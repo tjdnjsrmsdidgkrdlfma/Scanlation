@@ -1,0 +1,95 @@
+"""The engine contract — the single seam every plugin plugs into.
+
+The key design departure from the old (Crivella) stack: a Region carries
+*rotated* geometry (a 4-point polygon + angle + optional mask), not just an
+axis-aligned box. This lets the pipeline deskew tilted text (SFX, vertical
+JP) before recognition. Axis-aligned detectors degrade gracefully via
+``Region.from_bbox`` (a right-angled quad, angle 0).
+
+Only ``bbox`` (= [x_min, y_min, x_max, y_max]) is serialized to the wire, which
+the browser extension reads as [l, b, r, t]. polygon/angle/mask stay
+server-internal (deskew, future inpaint).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional, Protocol, runtime_checkable
+
+import numpy as np
+from PIL import Image
+
+
+@dataclass
+class Region:
+    polygon: np.ndarray                     # (4, 2) float32, image px, possibly rotated
+    bbox: tuple[int, int, int, int]         # axis-aligned (x_min, y_min, x_max, y_max), derived
+    angle: float = 0.0                      # signed deskew angle (deg)
+    vertical: bool = False                  # Japanese vertical writing
+    mask: Optional[np.ndarray] = None       # optional per-region segmentation mask
+    score: float = 1.0
+    order: int = 0                          # reading order (assigned by pipeline)
+
+    @staticmethod
+    def _bbox_from_poly(poly: np.ndarray) -> tuple[int, int, int, int]:
+        xs, ys = poly[:, 0], poly[:, 1]
+        return (
+            int(np.floor(float(xs.min()))),
+            int(np.floor(float(ys.min()))),
+            int(np.ceil(float(xs.max()))),
+            int(np.ceil(float(ys.max()))),
+        )
+
+    @classmethod
+    def from_quad(cls, quad, **kw) -> "Region":
+        """Build from any 4-point quad (rotated or not)."""
+        poly = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+        return cls(polygon=poly, bbox=cls._bbox_from_poly(poly), **kw)
+
+    @classmethod
+    def from_bbox(cls, x_min, y_min, x_max, y_max, **kw) -> "Region":
+        """Build from an axis-aligned box (degenerate right-angled quad, angle 0).
+
+        Vertices in clockwise order from top-left, matching the (W,H) target
+        deskew uses.
+        """
+        quad = [[x_min, y_min], [x_max, y_min], [x_max, y_max], [x_min, y_max]]
+        return cls.from_quad(quad, **kw)
+
+    def wire_box(self) -> list[int]:
+        """The 4-list the extension consumes: [x_min, y_min, x_max, y_max]."""
+        return [int(v) for v in self.bbox]
+
+
+# --- Lifecycle / metadata mixin shared by every plugin ---------------------
+class EngineBase:
+    name: str = "base"
+    display_name: str = "Base engine"
+    homepage: Optional[str] = None
+    warning: Optional[str] = None
+    description: str = ""
+    # {opt_name: {"type": <python type>, "default": <literal>, "description": str}}
+    OPTION_SCHEMA: dict = {}
+    SUPPORTED_SRC: list[str] = []           # iso1 codes, [] = any
+    SUPPORTED_DST: list[str] = []
+
+    def load(self) -> None:
+        """Acquire heavy resources (VRAM/model). Called lazily on first use."""
+
+    def unload(self) -> None:
+        """Release resources."""
+
+
+@runtime_checkable
+class Detector(Protocol):
+    def detect(self, image: Image.Image, options: dict) -> list[Region]: ...
+
+
+@runtime_checkable
+class Recognizer(Protocol):
+    # ``crop`` is already deskewed upright by the pipeline.
+    def recognize(self, crop: Image.Image, region: Region, options: dict) -> str: ...
+
+
+@runtime_checkable
+class Translator(Protocol):
+    def translate(self, text: str, src: str, dst: str, options: dict) -> str: ...

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scanlation-server"
+version = "0.1.0"
+description = "Contract-based manga OCR + in-place translation server (detection-first, rotated geometry)."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "numpy",
+    "pillow",
+    "opencv-python-headless",
+    "httpx",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+# Detection (comic-text-detector ONNX) — kept optional so the core + dummy
+# pipeline installs/imports with no heavy/native deps.
+ctd = ["onnxruntime", "pyclipper"]
+# Recognition (P4) and translation (P5) plugins, added in later stages.
+mangaocr = ["manga-ocr"]
+dev = ["pytest"]
+
+# --- Built-in plugin discovery (1-tier entry_points). Third-party plugins
+# declaring the same groups are auto-discovered after `pip install`. A source
+# checkout (no install) falls back to the hardcoded map in app/registry.py. ---
+[project.entry-points."scanlation.detectors"]
+ctd = "plugins.detector_ctd.plugin:CTDDetector"
+dummy = "plugins.dummy.plugin:DummyDetector"
+
+[project.entry-points."scanlation.recognizers"]
+dummy = "plugins.dummy.plugin:DummyRecognizer"
+
+[project.entry-points."scanlation.translators"]
+dummy = "plugins.dummy.plugin:DummyTranslator"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "plugins*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+markers = [
+    "slow: requires real model weights / heavy deps (deselect with -m 'not slow')",
+]

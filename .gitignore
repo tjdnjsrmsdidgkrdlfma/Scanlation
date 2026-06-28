@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Project runtime data (volumes) — never commit weights or caches
+server/data/
+server/models/
+server/crops/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# visualize.py / tool outputs
+*.annotated.png
+annotated.png
+
+# OS / editor
+.DS_Store
+Thumbs.db
