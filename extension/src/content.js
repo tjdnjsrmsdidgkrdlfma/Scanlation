@@ -131,14 +131,19 @@
 
   async function imageToBase64(el) {
     if (el.tagName === "CANVAS") return blobToBase64(await canvasBlob(el));
-    // IMG: prefer the original bytes; fall back to a canvas re-encode (CORS-tainted
-    // images will throw, in which case there is nothing we can read).
+    // 1) direct fetch — works same-origin or for CORS-enabled images
     try {
       const res = await fetch(el.src);
-      return blobToBase64(await res.blob());
-    } catch (e) {
-      return blobToBase64(await canvasBlob(el));
-    }
+      if (res.ok) return blobToBase64(await res.blob());
+    } catch (e) { /* CORS / network -> try the worker */ }
+    // 2) service worker fetch — has host_permissions, so it bypasses page CORS
+    //    (cannot beat Referer hotlink protection, e.g. pixiv i.pximg.net)
+    try {
+      const r = await ext.runtime.sendMessage({ type: "fetch-image", url: el.src });
+      if (r && r.ok) return r.base64;
+    } catch (e) { /* worker unavailable -> last resort */ }
+    // 3) canvas re-encode — only succeeds if the image isn't cross-origin tainted
+    return blobToBase64(await canvasBlob(el));
   }
 
   // ------------------------------------------------------------- server ----
