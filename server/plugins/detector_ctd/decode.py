@@ -67,12 +67,23 @@ def mask_to_regions(
     thresh: float = 0.3,
     min_area: int = 16,
     unclip_ratio: float = 1.2,
+    merge_px: int = 0,
 ) -> list[Region]:
-    """Convert a float mask (letterboxed coords) to original-pixel Regions."""
+    """Convert a float mask (letterboxed coords) to original-pixel Regions.
+
+    ``merge_px`` morphologically closes the binary mask first, bridging the
+    gaps between adjacent glyphs so a text line/bubble becomes ONE region
+    instead of one-region-per-character (manga-ocr needs whole lines, not
+    single characters). 0 disables merging.
+    """
     pad_w, pad_h = pad
     binary = (mask >= thresh).astype(np.uint8) * 255
     if binary.ndim == 3:
         binary = binary[..., 0]
+
+    if merge_px and merge_px > 0:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (merge_px, merge_px))
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     regions: list[Region] = []
