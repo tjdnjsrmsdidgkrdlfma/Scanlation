@@ -20,6 +20,8 @@ env/
 server/data/
 server/models/
 server/crops/
+server/samples/
+*.onnx
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm

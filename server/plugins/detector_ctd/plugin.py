@@ -107,18 +107,25 @@ class CTDDetector(EngineBase):
     # --- inference ---
     @staticmethod
     def _pick_mask(outputs: list[np.ndarray]) -> np.ndarray:
-        """Pick the segmentation output: the 4-D tensor with the largest H*W."""
-        best, best_area = None, -1
+        """Pick the text segmentation mask: the 4-D output with the largest
+        spatial area, tie-broken by fewest channels.
+
+        Verified against mayocream/comic-text-detector-onnx, whose outputs are
+        blk[1,64512,7] (block head, skipped), seg[1,1,1024,1024] (text mask,
+        chosen) and det[1,2,1024,1024] (line mask). seg is already in [0,1].
+        """
+        best, best_key = None, None
         for o in outputs:
-            if o.ndim == 4:
-                area = o.shape[-1] * o.shape[-2]
-                if area > best_area:
-                    best, best_area = o, area
+            if o.ndim != 4:
+                continue
+            _, c, h, w = o.shape
+            key = (h * w, -c)  # largest spatial, then fewest channels (text mask is 1-ch)
+            if best_key is None or key > best_key:
+                best, best_key = o, key
         if best is None:
             raise RuntimeError(f"No 4-D mask output found; got shapes {[o.shape for o in outputs]}")
-        mask = best[0]
-        mask = mask[0] if mask.shape[0] <= 4 else mask  # (C,H,W) -> text channel 0
-        if mask.min() < 0.0 or mask.max() > 1.0:        # logits -> sigmoid
+        mask = np.asarray(best)[0, 0]                  # (H, W), text channel
+        if mask.min() < 0.0 or mask.max() > 1.0:       # logits -> sigmoid
             mask = 1.0 / (1.0 + np.exp(-mask))
         return mask.astype(np.float32)
 
