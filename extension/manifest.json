@@ -15,7 +15,7 @@
   },
   "background": {
     "service_worker": "src/service-worker.js",
-    "type": "module"
+    "scripts": ["src/service-worker.js"]
   },
   "permissions": ["activeTab", "scripting", "storage", "tabs", "contextMenus"],
   "host_permissions": ["<all_urls>"],
