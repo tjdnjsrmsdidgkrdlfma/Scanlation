@@ -182,6 +182,7 @@
     div.dataset.ocr = item.ocr;
     div.dataset.tsl = item.tsl;
     div.textContent = cfg.showTranslated ? item.tsl : item.ocr;
+    div.title = div.textContent; // full text on hover, even if the box clips it
     div.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -191,12 +192,18 @@
   }
 
   function sizeFonts(entry) {
+    const dispW = entry.img.clientWidth || entry.img.width || 1;
     const dispH = entry.img.clientHeight || entry.img.height || 1;
-    const [, nh] = naturalSize(entry.img);
+    const [nw, nh] = naturalSize(entry.img);
     for (const box of entry.boxes) {
-      const [, b, , t] = JSON.parse(box.dataset.boxraw);
-      const pxH = ((t - b) / nh) * dispH;
-      box.style.fontSize = Math.max(8, pxH * 0.8 * cfg.fontScale) + "px";
+      const [l, b, r, t] = JSON.parse(box.dataset.boxraw);
+      const wpx = ((r - l) / nw) * dispW;
+      const hpx = ((t - b) / nh) * dispH;
+      // size font by text length vs box area so long text shrinks to fit
+      const len = Math.max(1, (box.textContent || "").length);
+      let fs = Math.sqrt((wpx * hpx * 0.8) / len);
+      fs = Math.max(7, Math.min(fs, hpx)) * cfg.fontScale; // never taller than the box
+      box.style.fontSize = fs + "px";
     }
   }
 
@@ -240,9 +247,13 @@
 
   // -------------------------------------------------------------- toggle ---
   function retext() {
-    for (const entry of tracked)
-      for (const box of entry.boxes)
+    for (const entry of tracked) {
+      for (const box of entry.boxes) {
         box.textContent = cfg.showTranslated ? box.dataset.tsl : box.dataset.ocr;
+        box.title = box.textContent;
+      }
+      sizeFonts(entry); // text length changed -> refit
+    }
   }
 
   function clearAll() {
