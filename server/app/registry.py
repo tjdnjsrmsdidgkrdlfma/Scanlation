@@ -28,6 +28,7 @@ _BUILTIN: dict[str, dict[str, str]] = {
     },
     "recognizer": {
         "dummy": "plugins.dummy.plugin:DummyRecognizer",
+        "mangaocr": "plugins.recognizer_mangaocr.plugin:MangaOcrRecognizer",
     },
     "translator": {
         "dummy": "plugins.dummy.plugin:DummyTranslator",

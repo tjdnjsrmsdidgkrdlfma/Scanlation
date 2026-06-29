@@ -34,6 +34,7 @@ dummy = "plugins.dummy.plugin:DummyDetector"
 
 [project.entry-points."scanlation.recognizers"]
 dummy = "plugins.dummy.plugin:DummyRecognizer"
+mangaocr = "plugins.recognizer_mangaocr.plugin:MangaOcrRecognizer"
 
 [project.entry-points."scanlation.translators"]
 dummy = "plugins.dummy.plugin:DummyTranslator"

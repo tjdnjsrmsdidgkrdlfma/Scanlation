@@ -15,6 +15,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+for _stream in (sys.stdout, sys.stderr):  # survive non-UTF-8 console (cp949)
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
 from PIL import Image, ImageDraw
 
 from app.geometry import deskew_crop

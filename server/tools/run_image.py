@@ -14,6 +14,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # allow `python tools/...`
 
+# Japanese output must survive a non-UTF-8 console (e.g. cp949 on Korean Windows).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
 from PIL import Image
 
 from app.pipeline import run_pipeline
