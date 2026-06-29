@@ -23,7 +23,9 @@ Wire protocol is a drop-in for the existing `ocr_extension` client (verified aga
 md5 is over the **base64 string**; box is `[x_min, y_min, x_max, y_max]` (client reads `[l,b,r,t]`);
 `/run_ocrtsl/` does the lazy(md5-only)→work(contents) flow.
 
-Not yet built: P4 manga-ocr recognizer, P5 ollama translator, P6 MV3 extension, P7 Docker/ROCm.
+Also built: P4 manga-ocr recognizer (real Japanese verified), P5 ollama translator
+(unit-tested; live run host-side), P6 clean-room MV3 browser extension ([extension/](extension/),
+wire-tested end-to-end). Not yet built: P7 Docker/ROCm, P8 tuning.
 
 ## Layout
 

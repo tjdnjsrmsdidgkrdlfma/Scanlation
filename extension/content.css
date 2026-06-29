@@ -1,0 +1,38 @@
+/* Scanlation overlay styles. Boxes are absolutely positioned over a wrapper
+   that sizes to the source image; coordinates come from the server as % of the
+   natural image size. */
+
+.scanlation-wrapper {
+  position: relative;
+  display: inline-block;
+  line-height: 0; /* avoid extra inline whitespace under the image */
+}
+
+.scanlation-box {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.05;
+  padding: 1px;
+  color: var(--scanlation-color, #000);
+  background: var(--scanlation-bg, rgba(255, 255, 255, 0.92));
+  border: var(--scanlation-border, 1px solid rgba(0, 0, 0, 0.25));
+  font-family: "Noto Sans KR", "Malgun Gothic", sans-serif;
+  word-break: break-word;
+  white-space: pre-wrap;
+  cursor: pointer;
+  z-index: 2147483646;
+}
+
+.scanlation-box:hover {
+  outline: 2px solid #d33;
+}
+
+.scanlation-box.scanlation-error {
+  background: rgba(255, 220, 220, 0.95);
+  color: #900;
+}
