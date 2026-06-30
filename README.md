@@ -92,9 +92,9 @@ python -m venv .venv
 # Linux:   source .venv/bin/activate && pip install -e "./server[ctd,mangaocr,dev]"
 ```
 
-CTD 가중치는 **번들 안 됨**: `comic-text-detector.onnx`를 `server/models/ctd/`에 두거나
-(`mayocream/comic-text-detector-onnx` 등) `SCANLATION_CTD_MODEL=/path.onnx` 지정.
-manga-ocr 모델은 첫 사용 시 자동 다운로드.
+**모델 가중치는 첫 사용 시 자동 다운로드**됩니다(HF): CTD onnx(~95MB) + manga-ocr 모델 둘 다.
+미리 두거나 오프라인이면: `server/models/ctd/`에 `.onnx` 배치 / `SCANLATION_CTD_MODEL=/path.onnx` /
+`SCANLATION_CTD_URL`로 미러 지정.
 
 ### 서버 실행
 
@@ -164,7 +164,7 @@ Firefox: `about:debugging` → 임시 부가 기능 로드 → [extension/manife
 | `SCANLATION_LANG_SRC` / `_DST` | `ja` / `ko` | 시작 언어 |
 | `SCANLATION_BASE_DIR` | server/ | `data/`(캐시, state.json) 루트 |
 | `SCANLATION_MODELS_DIR` | `<base>/models` | 가중치 루트 |
-| `SCANLATION_CTD_MODEL` | — | CTD `.onnx` 명시 경로 |
+| `SCANLATION_CTD_MODEL` / `_CTD_URL` | — / HF | CTD `.onnx` 명시 경로 / 자동 다운로드 URL |
 | `OLLAMA_ENDPOINT` / `OLLAMA_MODEL` | `…:11434/api` / — | ollama 백엔드 |
 | `LLAMACPP_ENDPOINT` / `LLAMACPP_MODEL` | `…:8080` / `local` | llama.cpp/OpenAI 백엔드 |
 
@@ -210,7 +210,7 @@ python tools/run_image.py  page.jpg --engines ctd,mangaocr,dummy         # wire 
 git clone https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git
 cd Scanlation && python -m venv .venv && source .venv/bin/activate
 pip install -e "./server[ctd,mangaocr]"
-# server/models/ctd/comic-text-detector.onnx 배치
+# CTD onnx + manga-ocr 모델은 첫 실행 시 자동 다운로드됨
 cd server
 SCANLATION_DEVICE=cpu SCANLATION_DETECTOR=ctd SCANLATION_RECOGNIZER=mangaocr \
 SCANLATION_TRANSLATOR=ollama OLLAMA_MODEL=<your-model> \

@@ -59,6 +59,8 @@ class CTDDetector(EngineBase):
         self._det_size = 1024
 
     # --- weights ---
+    DEFAULT_URL = "https://huggingface.co/mayocream/comic-text-detector-onnx/resolve/main/comic-text-detector.onnx?download=true"
+
     def _resolve_model_path(self) -> Path:
         import os
 
@@ -68,14 +70,26 @@ class CTDDetector(EngineBase):
             if p.is_file():
                 return p
         ctd_dir = settings.models_dir / "ctd"
-        if ctd_dir.is_dir():
-            onnx = sorted(ctd_dir.glob("*.onnx"))
-            if onnx:
-                return onnx[0]
-        raise RuntimeError(
-            "CTD ONNX weights not found. Set SCANLATION_CTD_MODEL=/path/model.onnx or place "
-            f"an .onnx in {ctd_dir}. See e.g. huggingface 'mayocream/comic-text-detector-onnx'."
-        )
+        existing = sorted(ctd_dir.glob("*.onnx")) if ctd_dir.is_dir() else []
+        if existing:
+            return existing[0]
+        # auto-download on first use (~95MB). Override URL via SCANLATION_CTD_URL,
+        # or pre-place an .onnx in ctd_dir / set SCANLATION_CTD_MODEL to skip this.
+        import urllib.request
+
+        url = os.environ.get("SCANLATION_CTD_URL", self.DEFAULT_URL)
+        ctd_dir.mkdir(parents=True, exist_ok=True)
+        dst = ctd_dir / "comic-text-detector.onnx"
+        logger.info("CTD weights not found; downloading from %s", url)
+        try:
+            urllib.request.urlretrieve(url, dst)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"CTD weights auto-download failed ({exc}). Place an .onnx in {ctd_dir} "
+                "or set SCANLATION_CTD_MODEL=/path/model.onnx."
+            ) from exc
+        logger.info("CTD weights downloaded -> %s (%d bytes)", dst, dst.stat().st_size)
+        return dst
 
     def _providers(self) -> list[str]:
         preferred = _PROVIDERS.get(settings.device.lower())
