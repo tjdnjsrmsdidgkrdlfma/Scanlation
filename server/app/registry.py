@@ -33,6 +33,7 @@ _BUILTIN: dict[str, dict[str, str]] = {
     "translator": {
         "dummy": "plugins.dummy.plugin:DummyTranslator",
         "ollama": "plugins.translator_ollama.plugin:OllamaTranslator",
+        "llamacpp": "plugins.translator_llamacpp.plugin:LlamaCppTranslator",
     },
 }
 

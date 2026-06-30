@@ -39,6 +39,7 @@ mangaocr = "plugins.recognizer_mangaocr.plugin:MangaOcrRecognizer"
 [project.entry-points."scanlation.translators"]
 dummy = "plugins.dummy.plugin:DummyTranslator"
 ollama = "plugins.translator_ollama.plugin:OllamaTranslator"
+llamacpp = "plugins.translator_llamacpp.plugin:LlamaCppTranslator"
 
 [tool.setuptools.packages.find]
 where = ["."]
