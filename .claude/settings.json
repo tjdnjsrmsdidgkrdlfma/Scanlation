@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "*",
+      "Bash(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "Monitor(*)",
+      "NotebookEdit(*)",
+      "PowerShell(*)",
+      "Read(*)",
+      "TodoWrite(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "Write(*)"
+    ],
+    "ask": [
+      "Bash(rm -r *)",
+      "Bash(rm -rf *)",
+      "Bash(Remove-Item *)",
+      "Bash(rmdir *)",
+      "PowerShell(Remove-Item *)",
+      "PowerShell(rmdir *)"
+    ]
+  }
+}

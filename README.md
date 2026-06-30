@@ -92,9 +92,13 @@ python -m venv .venv
 # Linux:   source .venv/bin/activate && pip install -e "./server[ctd,mangaocr,dev]"
 ```
 
-**모델 가중치는 첫 사용 시 자동 다운로드**됩니다(HF): CTD onnx(~95MB) + manga-ocr 모델 둘 다.
-미리 두거나 오프라인이면: `server/models/ctd/`에 `.onnx` 배치 / `SCANLATION_CTD_MODEL=/path.onnx` /
-`SCANLATION_CTD_URL`로 미러 지정.
+**모델 가중치는 명시적으로 설치**합니다(`load()`는 자동 다운로드 안 함 — 숨은 기본 동작 금지).
+한 번만 실행:
+```bash
+python tools/install.py        # ctd + manga-ocr 설치 (= 팝업 원클릭 / POST /manage_plugins/)
+```
+또는 `server/models/ctd/`에 `.onnx` 직접 배치 / `SCANLATION_CTD_MODEL=/path.onnx` 지정. 미러는
+`SCANLATION_CTD_URL`. (ollama/llamacpp는 별도 서비스라 설치 대상 아님 — `ollama pull <모델>`은 따로.)
 
 ### 서버 실행
 
@@ -138,6 +142,12 @@ Firefox: `about:debugging` → 임시 부가 기능 로드 → [extension/manife
 나머지를 `dummy`로 두면 실엔진 하나만 격리 검증 가능
 (도구에선 `--engines ctd,dummy,dummy`, 또는 `set_models`).
 
+**모델 설치(명시적, 숨은 기본 동작 아님):** 무거운 가중치가 있는 엔진(`ctd`, `mangaocr`)은
+설치해야 동작합니다. `GET /get_plugin_data/`가 엔진별 `installed` 상태를,
+`POST /manage_plugins/ {"plugins": {"ctd": true}}`가 설치(다운로드)를 수행 — 팝업 플러그인 탭의
+**원클릭**이 이걸 호출하고, CLI는 `python tools/install.py`. 계약에 `is_installed()`/`install()`만
+구현하면 어떤 엔진이든 같은 방식으로 설치됨.
+
 **플러그인 추가:** `EngineBase` 상속, 역할 메서드(`detect`/`recognize`/`translate`) +
 클래스 메타데이터 + `OPTION_SCHEMA` 구현, 그 다음 `app/registry.py`(`_BUILTIN`)와
 `pyproject.toml` entry_points에 등록. `scanlation.<role>` entry-point 그룹을 선언하는
@@ -164,7 +174,7 @@ Firefox: `about:debugging` → 임시 부가 기능 로드 → [extension/manife
 | `SCANLATION_LANG_SRC` / `_DST` | `ja` / `ko` | 시작 언어 |
 | `SCANLATION_BASE_DIR` | server/ | `data/`(캐시, state.json) 루트 |
 | `SCANLATION_MODELS_DIR` | `<base>/models` | 가중치 루트 |
-| `SCANLATION_CTD_MODEL` / `_CTD_URL` | — / HF | CTD `.onnx` 명시 경로 / 자동 다운로드 URL |
+| `SCANLATION_CTD_MODEL` / `_CTD_URL` | — / HF | CTD `.onnx` 명시 경로 / 설치 다운로드 URL |
 | `OLLAMA_ENDPOINT` / `OLLAMA_MODEL` | `…:11434/api` / — | ollama 백엔드 |
 | `LLAMACPP_ENDPOINT` / `LLAMACPP_MODEL` | `…:8080` / `local` | llama.cpp/OpenAI 백엔드 |
 
@@ -210,8 +220,8 @@ python tools/run_image.py  page.jpg --engines ctd,mangaocr,dummy         # wire 
 git clone https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git
 cd Scanlation && python -m venv .venv && source .venv/bin/activate
 pip install -e "./server[ctd,mangaocr]"
-# CTD onnx + manga-ocr 모델은 첫 실행 시 자동 다운로드됨
 cd server
+python tools/install.py   # 모델 설치 (한 번; = 원클릭 / POST /manage_plugins/)
 SCANLATION_DEVICE=cpu SCANLATION_DETECTOR=ctd SCANLATION_RECOGNIZER=mangaocr \
 SCANLATION_TRANSLATOR=ollama OLLAMA_MODEL=<your-model> \
 python -m uvicorn app.main:app --host 0.0.0.0 --port 4000

@@ -72,8 +72,19 @@ class EngineBase:
     SUPPORTED_SRC: list[str] = []           # iso1 codes, [] = any
     SUPPORTED_DST: list[str] = []
 
+    def is_installed(self) -> bool:
+        """Are this engine's local resources (weights) present? Engines with no
+        downloadable assets (dummy, external services) stay True."""
+        return True
+
+    def install(self) -> None:
+        """Fetch/prepare local resources — the explicit 'install' action (one-click
+        from the popup / manage_plugins, or tools/install.py). No-op by default;
+        load() never downloads implicitly."""
+
     def load(self) -> None:
-        """Acquire heavy resources (VRAM/model). Called lazily on first use."""
+        """Acquire heavy resources (VRAM/model) from already-installed assets.
+        Called lazily on first use; raises if not installed."""
 
     def unload(self) -> None:
         """Release resources."""

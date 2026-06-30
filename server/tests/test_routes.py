@@ -98,9 +98,14 @@ def test_set_lang_validates(client):
 def test_get_plugin_data_lists_engines(client):
     d = client.get("/get_plugin_data/").json()
     assert "dummy" in d and "ctd" in d
-    assert d["ctd"]["installed"] is True
+    assert d["dummy"]["installed"] is True            # no downloadable assets
+    assert isinstance(d["ctd"]["installed"], bool)    # real status (depends on weights)
 
 
-def test_manage_plugins_stub(client):
+def test_manage_plugins_install(client):
+    # dummy has no assets -> install is a no-op success
     r = client.post("/manage_plugins/", json={"plugins": {"dummy": True}})
     assert r.status_code == 200 and r.json()["status"] == "success"
+    # unknown plugin -> 502
+    r2 = client.post("/manage_plugins/", json={"plugins": {"nope": True}})
+    assert r2.status_code == 502
