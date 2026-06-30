@@ -57,3 +57,19 @@ class SetLangRequest(BaseModel):
 # --- /manage_plugins/ ------------------------------------------------------
 class ManagePluginsRequest(BaseModel):
     plugins: dict[str, bool]
+
+
+# --- admin: /set_options/ --------------------------------------------------
+class SetOptionsRequest(BaseModel):
+    engine: str
+    options: dict[str, Any]              # {opt: val}; null/"" removes the override
+
+
+# --- admin: prompt presets -------------------------------------------------
+class SavePromptRequest(BaseModel):
+    name: str
+    text: str
+
+
+class SelectPromptRequest(BaseModel):
+    name: str

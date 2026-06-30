@@ -25,6 +25,9 @@ class Selection:
     lang_dst: str = settings.default_lang_dst
     # {engine_name: {opt: val}} overrides applied on top of schema defaults.
     options: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Active LLM system-prompt preset name (see app.prompts) + user-saved presets.
+    prompt_active: str = "default"
+    prompts: dict[str, str] = field(default_factory=dict)
 
 
 class AppState:
@@ -68,12 +71,58 @@ class AppState:
         self.selection.lang_dst = lang_dst
         self.save()
 
+    def set_options(self, engine_name: str, options: dict[str, Any]) -> None:
+        """Persist per-engine option overrides (the admin 'engine options' form).
+
+        A value of None or "" *removes* the override, so the field reverts to the
+        engine's schema/env default (e.g. blank model -> OLLAMA_MODEL env).
+        """
+        cur = dict(self.selection.options.get(engine_name, {}))
+        for key, val in (options or {}).items():
+            if val is None or val == "":
+                cur.pop(key, None)
+            else:
+                cur[key] = val
+        if cur:
+            self.selection.options[engine_name] = cur
+        else:
+            self.selection.options.pop(engine_name, None)
+        self.save()
+
     def options_for(self, engine_name: str, request_options: dict | None) -> dict:
         """Merge persisted overrides with this request's options (request wins)."""
         merged = dict(self.selection.options.get(engine_name, {}))
         if request_options:
             merged.update(request_options.get(engine_name, {}) or {})
         return merged
+
+    # --- LLM system prompt (shared by all LLM translators) ---
+    def active_system_prompt(self) -> str:
+        from .prompts import resolve_prompt
+
+        return resolve_prompt(self.selection.prompt_active, self.selection.prompts)
+
+    def translator_options(self, engine_name: str, request_options: dict | None) -> dict:
+        """options_for + the active system prompt injected (unless overridden)."""
+        opts = self.options_for(engine_name, request_options)
+        opts.setdefault("system_prompt", self.active_system_prompt())
+        return opts
+
+    def save_prompt(self, name: str, text: str) -> None:
+        """Upsert a user prompt preset and make it active."""
+        self.selection.prompts[name] = text
+        self.selection.prompt_active = name
+        self.save()
+
+    def select_prompt(self, name: str) -> None:
+        self.selection.prompt_active = name
+        self.save()
+
+    def delete_prompt(self, name: str) -> None:
+        self.selection.prompts.pop(name, None)
+        if self.selection.prompt_active == name:
+            self.selection.prompt_active = "default"
+        self.save()
 
 
 state = AppState()

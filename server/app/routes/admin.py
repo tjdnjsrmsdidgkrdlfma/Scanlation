@@ -1,0 +1,117 @@
+"""Admin endpoints backing the /admin web page.
+
+One read (`GET /get_settings/`) returns everything the page needs; the rest are
+small mutations that persist to state.json so the choice survives restarts and
+the browser extension no longer has to set models on every page:
+
+  * /set_options/    per-engine option overrides (incl. the LLM model tag)
+  * /save_prompt/    upsert a custom system-prompt preset + activate it
+  * /select_prompt/  activate an existing preset (builtin or custom)
+  * /delete_prompt/  remove a custom preset
+
+Model/lang selection + plugin install reuse the existing wire endpoints
+(/set_models/, /set_lang/, /manage_plugins/, /get_plugin_data/).
+"""
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException
+
+from .. import __version_array__
+from ..config import LANGUAGES
+from ..prompts import BUILTIN_PROMPTS
+from ..registry import registry
+from ..schemas import SavePromptRequest, SelectPromptRequest, SetOptionsRequest
+from ..state import state
+
+router = APIRouter()
+
+
+def _serialize_schema(cls) -> dict:
+    out: dict = {}
+    for opt, spec in getattr(cls, "OPTION_SCHEMA", {}).items():
+        spec = dict(spec)
+        t = spec.get("type", str)
+        spec["type"] = getattr(t, "__name__", str(t))
+        out[opt] = spec
+    return out
+
+
+def _engine_entries(role: str) -> list[dict]:
+    entries = []
+    for name in registry.names(role):
+        cls = registry.get_class(role, name)
+        try:  # cheap __init__ only (no load) — is_installed checks fs/cache
+            installed = cls().is_installed()
+        except Exception:  # noqa: BLE001
+            installed = False
+        entries.append({
+            "name": name,
+            "display_name": getattr(cls, "display_name", name),
+            "description": getattr(cls, "description", ""),
+            "warning": getattr(cls, "warning", None),
+            "homepage": getattr(cls, "homepage", None),
+            "installed": installed,
+            "schema": _serialize_schema(cls),
+            "options": dict(state.selection.options.get(name, {})),
+        })
+    return entries
+
+
+@router.get("/get_settings/")
+def get_settings() -> dict:
+    """Full admin snapshot: selection + engines (w/ schema, install status, saved
+    options) + languages + prompt presets. One call drives the whole page."""
+    sel = state.selection
+    return {
+        "version": __version_array__,
+        "selection": {
+            "detector": sel.detector,
+            "recognizer": sel.recognizer,
+            "translator": sel.translator,
+            "lang_src": sel.lang_src,
+            "lang_dst": sel.lang_dst,
+            "prompt_active": sel.prompt_active,
+        },
+        "languages": LANGUAGES,
+        "engines": {role: _engine_entries(role) for role in ("detector", "recognizer", "translator")},
+        "prompts": {
+            "active": sel.prompt_active,
+            "builtin": BUILTIN_PROMPTS,
+            "custom": dict(sel.prompts),
+        },
+    }
+
+
+@router.post("/set_options/")
+def set_options(req: SetOptionsRequest) -> dict:
+    """Persist per-engine option overrides. Engine must exist in some role."""
+    known = any(registry.has(role, req.engine) for role in registry.all_classes())
+    if not known:
+        raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
+    state.set_options(req.engine, req.options)
+    return {"status": "success", "options": dict(state.selection.options.get(req.engine, {}))}
+
+
+@router.post("/save_prompt/")
+def save_prompt(req: SavePromptRequest) -> dict:
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="prompt name required")
+    state.save_prompt(name, req.text)
+    return {"status": "success", "active": state.selection.prompt_active}
+
+
+@router.post("/select_prompt/")
+def select_prompt(req: SelectPromptRequest) -> dict:
+    if req.name not in BUILTIN_PROMPTS and req.name not in state.selection.prompts:
+        raise HTTPException(status_code=400, detail=f"unknown prompt: {req.name}")
+    state.select_prompt(req.name)
+    return {"status": "success", "active": state.selection.prompt_active}
+
+
+@router.post("/delete_prompt/")
+def delete_prompt(req: SelectPromptRequest) -> dict:
+    if req.name in BUILTIN_PROMPTS:
+        raise HTTPException(status_code=400, detail="cannot delete a builtin prompt")
+    state.delete_prompt(req.name)
+    return {"status": "success", "active": state.selection.prompt_active}

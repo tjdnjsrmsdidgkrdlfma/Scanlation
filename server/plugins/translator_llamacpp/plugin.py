@@ -33,6 +33,7 @@ class LlamaCppTranslator(EngineBase):
     description = "Translation via an OpenAI-compatible /v1/chat/completions server (llama.cpp Vulkan, vllm, LM Studio...)."
     warning = "Requires a running server (LLAMACPP_ENDPOINT, default http://127.0.0.1:8080) with a model loaded."
     OPTION_SCHEMA = {
+        "model": {"type": str, "default": "", "description": "Model name (OpenAI clients require non-empty; llama-server ignores). Blank = LLAMACPP_MODEL env."},
         "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
         "seed": {"type": int, "default": 42, "description": "RNG seed."},
         "top_p": {"type": float, "default": 1.0, "description": "Nucleus sampling p."},
@@ -75,9 +76,9 @@ class LlamaCppTranslator(EngineBase):
 
         options = options or {}
         body = {
-            "model": options.get("model", self.model),
+            "model": options.get("model") or self.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": options.get("system_prompt") or SYSTEM_PROMPT},
                 {"role": "user", "content": build_prompt(text, src, dst, options.get("context", ""))},
             ],
             "temperature": float(options.get("temperature", 0.0)),

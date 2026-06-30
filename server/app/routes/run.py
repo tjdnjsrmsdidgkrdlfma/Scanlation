@@ -55,7 +55,7 @@ async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
     det, rec, tsl, src, dst, engines = _resolve()
     opt_box = state.options_for(det, req.options)
     opt_ocr = state.options_for(rec, req.options)
-    opt_tsl = state.options_for(tsl, req.options)
+    opt_tsl = state.translator_options(tsl, req.options)
     oh = opt_hash(opt_box, opt_ocr, opt_tsl)
 
     # --- lazy: md5 only, no contents ---
@@ -115,7 +115,7 @@ async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
 async def run_tsl(req: RunTslRequest) -> dict:
     s = state.selection
     translator = registry.get("translator", s.translator)
-    opt_tsl = state.options_for(s.translator, None)
+    opt_tsl = state.translator_options(s.translator, None)
     text = await run_in_threadpool(
         translate_text, req.text, s.lang_src, s.lang_dst, translator, opt_tsl
     )

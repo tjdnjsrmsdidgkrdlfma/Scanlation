@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scanlation · Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">繁</span>
+      <div>
+        <h1>Scanlation <span class="muted">Admin</span></h1>
+        <p class="sub" id="version">서버 설정 · 모델 · 프롬프트</p>
+      </div>
+    </div>
+    <div id="conn" class="pill pill-warn">연결 중…</div>
+  </header>
+
+  <main id="app" hidden>
+    <!-- 모델 선택 -->
+    <section class="card">
+      <h2>모델 선택 <span class="hint">마지막 선택이 서버에 저장되어 기본값이 됩니다</span></h2>
+      <div class="grid3">
+        <label>박스(detector)<select id="sel-detector"></select></label>
+        <label>OCR(recognizer)<select id="sel-recognizer"></select></label>
+        <label>번역(translator)<select id="sel-translator"></select></label>
+      </div>
+      <div class="row">
+        <div class="grid2 langs">
+          <label>원문<select id="sel-lang_src"></select></label>
+          <label>번역<select id="sel-lang_dst"></select></label>
+        </div>
+        <button class="btn primary" id="save-models">저장</button>
+      </div>
+    </section>
+
+    <!-- 번역 프롬프트 -->
+    <section class="card">
+      <h2>번역 프롬프트 <span class="hint">LLM 시스템 프롬프트를 고르거나 직접 편집</span></h2>
+      <div class="row">
+        <label class="grow">프리셋
+          <select id="prompt-preset"></select>
+        </label>
+        <button class="btn" id="prompt-use">이 프롬프트 사용</button>
+        <button class="btn danger" id="prompt-delete">삭제</button>
+      </div>
+      <textarea id="prompt-text" rows="10" spellcheck="false"></textarea>
+      <div class="row">
+        <label class="grow">저장 이름
+          <input id="prompt-name" type="text" placeholder="예: my-natural" />
+        </label>
+        <button class="btn primary" id="prompt-save">저장 &amp; 사용</button>
+      </div>
+      <p class="note">빌트인을 편집해 같은 이름으로 저장하면 그 이름의 커스텀 프리셋이 덮어씁니다. 새 이름으로 저장하면 복제됩니다. 커스텀을 삭제하면 빌트인으로 되돌아갑니다.</p>
+    </section>
+
+    <!-- 엔진 옵션 -->
+    <section class="card">
+      <h2>엔진 옵션 <span class="hint">선택된 엔진의 옵션 (예: 번역기 모델 태그)</span></h2>
+      <div id="engine-options"></div>
+    </section>
+
+    <!-- 플러그인 설치 -->
+    <section class="card">
+      <h2>플러그인 설치 <span class="hint">가중치/모델 원클릭 설치</span></h2>
+      <div id="plugins"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

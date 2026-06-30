@@ -109,3 +109,52 @@ def test_manage_plugins_install(client):
     # unknown plugin -> 502
     r2 = client.post("/manage_plugins/", json={"plugins": {"nope": True}})
     assert r2.status_code == 502
+
+
+# --- admin: get_settings / set_options / prompts ---------------------------
+def test_get_settings_shape(client):
+    d = client.get("/get_settings/").json()
+    assert set(d) >= {"version", "selection", "languages", "engines", "prompts"}
+    assert set(d["engines"]) == {"detector", "recognizer", "translator"}
+    assert "default" in d["prompts"]["builtin"]            # default always present
+    # the ollama translator exposes a 'model' option so the admin can set the tag
+    tr = {e["name"]: e for e in d["engines"]["translator"]}
+    assert "ollama" in tr and "model" in tr["ollama"]["schema"]
+    assert tr["ollama"]["schema"]["model"]["type"] == "str"
+
+
+def test_set_options_persists_and_clears(client):
+    r = client.post("/set_options/", json={"engine": "ollama", "options": {"model": "gemma-x", "num_ctx": 1024}})
+    assert r.status_code == 200
+    tr = {e["name"]: e for e in client.get("/get_settings/").json()["engines"]["translator"]}
+    assert tr["ollama"]["options"]["model"] == "gemma-x"
+    assert tr["ollama"]["options"]["num_ctx"] == 1024
+    # blank value removes that one override (reverts to schema/env default)
+    client.post("/set_options/", json={"engine": "ollama", "options": {"model": ""}})
+    tr = {e["name"]: e for e in client.get("/get_settings/").json()["engines"]["translator"]}
+    assert "model" not in tr["ollama"]["options"] and tr["ollama"]["options"]["num_ctx"] == 1024
+    client.post("/set_options/", json={"engine": "ollama", "options": {"num_ctx": ""}})  # cleanup
+    # unknown engine -> 400
+    assert client.post("/set_options/", json={"engine": "nope", "options": {}}).status_code == 400
+
+
+def test_prompt_select_save_delete(client):
+    assert client.post("/select_prompt/", json={"name": "literal"}).json()["active"] == "literal"
+    assert client.post("/select_prompt/", json={"name": "ghost"}).status_code == 400  # unknown
+    # save custom -> active + listed under custom
+    client.post("/save_prompt/", json={"name": "mine", "text": "SYSTEM TEST PROMPT"})
+    p = client.get("/get_settings/").json()["prompts"]
+    assert p["active"] == "mine" and p["custom"]["mine"] == "SYSTEM TEST PROMPT"
+    assert client.post("/delete_prompt/", json={"name": "default"}).status_code == 400  # builtin protected
+    # delete custom -> active falls back to default
+    assert client.post("/delete_prompt/", json={"name": "mine"}).json()["active"] == "default"
+    client.post("/select_prompt/", json={"name": "default"})  # cleanup
+
+
+def test_active_prompt_injected_into_translator_options(client):
+    from app.state import state
+
+    client.post("/save_prompt/", json={"name": "inj", "text": "INJECTED-PROMPT"})
+    assert state.translator_options("ollama", None)["system_prompt"] == "INJECTED-PROMPT"
+    client.post("/delete_prompt/", json={"name": "inj"})  # cleanup -> back to default
+    assert state.translator_options("ollama", None)["system_prompt"].startswith("From now on")

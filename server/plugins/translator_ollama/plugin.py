@@ -32,6 +32,7 @@ class OllamaTranslator(EngineBase):
     description = "LLM translation via a local ollama server (system-prompted, OCR-error tolerant)."
     warning = "Requires a running ollama server (OLLAMA_ENDPOINT) and a pulled model (OLLAMA_MODEL)."
     OPTION_SCHEMA = {
+        "model": {"type": str, "default": "", "description": "ollama model tag (e.g. gemma...). Blank = OLLAMA_MODEL env."},
         "num_ctx": {"type": int, "default": 512, "description": "KV-cache context window (translation inputs are short)."},
         "num_gpu": {"type": int, "default": 31, "description": "Layers to offload to GPU."},
         "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
@@ -77,9 +78,9 @@ class OllamaTranslator(EngineBase):
         prompt = build_prompt(text, src, dst, options.get("context", ""))
 
         body = {
-            "model": options.get("model", self.model),
+            "model": options.get("model") or self.model,
             "prompt": prompt,
-            "system": SYSTEM_PROMPT,
+            "system": options.get("system_prompt") or SYSTEM_PROMPT,
             "stream": False,
             "think": bool(options.get("think", False)),
             "options": {
