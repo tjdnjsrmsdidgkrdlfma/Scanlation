@@ -85,13 +85,13 @@ YOMU_DESIGN.md   전체 설계 / 핸드오프
 
 ## 빠른 시작
 
-Python 3.11+, Node는 확장 md5를 건드릴 때만 필요. 의존성은 repo 루트 `.venv`(gitignore)에 —
+Python 3.11+, Node는 확장 md5를 건드릴 때만 필요. 의존성은 repo 루트 `venv`(gitignore)에 —
 **절대 전역 pip install 금지.**
 
 ```bash
-python -m venv .venv
-# Windows: ./.venv/Scripts/python -m pip install -e "./server[ctd,mangaocr,dev]"
-# Linux:   source .venv/bin/activate && pip install -e "./server[ctd,mangaocr,dev]"
+python -m venv venv
+# Windows: ./venv/Scripts/python -m pip install -e "./server[ctd,mangaocr,dev]"
+# Linux:   source venv/bin/activate && pip install -e "./server[ctd,mangaocr,dev]"
 ```
 
 **모델 가중치는 명시적으로 설치**합니다(`load()`는 자동 다운로드 안 함 — 숨은 기본 동작 금지).
@@ -114,6 +114,21 @@ SCANLATION_TRANSLATOR=ollama OLLAMA_MODEL=<your-model> \
 python -m uvicorn app.main:app --host 0.0.0.0 --port 4000
 ```
 첫 실엔진 요청은 느림(CTD ONNX + manga-ocr 모델 로드); 같은 이미지 재요청은 md5 캐시로 즉시.
+
+### 관리자 페이지 (`/admin`)
+
+서버를 띄운 뒤 브라우저로 **`http://<host>:<port>/admin`** 접속(예: `http://127.0.0.1:4000/admin`).
+클라이언트(확장)가 매번 모델을 정할 필요 없이 **서버에 설정을 저장**합니다 — 마지막 선택이 곧 기본값
+(`data/state.json`에 영속). 할 수 있는 것:
+
+- **모델/언어 선택** — detector·recognizer·translator + src/dst. 저장 시 기본값이 됨.
+- **번역 프롬프트** — LLM 시스템 프롬프트 프리셋(`default`/`literal`/`natural`)을 고르거나 직접
+  편집·저장(커스텀 프리셋). 활성 프롬프트는 캐시 키에 포함되어 바꾸면 재번역됨.
+- **엔진 옵션** — 선택된 엔진의 옵션. 번역기 **모델 태그**(`OLLAMA_MODEL` 대신 여기서 지정·영속),
+  `num_ctx`/`temperature` 등. 빈칸 = 환경변수/스키마 기본값으로 복귀.
+- **플러그인 설치** — CTD/manga-ocr 가중치 원클릭 설치(= `tools/install.py` / `POST /manage_plugins/`).
+
+> 인증 없음(로컬/LAN 전용). 외부 노출 시 리버스 프록시 뒤에 둘 것.
 
 ### 확장 로드
 
@@ -186,8 +201,8 @@ Firefox: `about:debugging` → 임시 부가 기능 로드 → [extension/manife
 
 ```bash
 cd server
-../.venv/Scripts/python -m pytest -m "not slow"        # ~30개, 모델/GPU 불필요
-../.venv/Scripts/python -m pytest -m slow              # CTD/manga-ocr 스모크(가중치 필요)
+../venv/Scripts/python -m pytest -m "not slow"        # ~30개, 모델/GPU 불필요
+../venv/Scripts/python -m pytest -m slow              # CTD/manga-ocr 스모크(가중치 필요)
 ```
 
 **검출 육안 확인**(정확도 핵심 루프 — 검출이 병목):
@@ -223,7 +238,7 @@ python tools/run_image.py  page.jpg --engines ctd,mangaocr,dummy         # wire 
 ```bash
 # 0) 받기 + 설치
 git clone https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git
-cd Scanlation && python -m venv .venv && source .venv/bin/activate
+cd Scanlation && python -m venv venv && source venv/bin/activate
 pip install -e "./server[ctd,mangaocr]"
 cd server
 python tools/install.py            # 모델 설치 (한 번; = 원클릭 / POST /manage_plugins/)
@@ -269,7 +284,7 @@ LLAMACPP_ENDPOINT=http://127.0.0.1:8080`으로 교체(나머지 동일).
 1. 이 README(위 상태) + [YOMU_DESIGN.md](YOMU_DESIGN.md)(왜) 읽기.
 2. `pip install -e "./server[ctd,mangaocr,dev]"` 후 `pytest -m "not slow"` green 확인.
 3. P0–P6 완료, **리눅스/gfx1200에서 실제 번역까지 라이브 검증됨**; 다음은 P7(Docker) +
-   P8(노이즈 필터·세로쓰기·라틴 폴백 등). 솔로 프로젝트: `main`에 직접 커밋, 의존성은 `.venv`.
+   P8(노이즈 필터·세로쓰기·라틴 폴백 등). 솔로 프로젝트: `main`에 직접 커밋, 의존성은 `venv`.
 
 라이선스: 프로젝트 라이선스 미정(TBD). 트리는 **GPLv3-free**(클린룸; 엔진은 런타임 의존만) —
 그대로 유지할 것.
