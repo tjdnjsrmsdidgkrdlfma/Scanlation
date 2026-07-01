@@ -36,7 +36,7 @@
     band = {
       cx: W * 0.5, cy: H * 0.5, ang,
       dx: Math.cos(ang), dy: Math.sin(ang),
-      half: Math.min(W, H) * 0.27,              // band half-width
+      half: Math.min(W, H) * 0.25,              // band half-width
       len: Math.hypot(W, H) * 1.15,
     };
     return true;
@@ -53,7 +53,7 @@
   function seed() {
     // fine Milky-Way dust, clustered on the band (gaussian across it)
     dust = [];
-    const m = Math.max(120, Math.min(460, Math.round((W * H) / 380)));
+    const m = Math.max(150, Math.min(560, Math.round((W * H) / 300)));
     for (let i = 0; i < m; i++) {
       const along = (Math.random() - 0.5) * band.len;
       const perp = gauss() * band.half;
@@ -62,7 +62,7 @@
         y: band.cy + along * band.dy + perp * band.dx,
         r: 0.35 + Math.random() * 0.6,
         c: starColor(),
-        a: 0.22 + Math.random() * 0.36,
+        a: 0.26 + Math.random() * 0.40,
         vx: drift(), vy: drift(),
       });
     }
@@ -90,8 +90,8 @@
     ctx.rotate(band.ang);
     const g = ctx.createLinearGradient(0, -band.half, 0, band.half);
     g.addColorStop(0.0, "rgba(90,110,170,0)");
-    g.addColorStop(0.5, "rgba(152,152,208,0.16)");
-    g.addColorStop(0.62, "rgba(208,180,124,0.12)"); // faint warm core
+    g.addColorStop(0.5, "rgba(154,154,210,0.21)");
+    g.addColorStop(0.62, "rgba(210,182,126,0.15)"); // faint warm core
     g.addColorStop(1.0, "rgba(90,110,170,0)");
     ctx.fillStyle = g;
     ctx.fillRect(-band.len / 2, -band.half, band.len, band.half * 2);
