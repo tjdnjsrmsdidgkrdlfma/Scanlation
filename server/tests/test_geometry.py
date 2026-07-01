@@ -6,7 +6,7 @@ import math
 import numpy as np
 from PIL import Image, ImageDraw
 
-from app.contracts import Region
+from scanlation_sdk.contracts import Region
 from app.geometry import deskew_crop, order_quad
 
 

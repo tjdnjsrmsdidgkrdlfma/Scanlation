@@ -5,9 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scanlation-server"
 version = "0.1.0"
-description = "Contract-based manga OCR + in-place translation server (detection-first, rotated geometry)."
+description = "Contract-based manga OCR + in-place translation server (core; engines are separate pip packages)."
 requires-python = ">=3.11"
 dependencies = [
+    "scanlation-sdk",
     "fastapi",
     "uvicorn[standard]",
     "numpy",
@@ -17,28 +18,18 @@ dependencies = [
     "pydantic>=2",
 ]
 
-[project.optional-dependencies]
-# Detection (comic-text-detector ONNX) — kept optional so the core + dummy
-# pipeline installs/imports with no heavy/native deps.
-ctd = ["onnxruntime", "pyclipper"]
-# Recognition (P4) and translation (P5) plugins, added in later stages.
-mangaocr = ["manga-ocr"]
-
-# --- Built-in plugin discovery (1-tier entry_points). Third-party plugins
-# declaring the same groups are auto-discovered after `pip install`. A source
-# checkout (no install) falls back to the hardcoded map in app/registry.py. ---
+# --- Engine discovery is entry_points-only (no hardcoded map). Only the `dummy`
+# test doubles ship with the core; real engines (ctd, mangaocr, ollama, llamacpp)
+# are separate pip packages declaring the same `scanlation.<role>` groups and are
+# auto-discovered on install. ---
 [project.entry-points."scanlation.detectors"]
-ctd = "plugins.detector_ctd.plugin:CTDDetector"
 dummy = "plugins.dummy.plugin:DummyDetector"
 
 [project.entry-points."scanlation.recognizers"]
 dummy = "plugins.dummy.plugin:DummyRecognizer"
-mangaocr = "plugins.recognizer_mangaocr.plugin:MangaOcrRecognizer"
 
 [project.entry-points."scanlation.translators"]
 dummy = "plugins.dummy.plugin:DummyTranslator"
-ollama = "plugins.translator_ollama.plugin:OllamaTranslator"
-llamacpp = "plugins.translator_llamacpp.plugin:LlamaCppTranslator"
 
 [tool.setuptools.packages.find]
 where = ["."]

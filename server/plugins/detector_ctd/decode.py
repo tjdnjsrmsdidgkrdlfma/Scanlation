@@ -14,7 +14,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from app.contracts import Region
+from scanlation_sdk.contracts import Region
 
 
 def letterbox(img: np.ndarray, new_size: int, pad_value: int = 114):

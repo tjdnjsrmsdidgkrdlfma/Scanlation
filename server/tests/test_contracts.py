@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.contracts import Detector, Recognizer, Region, Translator
+from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
 from plugins.dummy.plugin import DummyDetector, DummyRecognizer, DummyTranslator
 
 

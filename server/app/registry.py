@@ -1,8 +1,9 @@
 """Plugin discovery + lazy instantiation.
 
-Two sources, merged: a hardcoded builtin map (so a plain source checkout with
-no ``pip install`` still works) and ``importlib.metadata`` entry_points (so any
-third-party package declaring the ``scanlation.<role>`` groups is auto-found).
+Engines are found purely through ``importlib.metadata`` entry_points: the core
+package declares the ``dummy`` test doubles; every real engine is a separate pip
+package declaring the ``scanlation.<role>`` groups (auto-discovered on install).
+There is no hardcoded plugin map — installing a package is how an engine appears.
 
 Engines are instantiated lazily on first use — that's when VRAM/model weights
 are actually loaded. Class-level metadata (OPTION_SCHEMA, description, ...) is
@@ -10,7 +11,6 @@ read without instantiating, so the handshake/options routes stay light.
 """
 from __future__ import annotations
 
-import importlib
 from importlib.metadata import entry_points
 from typing import Any
 
@@ -20,28 +20,6 @@ ROLES: dict[str, str] = {
     "translator": "scanlation.translators",
 }
 
-# Fallback for source checkouts (no install => no entry_points).
-_BUILTIN: dict[str, dict[str, str]] = {
-    "detector": {
-        "dummy": "plugins.dummy.plugin:DummyDetector",
-        "ctd": "plugins.detector_ctd.plugin:CTDDetector",
-    },
-    "recognizer": {
-        "dummy": "plugins.dummy.plugin:DummyRecognizer",
-        "mangaocr": "plugins.recognizer_mangaocr.plugin:MangaOcrRecognizer",
-    },
-    "translator": {
-        "dummy": "plugins.dummy.plugin:DummyTranslator",
-        "ollama": "plugins.translator_ollama.plugin:OllamaTranslator",
-        "llamacpp": "plugins.translator_llamacpp.plugin:LlamaCppTranslator",
-    },
-}
-
-
-def _load_class(path: str) -> type:
-    module_name, _, cls_name = path.partition(":")
-    return getattr(importlib.import_module(module_name), cls_name)
-
 
 class Registry:
     def __init__(self) -> None:
@@ -50,14 +28,6 @@ class Registry:
         self._discover()
 
     def _discover(self) -> None:
-        # 1) builtin fallback
-        for role, mapping in _BUILTIN.items():
-            for name, path in mapping.items():
-                try:
-                    self._classes[role][name] = _load_class(path)
-                except Exception:  # noqa: BLE001 - a broken plugin must not kill discovery
-                    pass
-        # 2) entry_points (override/extend builtin)
         for role, group in ROLES.items():
             try:
                 eps = entry_points(group=group)
@@ -66,7 +36,7 @@ class Registry:
             for ep in eps:
                 try:
                     self._classes[role][ep.name] = ep.load()
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 - a broken/absent plugin must not kill discovery
                     pass
 
     # --- queries (no instantiation) ---

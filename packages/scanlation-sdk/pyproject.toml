@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scanlation-sdk"
+version = "0.1.0"
+description = "Shared engine contract, runtime context, and prompt template for the Scanlation server and its engine plugins."
+requires-python = ">=3.11"
+# Deliberately thin: an engine plugin depends on this, NOT on the server core
+# (which would drag in fastapi/uvicorn/sqlite). Only numpy/pillow — the types
+# the contract (Region/Image) is expressed in.
+dependencies = [
+    "numpy",
+    "pillow",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scanlation_sdk*"]

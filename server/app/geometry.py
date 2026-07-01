@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 from PIL import Image
 
-from .contracts import Region
+from scanlation_sdk.contracts import Region
 
 
 def order_quad(pts: np.ndarray) -> np.ndarray:

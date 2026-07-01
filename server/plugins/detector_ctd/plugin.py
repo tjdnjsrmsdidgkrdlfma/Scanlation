@@ -26,7 +26,7 @@ import numpy as np
 from PIL import Image
 
 from app.config import settings
-from app.contracts import EngineBase, Region
+from scanlation_sdk.contracts import EngineBase, Region
 from . import decode
 
 logger = logging.getLogger("scanlation.ctd")

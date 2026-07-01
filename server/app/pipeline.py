@@ -13,7 +13,7 @@ from PIL import Image
 
 from .cache import cache
 from .config import settings
-from .contracts import Detector, Recognizer, Region, Translator
+from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
 from .geometry import deskew_crop
 
 

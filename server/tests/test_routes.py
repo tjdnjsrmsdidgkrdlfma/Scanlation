@@ -106,9 +106,8 @@ def test_set_lang_validates():
 
 def test_get_plugin_data_lists_engines():
     d = client().get("/get_plugin_data/").json()
-    assert "dummy" in d and "ctd" in d
+    assert "dummy" in d                               # core always ships the dummy engine
     assert d["dummy"]["installed"] is True            # no downloadable assets
-    assert isinstance(d["ctd"]["installed"], bool)    # real status (depends on weights)
 
 
 def test_manage_plugins_install():
@@ -127,10 +126,10 @@ def test_get_settings_shape():
     assert set(d) >= {"version", "selection", "languages", "engines", "prompts"}
     assert set(d["engines"]) == {"detector", "recognizer", "translator"}
     assert "default" in d["prompts"]["builtin"]            # default always present
-    # the ollama translator exposes a 'model' option so the admin can set the tag
-    tr = {e["name"]: e for e in d["engines"]["translator"]}
-    assert "ollama" in tr and "model" in tr["ollama"]["schema"]
-    assert tr["ollama"]["schema"]["model"]["type"] == "str"
+    # engines carry their OPTION_SCHEMA so the admin can render option fields
+    det = {e["name"]: e for e in d["engines"]["detector"]}
+    assert "dummy" in det and "num_boxes" in det["dummy"]["schema"]
+    assert det["dummy"]["schema"]["num_boxes"]["type"] == "int"
 
 
 def test_get_translator_models_shape():
@@ -144,16 +143,14 @@ def test_get_translator_models_shape():
 
 def test_set_options_persists_and_clears():
     c = client()
-    r = c.post("/set_options/", json={"engine": "ollama", "options": {"model": "gemma-x", "num_ctx": 1024}})
+    r = c.post("/set_options/", json={"engine": "dummy", "options": {"num_boxes": 1}})
     assert r.status_code == 200
-    tr = {e["name"]: e for e in c.get("/get_settings/").json()["engines"]["translator"]}
-    assert tr["ollama"]["options"]["model"] == "gemma-x"
-    assert tr["ollama"]["options"]["num_ctx"] == 1024
-    # blank value removes that one override (reverts to schema/env default)
-    c.post("/set_options/", json={"engine": "ollama", "options": {"model": ""}})
-    tr = {e["name"]: e for e in c.get("/get_settings/").json()["engines"]["translator"]}
-    assert "model" not in tr["ollama"]["options"] and tr["ollama"]["options"]["num_ctx"] == 1024
-    c.post("/set_options/", json={"engine": "ollama", "options": {"num_ctx": ""}})  # cleanup
+    det = {e["name"]: e for e in c.get("/get_settings/").json()["engines"]["detector"]}
+    assert det["dummy"]["options"]["num_boxes"] == 1
+    # blank value removes that override (reverts to the schema default)
+    c.post("/set_options/", json={"engine": "dummy", "options": {"num_boxes": ""}})
+    det = {e["name"]: e for e in c.get("/get_settings/").json()["engines"]["detector"]}
+    assert "num_boxes" not in det["dummy"]["options"]
     # unknown engine -> 400
     assert c.post("/set_options/", json={"engine": "nope", "options": {}}).status_code == 400
 
@@ -177,9 +174,9 @@ def test_active_prompt_injected_into_translator_options():
 
     c = client()
     c.post("/save_prompt/", json={"name": "inj", "text": "INJECTED-PROMPT"})
-    assert state.translator_options("ollama", None)["system_prompt"] == "INJECTED-PROMPT"
+    assert state.translator_options("dummy", None)["system_prompt"] == "INJECTED-PROMPT"
     c.post("/delete_prompt/", json={"name": "inj"})  # cleanup -> back to default
-    assert state.translator_options("ollama", None)["system_prompt"].startswith("From now on")
+    assert state.translator_options("dummy", None)["system_prompt"].startswith("From now on")
 
 
 TESTS = [

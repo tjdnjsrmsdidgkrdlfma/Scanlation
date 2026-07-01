@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from ..config import LANGUAGES
+from scanlation_sdk.context import LANGUAGES
 from ..registry import registry
 from ..schemas import SetLangRequest, SetModelsRequest
 from ..state import state

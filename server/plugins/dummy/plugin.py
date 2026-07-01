@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from app.contracts import EngineBase, Region
+from scanlation_sdk.contracts import EngineBase, Region
 
 
 def _rotated_quad(cx: float, cy: float, w: float, h: float, angle_deg: float) -> list[list[float]]:

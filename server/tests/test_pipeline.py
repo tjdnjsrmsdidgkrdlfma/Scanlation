@@ -4,7 +4,7 @@ from __future__ import annotations
 from PIL import Image
 
 from app.pipeline import assign_reading_order, run_pipeline
-from app.contracts import Region
+from scanlation_sdk.contracts import Region
 from plugins.dummy.plugin import DummyDetector, DummyRecognizer, DummyTranslator
 
 

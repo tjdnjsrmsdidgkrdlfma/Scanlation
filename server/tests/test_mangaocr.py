@@ -13,7 +13,7 @@ from PIL import Image
 def test_mangaocr_recognize_returns_str():
     if importlib.util.find_spec("manga_ocr") is None:
         return "SKIP: manga-ocr not installed"
-    from app.contracts import Region
+    from scanlation_sdk.contracts import Region
     from app.registry import registry
 
     rec = registry.get("recognizer", "mangaocr")

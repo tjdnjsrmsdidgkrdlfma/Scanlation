@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from .. import __version_array__
-from ..config import LANGUAGES
+from scanlation_sdk.context import LANGUAGES
 from ..registry import registry
 from ..state import state
 
