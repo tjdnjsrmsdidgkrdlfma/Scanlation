@@ -1,5 +1,7 @@
-/* Scanlation popup (module). Handshake-driven controls; talks to the server
- * over fetch and to the active tab's content script via messaging. */
+/* Scanlation options page (module). Settings only — connects to the server,
+ * persists endpoint/langs/engines/showTranslated. Translation on/off is the
+ * toolbar icon's job (one-click toggle), not this page. Since this runs in its
+ * own tab, live changes are broadcast to every tab's content script. */
 const ext = globalThis.browser || globalThis.chrome;
 
 const $ = (id) => document.getElementById(id);
@@ -22,11 +24,14 @@ function fillSelect(sel, values, labels, selected) {
   });
 }
 
-async function sendActive(msg) {
+// Broadcast a message to every tab's content script (this page is its own tab).
+async function sendAll(msg) {
   try {
-    const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
-    if (tab) await ext.tabs.sendMessage(tab.id, msg);
-  } catch (e) { /* no content script on this tab */ }
+    const tabs = await ext.tabs.query({});
+    for (const tab of tabs) {
+      try { await ext.tabs.sendMessage(tab.id, msg); } catch (e) { /* no content script here */ }
+    }
+  } catch (e) { /* tabs unavailable */ }
 }
 
 async function post(path, body) {
@@ -60,7 +65,7 @@ async function connect() {
     setStatus(`connected · v${(d.version || []).join(".")}`, "ok");
 
     await ext.storage.local.set({ endpoint: endpoint() });
-    sendActive({ type: "set-endpoint", endpoint: endpoint() });
+    sendAll({ type: "set-endpoint", endpoint: endpoint() });
   } catch (e) {
     $("conn").hidden = true;
     setStatus("cannot reach server: " + (e.message || e), "err");
@@ -70,10 +75,10 @@ async function connect() {
 function wire() {
   $("connect").addEventListener("click", connect);
 
-  $("lang_src").addEventListener("change", () =>
-    post("/set_lang/", { lang_src: $("lang_src").value, lang_dst: $("lang_dst").value }));
-  $("lang_dst").addEventListener("change", () =>
-    post("/set_lang/", { lang_src: $("lang_src").value, lang_dst: $("lang_dst").value }));
+  const setLang = () =>
+    post("/set_lang/", { lang_src: $("lang_src").value, lang_dst: $("lang_dst").value });
+  $("lang_src").addEventListener("change", setLang);
+  $("lang_dst").addEventListener("change", setLang);
 
   const setModels = () =>
     post("/set_models/", {
@@ -83,18 +88,15 @@ function wire() {
     });
   ["detector", "recognizer", "translator"].forEach((id) => $(id).addEventListener("change", setModels));
 
-  $("enable").addEventListener("click", () => sendActive({ type: "enable" }));
-  $("disable").addEventListener("click", () => sendActive({ type: "disable" }));
-
   $("showTranslated").addEventListener("change", async (e) => {
     await ext.storage.local.set({ showTranslated: e.target.checked });
-    sendActive({ type: "set-show-translated", value: e.target.checked });
+    sendAll({ type: "set-show-translated", value: e.target.checked });
   });
 }
 
 async function init() {
   const s = await ext.storage.local.get(["endpoint", "showTranslated"]);
-  $("endpoint").value = s.endpoint || "http://127.0.0.1:4000";
+  $("endpoint").value = s.endpoint || "http://127.0.0.1:4010";
   $("showTranslated").checked = s.showTranslated !== false;
   wire();
   connect(); // auto-connect to the saved endpoint

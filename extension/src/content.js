@@ -173,6 +173,14 @@
   }
 
   function fixImageDocumentLayout(img) {
+    // Save the pristine UA state first so disable()/clearAll() can restore the
+    // ImageDocument's centering — otherwise the img stays display:block+margin:0
+    // and jumps to the left after we unwrap it.
+    img.__scanOrig = {
+      cls: img.className,
+      style: img.getAttribute("style") || "",
+      body: document.body.getAttribute("style") || "",
+    };
     // The ImageDocument UA takes the lone <img> out of normal flow (shrink-to-fit
     // + centering), which collapses our inline-block wrapper to 0 width and stacks
     // every box at one point. Restore the image to normal flow so the wrapper
@@ -259,6 +267,7 @@
       const result = await runOcr(md5(base64), base64, {});
       applyResult(img, result.result || []);
       processed.add(img);
+      reportBadge();
     } catch (e) {
       console.warn("[scanlation]", e.message || e);
     } finally {
@@ -291,9 +300,21 @@
         wrapper.parentNode.insertBefore(img, wrapper);
         wrapper.remove();
       }
+      if (img.__scanOrig) {  // undo the ImageDocument layout takeover -> UA re-centers
+        img.className = img.__scanOrig.cls;
+        img.__scanOrig.style ? img.setAttribute("style", img.__scanOrig.style) : img.removeAttribute("style");
+        img.__scanOrig.body ? document.body.setAttribute("style", img.__scanOrig.body) : document.body.removeAttribute("style");
+        delete img.__scanOrig;
+      }
       processed.delete(img);
     }
     tracked.length = 0;
+  }
+
+  // Tell the service worker to reflect state on the toolbar icon badge
+  // (enabled + count of translated regions) — the toggle-icon's feedback.
+  function reportBadge() {
+    try { ext.runtime.sendMessage({ type: "badge", enabled, count: tracked.length }); } catch (e) { /* no worker */ }
   }
 
   function enable() {
@@ -305,6 +326,7 @@
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("resize", onResize, { passive: true });
+    reportBadge();
   }
 
   function disable() {
@@ -313,6 +335,7 @@
     if (observer) { observer.disconnect(); observer = null; }
     window.removeEventListener("resize", onResize);
     clearAll();
+    reportBadge();
   }
 
   let resizeTimer = null;
@@ -326,6 +349,7 @@
     switch (msg && msg.type) {
       case "enable": enable(); break;
       case "disable": disable(); break;
+      case "toggle": (enabled ? disable() : enable()); return Promise.resolve({ enabled, count: tracked.length });
       case "set-endpoint": cfg.endpoint = msg.endpoint; break;
       case "set-show-translated": cfg.showTranslated = !!msg.value; retext(); break;
       case "set-font-scale": cfg.fontScale = msg.value || 1; tracked.forEach(sizeFonts); break;

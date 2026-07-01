@@ -9,9 +9,12 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "Scanlation",
-    "default_popup": "popup.html",
+    "default_title": "Scanlation — click to translate this tab (right-click → Settings)",
     "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png" }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   },
   "background": {
     "service_worker": "src/service-worker.js",
