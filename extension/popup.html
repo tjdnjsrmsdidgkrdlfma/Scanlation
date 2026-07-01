@@ -5,32 +5,43 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <header>Scanlation</header>
+  <div class="app">
+    <header class="brand">
+      <img class="mark" src="icons/icon48.png" alt="" />
+      <div class="brand-txt">
+        <h1>Scanlation</h1>
+        <p class="tagline">manga OCR · in-place translation</p>
+      </div>
+    </header>
 
-  <div class="field">
-    <label for="endpoint">Server</label>
-    <div class="inline">
-      <input id="endpoint" type="text" placeholder="http://127.0.0.1:4000" />
-      <button id="connect">Connect</button>
+    <div class="field">
+      <label for="endpoint">Server</label>
+      <div class="inline">
+        <input id="endpoint" type="text" placeholder="https://scanlation.takecontr.lol" />
+        <button id="connect" class="primary">Connect</button>
+      </div>
+      <div id="status" class="status"></div>
     </div>
-    <div id="status" class="status"></div>
+
+    <section id="conn" hidden>
+      <div class="rule"><span>languages</span></div>
+      <div class="grid2">
+        <div class="field"><label for="lang_src">From</label><select id="lang_src"></select></div>
+        <div class="field"><label for="lang_dst">To</label><select id="lang_dst"></select></div>
+      </div>
+
+      <div class="rule"><span>engines</span></div>
+      <div class="field"><label for="detector">Detector</label><select id="detector"></select></div>
+      <div class="field"><label for="recognizer">Recognizer</label><select id="recognizer"></select></div>
+      <div class="field"><label for="translator">Translator</label><select id="translator"></select></div>
+
+      <div class="grid2 actions">
+        <button id="enable" class="primary">Enable on tab</button>
+        <button id="disable" class="ghost">Disable</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="showTranslated" /> Show translated <small>(off = original)</small></label>
+    </section>
   </div>
-
-  <section id="conn" hidden>
-    <div class="grid2">
-      <div class="field"><label for="lang_src">From</label><select id="lang_src"></select></div>
-      <div class="field"><label for="lang_dst">To</label><select id="lang_dst"></select></div>
-    </div>
-    <div class="field"><label for="detector">Detector</label><select id="detector"></select></div>
-    <div class="field"><label for="recognizer">Recognizer</label><select id="recognizer"></select></div>
-    <div class="field"><label for="translator">Translator</label><select id="translator"></select></div>
-
-    <div class="grid2">
-      <button id="enable" class="primary">Enable on tab</button>
-      <button id="disable">Disable</button>
-    </div>
-    <label class="chk"><input type="checkbox" id="showTranslated" /> Show translated <small>(off = original)</small></label>
-  </section>
 
   <script type="module" src="src/popup.js"></script>
 </body>
