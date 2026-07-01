@@ -134,7 +134,7 @@ button.ghost:hover { border-color: var(--swirl); color: #fff; }
 .status::before {
   content: ""; width: 7px; height: 7px; border-radius: 50%;
   background: #4a5478; box-shadow: 0 0 6px rgba(74, 84, 120, 0.8); flex: none;
-  position: relative; top: 1px;   /* nudge down to the text's optical centre */
+  position: relative; top: 2px;   /* nudge down to the text's optical centre */
 }
 .status.ok { color: var(--ok); }
 .status.ok::before { background: var(--gold); box-shadow: 0 0 8px rgba(230, 180, 80, 0.9); }

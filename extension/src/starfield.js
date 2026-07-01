@@ -1,13 +1,12 @@
 /* Scanlation popup — "Starry Night" backdrop.
  *
- *   - stars sit still and TWINKLE (slowly), drifting only a hair
+ *   - stars sit in place and TWINKLE (slowly); they only SWAY a hair around
+ *     their spot (no net drift, so nothing ever wraps in from the edges)
  *   - brighter ones show a small 4-point sparkle (✦), not a plain circle
- *   - a MILKY WAY band (dense fine dust, tapering to thin ends) + a few faint
- *     field stars off it
- * The sky is a FIXED scene built once. When the popup grows (e.g. #conn opens
- * after Connect) we only enlarge the canvas — the same sky is revealed further,
- * so nothing reseeds or pops in from the edges. MV2 CSP-safe, prefers-reduced-
- * motion aware, dies with the popup. */
+ *   - a MILKY WAY band (dense fine dust, tapering to thin ends) + faint field stars
+ * The sky is a FIXED scene built once over a generous logical height; when the
+ * popup grows (#conn after Connect) we only enlarge the canvas and reveal more of
+ * the same sky — no reseed. MV2 CSP-safe, prefers-reduced-motion aware. */
 (() => {
   "use strict";
   const TAU = 6.2832;
@@ -21,7 +20,6 @@
   let stars = [], dust = [], band = null, baseGrad = null, seeded = false, t = 0, raf = 0;
 
   const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5; // ~[-1,1]
-  const drift = () => (Math.random() - 0.5) * 0.02;  // a hair of motion
 
   function starColor() {
     const r = Math.random();
@@ -29,7 +27,17 @@
     return r < 0.55 ? "#e6b450" : "#f6d488";
   }
 
-  // Only the canvas backing follows the popup size; the sky (below) is fixed.
+  // in-place sway params: tiny amplitude + slow speed, so a star just wobbles
+  function sway() {
+    return {
+      ax: 0.5 + Math.random() * 1.3, ay: 0.5 + Math.random() * 1.3,
+      sxs: 0.12 + Math.random() * 0.35, sys: 0.12 + Math.random() * 0.35,
+      px: Math.random() * TAU, py: Math.random() * TAU,
+    };
+  }
+  const swayX = (p) => p.x + p.s.ax * Math.sin(t * p.s.sxs + p.s.px);
+  const swayY = (p) => p.y + p.s.ay * Math.sin(t * p.s.sys + p.s.py);
+
   function fitCanvas() {
     const w = window.innerWidth, h = window.innerHeight;
     if (w === W && h === H) return;
@@ -72,21 +80,19 @@
         r: 0.35 + Math.random() * 0.6,
         c: starColor(),
         a: 0.26 + Math.random() * 0.4,
-        vx: drift(), vy: drift(),
+        s: sway(),
       });
     }
-    // faint field stars off the band, so empty sky isn't a total void
-    const f = Math.round(m * 0.16);
+    const f = Math.round(m * 0.16);                                // faint field stars off the band
     for (let i = 0; i < f; i++) {
       dust.push({
         x: Math.random() * SW, y: Math.random() * SH,
         r: 0.3 + Math.random() * 0.5,
         c: starColor(),
         a: 0.1 + Math.random() * 0.2,
-        vx: drift(), vy: drift(),
+        s: sway(),
       });
     }
-    // brighter foreground stars, scattered over the whole sky
     stars = [];
     const n = Math.max(26, Math.min(74, Math.round((SW * SH) / 3200)));
     for (let i = 0; i < n; i++) {
@@ -98,7 +104,7 @@
         tw: 0.4 + Math.random() * 1.0,          // slow twinkle
         ph: Math.random() * TAU,
         spike: r > 1.4 || Math.random() < 0.14 ? r * (1.0 + Math.random() * 1.0) : 0,
-        vx: drift(), vy: drift(),
+        s: sway(),
       });
     }
   }
@@ -124,7 +130,7 @@
     ctx.globalAlpha = a;
     ctx.fillStyle = p.c;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, TAU);
+    ctx.arc(swayX(p), swayY(p), p.r, 0, TAU);
     ctx.fill();
   }
 
@@ -135,13 +141,14 @@
     if (s.spike) {
       const len = s.spike * (0.5 + 0.7 * tw);
       const w = s.r * 0.5;
+      const x = swayX(s), y = swayY(s);
       ctx.globalAlpha = a * 0.55;
       ctx.beginPath();
-      ctx.moveTo(s.x, s.y - len); ctx.lineTo(s.x - w, s.y);
-      ctx.lineTo(s.x, s.y + len); ctx.lineTo(s.x + w, s.y); ctx.closePath(); ctx.fill();
+      ctx.moveTo(x, y - len); ctx.lineTo(x - w, y);
+      ctx.lineTo(x, y + len); ctx.lineTo(x + w, y); ctx.closePath(); ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(s.x - len, s.y); ctx.lineTo(s.x, s.y - w);
-      ctx.lineTo(s.x + len, s.y); ctx.lineTo(s.x, s.y + w); ctx.closePath(); ctx.fill();
+      ctx.moveTo(x - len, y); ctx.lineTo(x, y - w);
+      ctx.lineTo(x + len, y); ctx.lineTo(x, y + w); ctx.closePath(); ctx.fill();
     }
   }
 
@@ -158,19 +165,10 @@
     ctx.globalAlpha = 1;
   }
 
-  function wrap(p) {
-    if (p.x < -4) p.x = SW + 4; else if (p.x > SW + 4) p.x = -4;
-    if (p.y < -4) p.y = SH + 4; else if (p.y > SH + 4) p.y = -4;
-  }
-  function step() {
-    for (const p of dust) { p.x += p.vx; p.y += p.vy; wrap(p); }
-    for (const s of stars) { s.x += s.vx; s.y += s.vy; wrap(s); }
-  }
-
   function frame() {
     fitCanvas();
     if (W && !seeded) build();
-    if (seeded) { render(); step(); t += 0.016; }
+    if (seeded) { render(); t += 0.016; }
     raf = requestAnimationFrame(frame);
   }
 
