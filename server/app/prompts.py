@@ -6,9 +6,9 @@ resolved text through the per-call options dict (``system_prompt``), so they sta
 decoupled from this module — and fall back to ``DEFAULT_SYSTEM_PROMPT`` when
 called directly (unit tests / a bare ``translate()``).
 
-This lives in ``app`` (not ``plugins``) because state.py resolves the active
-prompt and must not import a plugin. ``plugins.llm_prompt`` re-exports
-``DEFAULT_SYSTEM_PROMPT`` as ``SYSTEM_PROMPT`` for backward compatibility.
+The named presets live here (core); the baseline ``DEFAULT_SYSTEM_PROMPT`` and
+the user-turn ``build_prompt`` template are in ``scanlation_sdk.prompt``, shared
+with the translator plugins.
 """
 from __future__ import annotations
 

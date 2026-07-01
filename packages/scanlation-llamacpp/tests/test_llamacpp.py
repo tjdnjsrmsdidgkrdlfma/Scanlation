@@ -1,7 +1,7 @@
 """LlamaCppTranslator unit tests — OpenAI-compatible request shape, HTTP mocked."""
 from __future__ import annotations
 
-from plugins.translator_llamacpp.plugin import LlamaCppTranslator
+from scanlation_llamacpp.plugin import LlamaCppTranslator
 
 
 def _translator() -> LlamaCppTranslator:
@@ -78,6 +78,6 @@ TESTS = [
 if __name__ == "__main__":
     import sys
 
-    from tests.helpers import run
+    from scanlation_sdk.testing import run
 
     sys.exit(run(TESTS, "test_llamacpp"))

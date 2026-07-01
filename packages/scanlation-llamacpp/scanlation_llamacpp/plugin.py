@@ -3,7 +3,7 @@
 Primary use: run the LLM under llama.cpp's `llama-server` with the **Vulkan**
 backend, which is often more reliable than ROCm on newer AMD GPUs (e.g. gfx1200
 / RDNA4) where ollama's Vulkan support is weak. Same system prompt + template as
-the ollama backend (shared via plugins.llm_prompt), so translations are
+the ollama backend (shared via scanlation_sdk.prompt), so translations are
 consistent regardless of which backend the GPU happens to like.
 
 Talks `/v1/chat/completions`, so it also works with any OpenAI-compatible server
@@ -18,7 +18,7 @@ import re
 from typing import Any
 
 from scanlation_sdk.contracts import EngineBase
-from plugins.llm_prompt import SYSTEM_PROMPT, build_prompt
+from scanlation_sdk.prompt import SYSTEM_PROMPT, build_prompt
 
 logger = logging.getLogger("scanlation.llamacpp")
 
