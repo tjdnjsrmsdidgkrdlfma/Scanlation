@@ -5,7 +5,7 @@ network: _generate is replaced with a fake that captures the request body.
 """
 from __future__ import annotations
 
-from plugins.translator_ollama.plugin import OllamaTranslator
+from scanlation_ollama.plugin import OllamaTranslator
 
 
 def _translator() -> OllamaTranslator:
@@ -87,6 +87,6 @@ TESTS = [
 if __name__ == "__main__":
     import sys
 
-    from tests.helpers import run
+    from scanlation_sdk.testing import run
 
     sys.exit(run(TESTS, "test_ollama"))

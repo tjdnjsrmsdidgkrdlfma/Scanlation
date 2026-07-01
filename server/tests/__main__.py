@@ -12,7 +12,6 @@ from tests import (
     test_contracts,
     test_geometry,
     test_llamacpp,
-    test_ollama,
     test_pipeline,
     test_routes,
 )
@@ -23,7 +22,6 @@ MODULES = [
     test_geometry,
     test_pipeline,
     test_routes,
-    test_ollama,
     test_llamacpp,
 ]
 

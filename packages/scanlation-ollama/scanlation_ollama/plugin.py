@@ -18,7 +18,7 @@ import os
 from typing import Any
 
 from scanlation_sdk.contracts import EngineBase
-from plugins.llm_prompt import SYSTEM_PROMPT, build_prompt
+from scanlation_sdk.prompt import SYSTEM_PROMPT, build_prompt
 
 logger = logging.getLogger("scanlation.ollama")
 
