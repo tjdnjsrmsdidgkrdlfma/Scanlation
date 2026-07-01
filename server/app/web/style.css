@@ -157,8 +157,20 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .opt-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
 .opt-fields label { color: var(--txt); }
 .opt-fields .desc { color: var(--muted); font-size: 11px; font-weight: 400; }
-.opt-check { flex-direction: row; align-items: center; gap: 8px; }
-.opt-check input { width: auto; }
+.opt-check { flex-direction: row; align-items: center; gap: 10px; cursor: pointer; }
+.opt-check input { position: absolute; opacity: 0; width: 0; height: 0; }  /* hide native box */
+.toggle {
+  flex: none; width: 34px; height: 20px; border-radius: 999px;
+  background: var(--line); position: relative; transition: background .15s;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--muted); transition: transform .15s, background .15s;
+}
+.opt-check input:checked + .toggle { background: var(--accent2); }
+.opt-check input:checked + .toggle::after { transform: translateX(14px); background: #fff; }
+.opt-check input:focus-visible + .toggle { outline: 2px solid var(--accent); outline-offset: 2px; }
 .opt-empty { color: var(--muted); font-size: 12px; }
 
 /* plugin rows */

@@ -240,7 +240,7 @@ function fieldInput(opt, spec, value) {
   const has = value !== undefined && value !== null;
   if (type === "bool") {
     const checked = (has ? value : spec.default) ? "checked" : "";
-    return `<label class="opt-check"><input type="checkbox" data-opt="${opt}" data-type="bool" ${checked}/> ${opt}</label>`;
+    return `<label class="opt-check"><input type="checkbox" data-opt="${opt}" data-type="bool" ${checked}/><span class="toggle"></span> ${opt}</label>`;
   }
   const inputType = (type === "int" || type === "float") ? "number" : "text";
   const step = type === "float" ? ` step="any"` : "";
