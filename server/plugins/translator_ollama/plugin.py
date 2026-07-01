@@ -30,9 +30,9 @@ class OllamaTranslator(EngineBase):
     display_name = "ollama (LLM)"
     homepage = "https://ollama.com"
     description = "LLM translation via a local ollama server (system-prompted, OCR-error tolerant)."
-    warning = "Requires a running ollama server (OLLAMA_ENDPOINT) and a pulled model (OLLAMA_MODEL)."
+    warning = "Requires a running ollama server (OLLAMA_ENDPOINT) and a model pulled + selected in /admin."
     OPTION_SCHEMA = {
-        "model": {"type": str, "default": "", "description": "ollama model tag (e.g. gemma...). Blank = OLLAMA_MODEL env."},
+        "model": {"type": str, "default": "", "description": "ollama model tag (e.g. gemma4:31b). Required — pick it in /admin."},
         "num_ctx": {"type": int, "default": 512, "description": "KV-cache context window (translation inputs are short)."},
         "num_gpu": {"type": int, "default": 31, "description": "Layers to offload to GPU."},
         "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
@@ -45,7 +45,6 @@ class OllamaTranslator(EngineBase):
 
     def __init__(self) -> None:
         self.endpoint = os.getenv("OLLAMA_ENDPOINT", DEFAULT_ENDPOINT)
-        self.model = os.getenv("OLLAMA_MODEL", "")
         self._client = None
 
     def load(self) -> None:
@@ -54,7 +53,7 @@ class OllamaTranslator(EngineBase):
         import httpx
 
         self._client = httpx.Client(timeout=120.0)
-        logger.info("ollama translator ready (endpoint=%s model=%s)", self.endpoint, self.model or "<unset>")
+        logger.info("ollama translator ready (endpoint=%s)", self.endpoint)
 
     def list_models(self) -> list[str]:
         """Pulled model tags from `GET {endpoint}/tags`. [] if ollama is down."""
@@ -86,10 +85,13 @@ class OllamaTranslator(EngineBase):
             return text
 
         options = options or {}
+        model = options.get("model")
+        if not model:
+            raise ValueError("no ollama model selected — pick one in /admin")
         prompt = build_prompt(text, src, dst, options.get("context", ""))
 
         body = {
-            "model": options.get("model") or self.model,
+            "model": model,
             "prompt": prompt,
             "system": options.get("system_prompt") or SYSTEM_PROMPT,
             "stream": False,

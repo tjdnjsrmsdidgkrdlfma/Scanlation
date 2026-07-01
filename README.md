@@ -76,7 +76,7 @@ server/
   app/        contracts, geometry, pipeline, registry, cache, state, config, schemas, routes/
   plugins/    dummy/  detector_ctd/  recognizer_mangaocr/  translator_ollama/
               translator_llamacpp/  llm_prompt.py (공유 LLM 프롬프트)
-  tools/      run_image.py, visualize.py
+  tools/      install.py, visualize.py
   tests/      단위 35개(핸드롤 러너, `python -m tests`) + 개별 모델 스모크
   models/     CTD 가중치 (gitignore)        data/  sqlite 캐시+state (gitignore)
 extension/
@@ -110,13 +110,10 @@ python tools/install.py        # ctd + manga-ocr 설치 (= 팝업 원클릭 / PO
 
 ```bash
 cd server
-# 빠른 스모크(모델 0): dummy 엔진
-python -m uvicorn app.main:app --host 127.0.0.1 --port 4000
-# 실엔진(CTD + manga-ocr는 CPU, ollama는 GPU):
-SCANLATION_DEVICE=cpu SCANLATION_DETECTOR=ctd SCANLATION_RECOGNIZER=mangaocr \
-SCANLATION_TRANSLATOR=ollama OLLAMA_MODEL=<your-model> \
 python -m uvicorn app.main:app --host 0.0.0.0 --port 4000
 ```
+**엔진·모델·언어·프롬프트는 전부 `/admin`에서 선택**합니다(→ `state.json`에 영속, 다음 기동부터 기본값).
+실행 명령엔 플래그·env가 없습니다. GPU면 provider 힌트로 `SCANLATION_DEVICE=rocm`만 앞에 붙이면 됩니다.
 첫 실엔진 요청은 느림(CTD ONNX + manga-ocr 모델 로드); 같은 이미지 재요청은 md5 캐시로 즉시.
 
 ### 관리자 페이지 (`/admin`)
@@ -128,7 +125,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 4000
 - **모델/언어 선택** — detector·recognizer·translator + src/dst. 저장 시 기본값이 됨.
 - **번역 프롬프트** — LLM 시스템 프롬프트 프리셋(`default`/`literal`/`natural`)을 고르거나 직접
   편집·저장(커스텀 프리셋). 활성 프롬프트는 캐시 키에 포함되어 바꾸면 재번역됨.
-- **엔진 옵션** — 선택된 엔진의 옵션. 번역기 **모델 태그**(`OLLAMA_MODEL` 대신 여기서 지정·영속),
+- **엔진 옵션** — 선택된 엔진의 옵션. 번역기 **모델**(설치된 것 중 드롭다운 선택·영속; env 없음),
   `num_ctx`/`temperature` 등. 빈칸 = 환경변수/스키마 기본값으로 복귀.
 - **플러그인 설치** — CTD/manga-ocr 가중치 원클릭 설치(= `tools/install.py` / `POST /manage_plugins/`).
 
@@ -176,10 +173,10 @@ Firefox: `about:debugging` → 임시 부가 기능 로드 → [extension/manife
 
 ### 번역 백엔드
 - **`ollama`** → `POST /api/generate` (ollama 내부 llama.cpp로 ROCm). env:
-  `OLLAMA_ENDPOINT`(`http://127.0.0.1:11434/api`), `OLLAMA_MODEL`.
+  `OLLAMA_ENDPOINT`(`http://127.0.0.1:11434/api`). **모델은 `/admin`에서 선택**(env 없음).
 - **`llamacpp`** → OpenAI `POST /v1/chat/completions` — 최신 AMD에서 ROCm이 불안할 때
   **Vulkan**(`llama-server`)용, 또는 임의 OpenAI 호환 서버. env:
-  `LLAMACPP_ENDPOINT`(`http://127.0.0.1:8080`), `LLAMACPP_MODEL`. `<think>` 구간 제거.
+  `LLAMACPP_ENDPOINT`(`http://127.0.0.1:8080`). 모델은 `/admin`(서버 `/v1/models`에서 조회). `<think>` 구간 제거.
 
 둘 다 사용자 튜닝 시스템 프롬프트 + 템플릿([server/plugins/llm_prompt.py](server/plugins/llm_prompt.py))
 공유: 번역만, OCR 오류 감안, 추론 한 문장.
@@ -191,13 +188,15 @@ Firefox: `about:debugging` → 임시 부가 기능 로드 → [extension/manife
 | 변수 | 기본 | 의미 |
 |---|---|---|
 | `SCANLATION_DEVICE` | `cpu` | `cpu` / `rocm` / `dml` provider 힌트(항상 CPU fallback) |
-| `SCANLATION_DETECTOR` / `_RECOGNIZER` / `_TRANSLATOR` | `dummy` | 시작 시 역할별 엔진 |
-| `SCANLATION_LANG_SRC` / `_DST` | `ja` / `ko` | 시작 언어 |
+| `SCANLATION_DETECTOR` / `_RECOGNIZER` / `_TRANSLATOR` | `dummy` | 최초 기동 기본 엔진(이후 `/admin` 선택이 덮어씀) |
+| `SCANLATION_LANG_SRC` / `_DST` | `ja` / `ko` | 최초 기동 기본 언어(이후 `/admin`) |
 | `SCANLATION_BASE_DIR` | server/ | `data/`(캐시, state.json) 루트 |
 | `SCANLATION_MODELS_DIR` | `<base>/models` | 가중치 루트 |
 | `SCANLATION_CTD_MODEL` / `_CTD_URL` | — / HF | CTD `.onnx` 명시 경로 / 설치 다운로드 URL |
-| `OLLAMA_ENDPOINT` / `OLLAMA_MODEL` | `…:11434/api` / — | ollama 백엔드 |
-| `LLAMACPP_ENDPOINT` / `LLAMACPP_MODEL` | `…:8080` / `local` | llama.cpp/OpenAI 백엔드 |
+| `OLLAMA_ENDPOINT` | `…:11434/api` | ollama 백엔드 주소 (모델은 `/admin`) |
+| `LLAMACPP_ENDPOINT` | `…:8080` | llama.cpp/OpenAI 백엔드 주소 (모델은 `/admin`) |
+
+> 모델 태그는 이제 env가 아니라 **`/admin` 엔진 옵션의 드롭다운**에서만 정합니다(백엔드에 설치된 모델을 조회). `state.json`에 영속.
 
 ---
 
@@ -213,10 +212,9 @@ cd server
 **검출 육안 확인**(정확도 핵심 루프 — 검출이 병목):
 ```bash
 python tools/visualize.py page.jpg --detector ctd --out annotated.png   # 폴리곤 + 인덱스
-python tools/run_image.py  page.jpg --engines ctd,mangaocr,dummy         # wire JSON
 ```
 `visualize.py`는 `annotated.png` + deskew된 `crops/`를 저장 → 박스 위치와 crop이 똑바른지
-눈으로 판단.
+눈으로 판단. (실제 ja→ko 확인은 서버+`/admin`+브라우저로.)
 
 ---
 
@@ -250,23 +248,17 @@ python tools/install.py            # 모델 설치 (한 번; = 원클릭 / POST 
 ollama pull <your-model>           # ollama 모델 (별도 서비스)
 ```
 
-**1) 브라우저 없이 CLI로 먼저 검증** (진짜 ja→ko):
+**1) 서버 띄우기** (포트 자유; 끄지 말 것 — tmux/nohup). 플래그·env 없음:
 ```bash
-OLLAMA_MODEL='<your-model>' SCANLATION_DEVICE=cpu \
-python tools/run_image.py <manga.jpg> --engines ctd,mangaocr,ollama
-#  → [{"ocr":"일본어","tsl":"한국어","box":[...]}] 나오면 호스트 작동 OK
-```
-> 한 줄로 칠 것 — `\` 줄바꿈으로 끊기면 `--engines`가 떨어져 나가 dummy로 돈다.
-
-**2) 서버로 띄우기** (포트 자유; 끄지 말 것 — tmux/nohup):
-```bash
-OLLAMA_MODEL='<your-model>' SCANLATION_DEVICE=cpu \
-SCANLATION_DETECTOR=ctd SCANLATION_RECOGNIZER=mangaocr SCANLATION_TRANSLATOR=ollama \
 python -m uvicorn app.main:app --host 0.0.0.0 --port 4001
 #  확인:  curl -s http://127.0.0.1:4001/ | head -c 150
 ```
-> env로 엔진을 지정하는 대신, 그냥 띄우고 **`http://127.0.0.1:4001/admin`**(터널)에서 모델·
-> 프롬프트·모델태그를 골라도 됨 — `state.json`에 저장돼 다음 기동부터 기본값. env는 fallback.
+> GPU면 provider 힌트로 `SCANLATION_DEVICE=rocm`만 앞에 붙이면 됨.
+
+**2) `/admin`에서 설정** (SSH 터널 뒤 브라우저 → 3번의 터널 사용):
+`http://127.0.0.1:4001/admin` → **모델·언어 탭**에서 detector `ctd` · recognizer `mangaocr` ·
+translator `ollama` 선택 → **엔진 옵션 탭**에서 translator `model` **드롭다운**으로 pull해둔 모델 선택
+→ 저장. 전부 `state.json`에 영속(다음 기동부터 기본값). **모델은 여기서만 지정**(env 없음).
 
 **3) 확장 연결** (브라우저가 다른 PC면 SSH 터널로 혼합콘텐츠·CORS 회피):
 ```bash
@@ -281,8 +273,8 @@ cd /path/to/manga && python -m http.server 8001    # 호스트에서
 ```
 → 브라우저 `http://127.0.0.1:8001/` 만화 페이지 → **F5 → Enable** → 한국어 오버레이.
 
-**ROCm 불안하면**: `llama-server`(Vulkan) 띄우고 `SCANLATION_TRANSLATOR=llamacpp
-LLAMACPP_ENDPOINT=http://127.0.0.1:8080`으로 교체(나머지 동일).
+**ROCm 불안하면**: `llama-server`(Vulkan) 띄우고 `/admin`에서 translator를 `llamacpp`로 바꾸면 됨
+(백엔드 주소만 다르면 `LLAMACPP_ENDPOINT`를 서버 실행 앞에 env로; 기본 `http://127.0.0.1:8080`).
 
 ---
 

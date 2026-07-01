@@ -33,7 +33,7 @@ class LlamaCppTranslator(EngineBase):
     description = "Translation via an OpenAI-compatible /v1/chat/completions server (llama.cpp Vulkan, vllm, LM Studio...)."
     warning = "Requires a running server (LLAMACPP_ENDPOINT, default http://127.0.0.1:8080) with a model loaded."
     OPTION_SCHEMA = {
-        "model": {"type": str, "default": "", "description": "Model name (OpenAI clients require non-empty; llama-server ignores). Blank = LLAMACPP_MODEL env."},
+        "model": {"type": str, "default": "", "description": "Model id (from the server's /v1/models). Required — pick it in /admin. (llama-server ignores it; other OpenAI servers require it.)"},
         "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
         "seed": {"type": int, "default": 42, "description": "RNG seed."},
         "top_p": {"type": float, "default": 1.0, "description": "Nucleus sampling p."},
@@ -45,7 +45,6 @@ class LlamaCppTranslator(EngineBase):
 
     def __init__(self) -> None:
         self.endpoint = os.getenv("LLAMACPP_ENDPOINT", DEFAULT_ENDPOINT)
-        self.model = os.getenv("LLAMACPP_MODEL", "local")  # llama-server ignores this, OpenAI clients require it
         self._client = None
 
     def load(self) -> None:
@@ -54,7 +53,7 @@ class LlamaCppTranslator(EngineBase):
         import httpx
 
         self._client = httpx.Client(timeout=120.0)
-        logger.info("llama.cpp translator ready (endpoint=%s model=%s)", self.endpoint, self.model)
+        logger.info("llama.cpp translator ready (endpoint=%s)", self.endpoint)
 
     def list_models(self) -> list[str]:
         """Loaded model ids from `GET {endpoint}/v1/models`. [] if server is down."""
@@ -86,8 +85,11 @@ class LlamaCppTranslator(EngineBase):
             return text
 
         options = options or {}
+        model = options.get("model")
+        if not model:
+            raise ValueError("no llama.cpp model selected — pick one in /admin")
         body = {
-            "model": options.get("model") or self.model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": options.get("system_prompt") or SYSTEM_PROMPT},
                 {"role": "user", "content": build_prompt(text, src, dst, options.get("context", ""))},

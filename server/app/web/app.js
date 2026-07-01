@@ -40,7 +40,7 @@ const I18N = {
     "plugins.install": "설치",
     "field.default": "(기본값)",
     "field.defaultPrefix": "기본",
-    "field.envDefault": "— 기본값 (실행 env) —",
+    "field.pickModel": "— 모델 선택 —",
     "field.notInstalled": "(미설치)",
     "preset.builtin": "빌트인",
     "preset.builtinEdited": "빌트인·수정됨",
@@ -90,7 +90,7 @@ const I18N = {
     "plugins.install": "Install",
     "field.default": "(default)",
     "field.defaultPrefix": "default",
-    "field.envDefault": "— default (launch env) —",
+    "field.pickModel": "— pick a model —",
     "field.notInstalled": "(not installed)",
     "preset.builtin": "builtin",
     "preset.builtinEdited": "builtin · edited",
@@ -291,7 +291,7 @@ async function setupModelPicker() {
   } catch (_) { return; }
   if (!models.length) return;  // backend down -> keep the text input
   const current = input.value;
-  const opts = [`<option value="">${t("field.envDefault")}</option>`];
+  const opts = [`<option value="">${t("field.pickModel")}</option>`];
   if (current && !models.includes(current)) {
     opts.push(`<option value="${current}">${current} ${t("field.notInstalled")}</option>`);
   }

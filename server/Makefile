@@ -2,7 +2,7 @@
 # equivalent ../venv/Scripts/python commands directly (see README).
 PY ?= ../venv/Scripts/python
 
-.PHONY: test test-ctd test-mangaocr serve run-cpu viz install
+.PHONY: test test-ctd test-mangaocr serve viz install
 
 test:            ## fast unit suite, no models/GPU (hand-rolled runner)
 	$(PY) -m tests
@@ -15,9 +15,6 @@ test-mangaocr:   ## manga-ocr smoke (needs the package; self-skips otherwise)
 
 serve:           ## run the API (uvicorn, single worker)
 	$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 4000 --workers 1
-
-run-cpu:         ## run pipeline on an image: make run-cpu IMG=page.png ENGINES=ctd,dummy,dummy
-	$(PY) tools/run_image.py "$(IMG)" --engines "$(or $(ENGINES),ctd,dummy,dummy)"
 
 viz:             ## visualize detection: make viz IMG=page.png
 	$(PY) tools/visualize.py "$(IMG)" --detector "$(or $(DET),ctd)"

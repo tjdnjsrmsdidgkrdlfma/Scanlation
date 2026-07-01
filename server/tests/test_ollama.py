@@ -25,10 +25,11 @@ def _translator() -> OllamaTranslator:
 
 def test_builds_request_from_tuned_config():
     translator = _translator()
-    out = translator.translate("こんにちは", "ja", "ko", {})
+    out = translator.translate("こんにちは", "ja", "ko", {"model": "gemma-test"})
     assert out == "안녕하세요"  # response stripped
 
     body = translator._captured
+    assert body["model"] == "gemma-test"  # model comes from options (admin), no env fallback
     assert body["stream"] is False
     assert body["think"] is False
     assert body["system"].startswith("From now on")
@@ -43,7 +44,7 @@ def test_builds_request_from_tuned_config():
 
 def test_options_override():
     translator = _translator()
-    translator.translate("テスト文章です", "ja", "ko", {"num_ctx": 1024, "think": True, "temperature": 0.7})
+    translator.translate("テスト文章です", "ja", "ko", {"model": "gemma-test", "num_ctx": 1024, "think": True, "temperature": 0.7})
     body = translator._captured
     assert body["think"] is True
     assert body["options"]["num_ctx"] == 1024
@@ -65,10 +66,22 @@ def test_short_text_skips_model_call():
     assert called is False
 
 
+def test_missing_model_raises():
+    tr = OllamaTranslator()
+    tr._generate = lambda body: {"response": "x"}  # must never be reached
+    raised = False
+    try:
+        tr.translate("これは十分に長い文章です", "ja", "ko", {})  # no model in options
+    except ValueError:
+        raised = True
+    assert raised, "translate must raise when no model is selected"
+
+
 TESTS = [
     test_builds_request_from_tuned_config,
     test_options_override,
     test_short_text_skips_model_call,
+    test_missing_model_raises,
 ]
 
 if __name__ == "__main__":

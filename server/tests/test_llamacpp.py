@@ -21,10 +21,11 @@ def _translator() -> LlamaCppTranslator:
 
 def test_builds_openai_chat_request():
     translator = _translator()
-    out = translator.translate("こんにちは", "ja", "ko", {})
+    out = translator.translate("こんにちは", "ja", "ko", {"model": "local-test"})
     assert out == "안녕하세요"  # stripped + <think> removed
 
     b = translator._captured
+    assert b["model"] == "local-test"  # model from options (admin), no env fallback
     assert b["stream"] is False
     sys_msg, user_msg = b["messages"]
     assert sys_msg["role"] == "system" and sys_msg["content"].startswith("From now on")
@@ -38,8 +39,19 @@ def test_builds_openai_chat_request():
 def test_keep_think_when_disabled():
     tr = LlamaCppTranslator()
     tr._chat = lambda body: {"choices": [{"message": {"content": "<think>x</think>네"}}]}
-    out = tr.translate("テスト文章", "ja", "ko", {"strip_think": False})
+    out = tr.translate("テスト文章", "ja", "ko", {"model": "local-test", "strip_think": False})
     assert "<think>" in out
+
+
+def test_missing_model_raises():
+    tr = LlamaCppTranslator()
+    tr._chat = lambda body: {"choices": [{"message": {"content": "x"}}]}  # never reached
+    raised = False
+    try:
+        tr.translate("これは十分に長い文章です", "ja", "ko", {})  # no model in options
+    except ValueError:
+        raised = True
+    assert raised, "translate must raise when no model is selected"
 
 
 def test_short_text_skips():
@@ -59,6 +71,7 @@ def test_short_text_skips():
 TESTS = [
     test_builds_openai_chat_request,
     test_keep_think_when_disabled,
+    test_missing_model_raises,
     test_short_text_skips,
 ]
 

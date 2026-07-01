@@ -75,7 +75,7 @@ class AppState:
         """Persist per-engine option overrides (the admin 'engine options' form).
 
         A value of None or "" *removes* the override, so the field reverts to the
-        engine's schema/env default (e.g. blank model -> OLLAMA_MODEL env).
+        engine's schema default (e.g. clearing the translator model unsets it).
         """
         cur = dict(self.selection.options.get(engine_name, {}))
         for key, val in (options or {}).items():
