@@ -121,6 +121,17 @@ yomu-server/
   models/ data/             # 볼륨, gitignore
 ```
 
+> **repo 구조 결정: 모노레포 (서버 + 확장 한 리포)**
+> Crivella는 `ocr_translate`(PyPI 패키지)와 `ocr_extension`(스토어 확장)을 **별도 리포**로 뒀다 —
+> 서로 다른 생태계에 독립 배포·버전·라이선스되는 두 제품이라서. 우리는 다르다:
+> - **솔로 + 와이어 계약 공동 진화** — 서버·확장이 같은 JSON 계약을 쓰고 함께 바뀐다. 한 리포면
+>   계약 변경(예: 역할 어휘 rename)을 **한 커밋**으로 반영; 나누면 두 리포·버전맞추기·비호환 창이 생긴다.
+> - **배포에 분리 불필요** — AMO는 `extension/` zip, Docker(P7)는 `server/`에서 빌드.
+> - **락인 없음** — 나중에 독립 배포/라이브러리 공개 같은 트리거가 생기면 히스토리 보존해 분리:
+>   `git subtree split --prefix=extension`(또는 `git filter-repo --subdirectory-filter extension`).
+>
+> → 지금은 모노레포 유지. **개발을 다 하고 나눠도 늦지 않다.**
+
 ### 3.2 플러그인 발견 — 권장: entry_points 1단 + 내장 fallback
 프로젝트가 자기 내장 엔진을 pyproject에 3개 그룹으로 선언:
 ```toml

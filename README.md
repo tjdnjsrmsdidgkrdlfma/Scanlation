@@ -86,6 +86,12 @@ extension/
 YOMU_DESIGN.md   전체 설계 / 핸드오프
 ```
 
+> **모노레포 (서버 + 확장 한 리포)** — 둘이 **와이어 계약(JSON API)을 공유·공동 진화**하므로
+> 한 리포에서 원자적으로 바꿉니다(예: 역할 어휘 rename을 서버+확장 한 커밋으로). 배포엔 분리가
+> 불필요 — 확장은 `extension/` zip을 AMO에, 서버는 `server/`에서 Docker로. 나중에 독립 배포/
+> 라이브러리 공개 같은 구체적 필요가 생기면 히스토리 보존해 분리 가능:
+> `git subtree split --prefix=extension -b extension-only`. 근거: [YOMU_DESIGN.md](YOMU_DESIGN.md).
+
 ---
 
 ## 빠른 시작
