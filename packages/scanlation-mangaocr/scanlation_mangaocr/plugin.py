@@ -20,7 +20,7 @@ logger = logging.getLogger("scanlation.mangaocr")
 
 class MangaOcrRecognizer(EngineBase):
     name = "mangaocr"
-    display_name = "manga-ocr"
+    display_name = "Manga OCR"
     homepage = "https://github.com/kha-white/manga-ocr"
     description = "Japanese manga text recognizer (ViT-encoder/BERT-decoder). Reads vertical + horizontal natively."
     warning = "Downloads ~400MB model (kha-white/manga-ocr-base) on first use."
