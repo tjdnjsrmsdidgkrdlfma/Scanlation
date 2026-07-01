@@ -1,9 +1,10 @@
 """Plugin discovery + lazy instantiation.
 
-Engines are found purely through ``importlib.metadata`` entry_points: the core
-package declares the ``dummy`` test doubles; every real engine is a separate pip
-package declaring the ``scanlation.<role>`` groups (auto-discovered on install).
-There is no hardcoded plugin map — installing a package is how an engine appears.
+Engines are found purely through ``importlib.metadata`` entry_points. The core
+ships NO engine of its own; every engine is a separate pip package declaring the
+``scanlation.<role>`` groups (auto-discovered on install). There is no hardcoded
+plugin map — installing a package is how an engine appears. (Tests register their
+own fakes directly; see tests/fake_engines.py.)
 
 Engines are instantiated lazily on first use — that's when VRAM/model weights
 are actually loaded. Class-level metadata (OPTION_SCHEMA, description, ...) is

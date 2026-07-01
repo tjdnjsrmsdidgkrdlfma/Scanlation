@@ -5,7 +5,7 @@ from PIL import Image
 
 from app.pipeline import assign_reading_order, run_pipeline
 from scanlation_sdk.contracts import Region
-from plugins.dummy.plugin import DummyDetector, DummyRecognizer, DummyTranslator
+from tests.fake_engines import DummyDetector, DummyRecognizer, DummyTranslator
 
 
 def test_reading_order_is_right_to_left_top_to_bottom():

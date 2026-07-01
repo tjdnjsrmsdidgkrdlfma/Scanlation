@@ -19,5 +19,5 @@ serve:           ## run the API (uvicorn, single worker)
 viz:             ## visualize detection: make viz IMG=page.png
 	$(PY) tools/visualize.py "$(IMG)" --detector "$(or $(DET),ctd)"
 
-install:         ## editable core (sdk + server; dummy engine only, engines are separate pkgs)
+install:         ## editable core (sdk + server; no engine — engines are separate pkgs)
 	$(PY) -m pip install -e ../scanlation-sdk -e .

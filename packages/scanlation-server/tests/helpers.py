@@ -50,6 +50,8 @@ def client():
         from fastapi.testclient import TestClient
 
         from app.main import app
+        from tests.fake_engines import install_fakes
 
+        install_fakes()  # product ships no engine; register test fakes + select them
         _CLIENT = TestClient(app)
     return _CLIENT

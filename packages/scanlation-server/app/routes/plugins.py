@@ -24,7 +24,7 @@ def get_plugin_data() -> dict:
     # installed (pip-present) engines, discovered via entry_points
     for role, mapping in registry.all_classes().items():
         for name, cls in mapping.items():
-            if name in resp:  # dedupe shared names (e.g. 'dummy' in every role)
+            if name in resp:  # dedupe an engine registered under multiple roles
                 resp[name]["roles"].append(role)
                 continue
             try:  # cheap __init__ only (no load); is_installed checks the filesystem/cache

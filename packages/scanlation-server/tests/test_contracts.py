@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
-from plugins.dummy.plugin import DummyDetector, DummyRecognizer, DummyTranslator
+from tests.fake_engines import DummyDetector, DummyRecognizer, DummyTranslator
 
 
 def test_region_from_bbox_shape_and_wire():

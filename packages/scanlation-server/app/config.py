@@ -25,10 +25,12 @@ class Settings:
     port: int = field(default_factory=lambda: int(_env("SCANLATION_PORT", "4000")))
 
     # First-run default engine selection (role -> plugin name) + languages; the
-    # admin page overrides these into state.json afterwards.
-    default_detector: str = field(default_factory=lambda: _env("SCANLATION_DETECTOR", "dummy"))
-    default_recognizer: str = field(default_factory=lambda: _env("SCANLATION_RECOGNIZER", "dummy"))
-    default_translator: str = field(default_factory=lambda: _env("SCANLATION_TRANSLATOR", "dummy"))
+    # admin page overrides these into state.json afterwards. Empty by default:
+    # the core ships no engine, so nothing is selected until one is installed and
+    # picked (running without one is a 400).
+    default_detector: str = field(default_factory=lambda: _env("SCANLATION_DETECTOR", ""))
+    default_recognizer: str = field(default_factory=lambda: _env("SCANLATION_RECOGNIZER", ""))
+    default_translator: str = field(default_factory=lambda: _env("SCANLATION_TRANSLATOR", ""))
     default_lang_src: str = field(default_factory=lambda: _env("SCANLATION_LANG_SRC", "ja"))
     default_lang_dst: str = field(default_factory=lambda: _env("SCANLATION_LANG_DST", "ko"))
 

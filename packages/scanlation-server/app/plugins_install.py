@@ -1,6 +1,6 @@
 """Runtime plugin (engine) installation — pip-install an engine package on demand.
 
-The core image/venv ships only ``dummy``. Real engines (ctd/mangaocr/ollama/
+The core image/venv ships NO engine. Real engines (ctd/mangaocr/ollama/
 llamacpp) are separate pip packages that live in this monorepo but are NOT in the
 core image. The admin "install" button (``POST /manage_plugins/``) pip-installs
 the chosen one into a persistent, ``sys.path``-ed dir (``SCANLATION_PLUGINS_DIR``,

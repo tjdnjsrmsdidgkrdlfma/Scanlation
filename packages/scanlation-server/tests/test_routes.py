@@ -38,6 +38,23 @@ def test_run_ocrtsl_md5_mismatch_is_400():
     assert r.status_code == 400
 
 
+def test_no_engine_installed_is_400():
+    """The core ships no engine; running a role with none selected -> 400."""
+    from app.state import state
+
+    c = client()
+    saved = (state.selection.detector, state.selection.recognizer, state.selection.translator)
+    try:
+        state.selection.detector = ""                 # no detector installed/selected
+        p = payload(color=(7, 7, 7))                  # unique md5 -> cache miss -> runs
+        r = c.post("/run_ocrtsl/", json={"md5": p["md5"], "contents": p["b64"]})
+        assert r.status_code == 400
+        state.selection.translator = ""               # no translator -> run_tsl 400 too
+        assert c.post("/run_tsl/", json={"text": "x"}).status_code == 400
+    finally:
+        state.selection.detector, state.selection.recognizer, state.selection.translator = saved
+
+
 def test_lazy_miss_then_work_then_cached_hit():
     c = client()
     p = payload(color=(123, 222, 31))  # unique md5
@@ -106,9 +123,9 @@ def test_set_lang_validates():
 
 def test_get_plugin_data_lists_engines():
     d = client().get("/get_plugin_data/").json()
-    assert "dummy" in d                               # core always ships the dummy engine
+    assert "dummy" in d                               # the test harness registered a fake 'dummy'
     assert d["dummy"]["installed"] is True            # no downloadable assets
-    assert d["dummy"]["installed_package"] is True    # dummy is part of the core
+    assert d["dummy"]["installed_package"] is True    # present in the (test) registry
     # installable engines are listed too (from the registry if pip-installed, else
     # from the catalog with installed_package=False)
     for name in ("ctd", "mangaocr", "ollama", "llamacpp"):
@@ -249,6 +266,7 @@ TESTS = [
     test_handshake_keys,
     test_run_ocrtsl_work_returns_boxes,
     test_run_ocrtsl_md5_mismatch_is_400,
+    test_no_engine_installed_is_400,
     test_lazy_miss_then_work_then_cached_hit,
     test_run_tsl_and_get_trans_roundtrip,
     test_set_manual_translation_wins,

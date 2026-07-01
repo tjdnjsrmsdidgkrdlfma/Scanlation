@@ -18,22 +18,14 @@ dependencies = [
     "pydantic>=2",
 ]
 
-# --- Engine discovery is entry_points-only (no hardcoded map). Only the `dummy`
-# test doubles ship with the core; real engines (ctd, mangaocr, ollama, llamacpp)
-# are separate pip packages declaring the same `scanlation.<role>` groups and are
-# auto-discovered on install. ---
-[project.entry-points."scanlation.detectors"]
-dummy = "plugins.dummy.plugin:DummyDetector"
-
-[project.entry-points."scanlation.recognizers"]
-dummy = "plugins.dummy.plugin:DummyRecognizer"
-
-[project.entry-points."scanlation.translators"]
-dummy = "plugins.dummy.plugin:DummyTranslator"
-
+# --- Engine discovery is entry_points-only (no hardcoded map). The core ships NO
+# engine at all: real engines (ctd, mangaocr, ollama, llamacpp) are separate pip
+# packages declaring the `scanlation.<role>` groups, auto-discovered on install.
+# A fresh install has no engines — running without one is a 400. (Tests register
+# their own fakes; see tests/fake_engines.py.) ---
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*", "plugins*"]
+include = ["app*"]
 
 # Ship the admin SPA (app/web/*.html,js,css) inside the wheel so a non-editable
 # install (Docker) serves /admin. Editable/dev installs read the source directly.

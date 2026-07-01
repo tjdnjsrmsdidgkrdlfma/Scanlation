@@ -1,9 +1,14 @@
-"""Dummy engines — the permanent test doubles.
+"""Test-only fake engines (formerly the shipped `dummy` plugin).
 
-These ship in the package (not throwaway): they make the whole skeleton — wire
-protocol, pipeline, cache, reading order, routes — testable with zero models,
-deterministically and fast. The dummy detector deliberately emits one rotated
-quad so the deskew path is exercised end-to-end.
+The product no longer ships any placeholder engine — a fresh install has no
+engines until you install a real one, and running without one is a 400 error.
+These fakes exist ONLY for the test suite: they exercise the whole skeleton —
+wire protocol, pipeline, cache, reading order, routes — with zero models,
+deterministically and fast. The fake detector deliberately emits one rotated
+quad so the deskew path is covered. ``install_fakes()`` registers them into the
+live registry + selection so the route tests have a working pipeline.
+
+They keep ``name = "dummy"`` so the existing tests read naturally.
 """
 from __future__ import annotations
 
@@ -65,3 +70,17 @@ class DummyTranslator(EngineBase):
 
     def translate(self, text: str, src: str, dst: str, options: dict[str, Any]) -> str:
         return f"[{src}->{dst}] {text}"
+
+
+def install_fakes() -> None:
+    """Register the fakes into the live registry + select them, so route tests
+    have a working detector/recognizer/translator (the product ships none)."""
+    from app.registry import registry
+    from app.state import state
+
+    registry.all_classes()["detector"]["dummy"] = DummyDetector
+    registry.all_classes()["recognizer"]["dummy"] = DummyRecognizer
+    registry.all_classes()["translator"]["dummy"] = DummyTranslator
+    state.selection.detector = "dummy"
+    state.selection.recognizer = "dummy"
+    state.selection.translator = "dummy"

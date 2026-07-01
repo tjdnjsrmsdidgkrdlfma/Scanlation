@@ -25,6 +25,15 @@ from ..state import state
 router = APIRouter()
 
 
+def _require(role: str, name: str) -> None:
+    """400 if a role has no engine installed/selected (the core ships none)."""
+    if not name or not registry.has(role, name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"no {role} engine installed — install and select one in /admin",
+        )
+
+
 def _resolve():
     """Current (names, langs, engines-id) from selection."""
     s = state.selection
@@ -76,6 +85,11 @@ async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
         if cached is not None:
             return {"result": cached}
 
+    # Need a real engine per role to run (cache miss) -> 400 if any is missing.
+    _require("detector", det)
+    _require("recognizer", rec)
+    _require("translator", tsl)
+
     # Dedupe concurrent identical requests onto one computation.
     id_ = (req.md5, src, dst, engines, oh)
     existing = state.inflight.get(id_)
@@ -114,6 +128,7 @@ async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
 @router.post("/run_tsl/")
 async def run_tsl(req: RunTslRequest) -> dict:
     s = state.selection
+    _require("translator", s.translator)
     translator = registry.get("translator", s.translator)
     opt_tsl = state.translator_options(s.translator, None)
     text = await run_in_threadpool(
