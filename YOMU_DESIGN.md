@@ -9,6 +9,7 @@
 > - **설정 = `/admin` 단일 소스** — 엔진·모델·언어·프롬프트를 서버 관리 페이지(`/admin`, `state.json` 영속)에서 지정. `OLLAMA_MODEL`/`LLAMACPP_MODEL` 등 **모델 env 폴백 제거**(미설정 시 에러). 모델은 백엔드 설치 목록 드롭다운으로 선택.
 > - **테스트 = 자체 핸드롤 러너** — pytest 미사용. `python -m tests`(빠른 스위트) / `python -m tests.test_ctd`(개별 스모크).
 > - **CLI 최소화** — `tools/run_image.py` 삭제(실 검증은 `/admin`+브라우저). `tools/visualize.py`(검출 육안 확인)만 유지.
+> - **다중 패키지 분리** — `server/` 단일 패키지를 `packages/`의 여러 pip 패키지로 분리: 공유 계약 `scanlation-sdk`(contracts·context·prompt·testing) + 코어 `scanlation-server`(dummy 엔진만 번들) + 엔진별 패키지(`scanlation-{ctd,mangaocr,ollama,llamacpp}`). 코어는 엔진을 전혀 모르고 **`entry_points`로만 발견**(`registry._BUILTIN` 하드코딩 맵 제거) — "설치한 패키지 = 탑재 엔진". 아래 §의 `server/plugins/*`·`app.contracts`·`plugins.llm_prompt` 경로 참조는 이 구조로 이동됨(계약 = `scanlation_sdk`).
 
 ---
 
