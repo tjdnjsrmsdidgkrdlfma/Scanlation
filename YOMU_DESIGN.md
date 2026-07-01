@@ -4,6 +4,12 @@
 > **라이선스:** TBD (단 전제: GPLv3 코드는 **복사 금지**, 알고리즘만 독립 재구현)
 > **이 문서의 목적:** 컨텍스트가 길어져 **새 세션에서 이어서 빌드**하기 위한 자족적(self-contained) 설계서. 사전 지식 없이 이 문서만으로 구현을 시작할 수 있도록 작성됨.
 
+> ⚠ **이후 구현에서 바뀐 점 (이 문서는 원 설계 기록):** 현재 상태·사용법은 [README.md](README.md), 에이전트 지침은 [CLAUDE.md](CLAUDE.md)를 우선한다. 원 설계 대비 주요 divergence:
+> - **역할 어휘 통일** — 구 `ocr_extension` drop-in 호환(BOX/OCR/TSL)을 **폐기**하고 서버·와이어·확장·admin 전 계층을 `detector`/`recognizer`/`translator`로 통일. (결과 키 `{ocr,tsl,box}`만 데이터 필드로 유지)
+> - **설정 = `/admin` 단일 소스** — 엔진·모델·언어·프롬프트를 서버 관리 페이지(`/admin`, `state.json` 영속)에서 지정. `OLLAMA_MODEL`/`LLAMACPP_MODEL` 등 **모델 env 폴백 제거**(미설정 시 에러). 모델은 백엔드 설치 목록 드롭다운으로 선택.
+> - **테스트 = 자체 핸드롤 러너** — pytest 미사용. `python -m tests`(빠른 스위트) / `python -m tests.test_ctd`(개별 스모크).
+> - **CLI 최소화** — `tools/run_image.py` 삭제(실 검증은 `/admin`+브라우저). `tools/visualize.py`(검출 육안 확인)만 유지.
+
 ---
 
 ## 1. Context — 왜 이걸 만드는가
