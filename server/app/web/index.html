@@ -11,65 +11,66 @@
     <header class="topbar">
       <div class="brand">
         <h1>Scanlation <span class="muted">Admin</span></h1>
-        <p class="sub" id="version">서버 설정 · 모델 · 프롬프트</p>
+        <p class="sub" id="version" data-i18n="brand.sub">서버 설정 · 모델 · 프롬프트</p>
       </div>
+      <button class="btn sm" id="lang-toggle">EN</button>
     </header>
 
     <nav class="tabbar" id="tabbar" hidden>
-      <button class="tab active" data-view="models">모델 · 언어</button>
-      <button class="tab" data-view="prompt">번역 프롬프트</button>
-      <button class="tab" data-view="options">엔진 옵션</button>
-      <button class="tab" data-view="plugins">플러그인</button>
+      <button class="tab active" data-view="models" data-i18n="tab.models">모델 · 언어</button>
+      <button class="tab" data-view="prompt" data-i18n="tab.prompt">번역 프롬프트</button>
+      <button class="tab" data-view="options" data-i18n="tab.options">엔진 옵션</button>
+      <button class="tab" data-view="plugins" data-i18n="tab.plugins">플러그인</button>
     </nav>
   </div>
 
   <main id="app" hidden>
     <!-- 모델 선택 -->
     <section class="card view active" data-view="models">
-      <h2>모델 선택 <span class="hint">마지막 선택이 서버에 저장되어 기본값이 됩니다</span></h2>
+      <h2><span data-i18n="models.h2">모델 선택</span> <span class="hint" data-i18n="models.hint">마지막 선택이 서버에 저장되어 기본값이 됩니다</span></h2>
       <div class="grid3">
-        <label>박스(detector)<select id="sel-detector"></select></label>
-        <label>OCR(recognizer)<select id="sel-recognizer"></select></label>
-        <label>번역(translator)<select id="sel-translator"></select></label>
+        <label><span data-i18n="models.detector">박스(detector)</span><select id="sel-detector"></select></label>
+        <label><span data-i18n="models.recognizer">OCR(recognizer)</span><select id="sel-recognizer"></select></label>
+        <label><span data-i18n="models.translator">번역(translator)</span><select id="sel-translator"></select></label>
       </div>
       <div class="row">
         <div class="grid2 langs">
-          <label>원문<select id="sel-lang_src"></select></label>
-          <label>번역<select id="sel-lang_dst"></select></label>
+          <label><span data-i18n="models.src">원문</span><select id="sel-lang_src"></select></label>
+          <label><span data-i18n="models.dst">번역</span><select id="sel-lang_dst"></select></label>
         </div>
-        <button class="btn primary" id="save-models">저장</button>
+        <button class="btn primary" id="save-models" data-i18n="btn.save">저장</button>
       </div>
     </section>
 
     <!-- 번역 프롬프트 -->
     <section class="card view" data-view="prompt">
-      <h2>번역 프롬프트 <span class="hint">LLM 시스템 프롬프트를 고르거나 직접 편집</span></h2>
+      <h2><span data-i18n="prompt.h2">번역 프롬프트</span> <span class="hint" data-i18n="prompt.hint">LLM 시스템 프롬프트를 고르거나 직접 편집</span></h2>
       <div class="row">
-        <label class="grow">프리셋
+        <label class="grow"><span data-i18n="prompt.preset">프리셋</span>
           <select id="prompt-preset"></select>
         </label>
-        <button class="btn" id="prompt-use">이 프롬프트 사용</button>
-        <button class="btn danger" id="prompt-delete">삭제</button>
+        <button class="btn" id="prompt-use" data-i18n="prompt.use">이 프롬프트 사용</button>
+        <button class="btn danger" id="prompt-delete" data-i18n="prompt.delete">삭제</button>
       </div>
       <textarea id="prompt-text" rows="10" spellcheck="false"></textarea>
       <div class="row">
-        <label class="grow">저장 이름
-          <input id="prompt-name" type="text" placeholder="예: my-natural" />
+        <label class="grow"><span data-i18n="prompt.saveName">저장 이름</span>
+          <input id="prompt-name" type="text" data-i18n-ph="prompt.namePlaceholder" placeholder="예: my-natural" />
         </label>
-        <button class="btn primary" id="prompt-save">저장 &amp; 사용</button>
+        <button class="btn primary" id="prompt-save" data-i18n="prompt.save">저장 &amp; 사용</button>
       </div>
-      <p class="note">빌트인을 편집해 같은 이름으로 저장하면 그 이름의 커스텀 프리셋이 덮어씁니다. 새 이름으로 저장하면 복제됩니다. 커스텀을 삭제하면 빌트인으로 되돌아갑니다.</p>
+      <p class="note" data-i18n="prompt.note">빌트인을 편집해 같은 이름으로 저장하면 그 이름의 커스텀 프리셋이 덮어씁니다. 새 이름으로 저장하면 복제됩니다. 커스텀을 삭제하면 빌트인으로 되돌아갑니다.</p>
     </section>
 
     <!-- 엔진 옵션 -->
     <section class="card view" data-view="options">
-      <h2>엔진 옵션 <span class="hint">선택된 엔진의 옵션 (예: 번역기 모델 태그)</span></h2>
+      <h2><span data-i18n="options.h2">엔진 옵션</span> <span class="hint" data-i18n="options.hint">선택된 엔진의 옵션 (예: 번역기 모델 태그)</span></h2>
       <div id="engine-options"></div>
     </section>
 
     <!-- 플러그인 설치 -->
     <section class="card view" data-view="plugins">
-      <h2>플러그인 설치 <span class="hint">가중치/모델 원클릭 설치</span></h2>
+      <h2><span data-i18n="plugins.h2">플러그인 설치</span> <span class="hint" data-i18n="plugins.hint">가중치/모델 원클릭 설치</span></h2>
       <div id="plugins"></div>
     </section>
   </main>
