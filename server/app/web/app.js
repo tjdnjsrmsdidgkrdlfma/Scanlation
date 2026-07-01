@@ -5,6 +5,10 @@
 const $ = (id) => document.getElementById(id);
 let DATA = null; // last /get_settings/ snapshot
 
+// Canonical role labels across the whole UI — match the wire protocol
+// (handshake BOXModels/OCRModels/TSLModels). Language-neutral, so not i18n'd.
+const ROLE_LABEL = { detector: "BOX", recognizer: "OCR", translator: "TSL" };
+
 // --- i18n -----------------------------------------------------------------
 // UI chrome only. Engine metadata (display_name/description/warning/option
 // descriptions) comes from the server already in English, so it isn't keyed
@@ -19,9 +23,6 @@ const I18N = {
     "tab.plugins": "플러그인",
     "models.h2": "모델 선택",
     "models.hint": "마지막 선택이 서버에 저장되어 기본값이 됩니다",
-    "models.detector": "박스(detector)",
-    "models.recognizer": "OCR(recognizer)",
-    "models.translator": "번역(translator)",
     "models.src": "원문",
     "models.dst": "번역",
     "btn.save": "저장",
@@ -35,7 +36,7 @@ const I18N = {
     "prompt.save": "저장 & 사용",
     "prompt.note": "빌트인을 편집해 같은 이름으로 저장하면 그 이름의 커스텀 프리셋이 덮어씁니다. 새 이름으로 저장하면 복제됩니다. 커스텀을 삭제하면 빌트인으로 되돌아갑니다.",
     "options.h2": "엔진 옵션",
-    "options.hint": "선택된 엔진의 옵션 (예: 번역기 모델 태그)",
+    "options.hint": "선택된 엔진의 옵션 (예: TSL 모델 태그)",
     "options.none": "설정 가능한 옵션이 없습니다.",
     "plugins.h2": "플러그인 설치",
     "plugins.hint": "가중치/모델 원클릭 설치",
@@ -70,9 +71,6 @@ const I18N = {
     "tab.plugins": "Plugins",
     "models.h2": "Model selection",
     "models.hint": "Your last choice is saved on the server as the default",
-    "models.detector": "Boxes (detector)",
-    "models.recognizer": "OCR (recognizer)",
-    "models.translator": "Translation (translator)",
     "models.src": "Source",
     "models.dst": "Target",
     "btn.save": "Save",
@@ -86,7 +84,7 @@ const I18N = {
     "prompt.save": "Save & use",
     "prompt.note": "Editing a builtin and saving under the same name creates a custom preset that overrides it. Saving under a new name clones it. Deleting a custom preset reverts to the builtin.",
     "options.h2": "Engine options",
-    "options.hint": "Options for the selected engines (e.g. translator model tag)",
+    "options.hint": "Options for the selected engines (e.g. TSL model tag)",
     "options.none": "No configurable options.",
     "plugins.h2": "Plugin installation",
     "plugins.hint": "One-click install of weights/models",
@@ -261,7 +259,7 @@ function optBlock(role, e) {
       `</div><button class="btn primary sm" data-save-engine="${e.name}">${t("btn.save")}</button>`;
   }
   return `<div class="opt-block" data-engine="${e.name}">
-      <span class="role">${role}</span>
+      <span class="role">${ROLE_LABEL[role]}</span>
       <h3>${e.display_name} <span class="hint">${e.name}</span></h3>
       ${fields}
     </div>`;
@@ -303,7 +301,7 @@ function renderPlugins() {
     const warn = e.warning ? `<div class="pwarn">⚠ ${e.warning}</div>` : "";
     return `<div class="plugin">
         <div class="meta">
-          <div class="pname">${e.display_name} <span class="proles">${e.roles.join(", ")}</span></div>
+          <div class="pname">${e.display_name} <span class="proles">${e.roles.map((r) => ROLE_LABEL[r]).join(", ")}</span></div>
           <div class="pdesc">${e.description || ""}</div>
           ${warn}
         </div>
