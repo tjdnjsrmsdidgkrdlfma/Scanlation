@@ -84,16 +84,17 @@ function wire() {
   $("enable").addEventListener("click", () => sendActive({ type: "enable" }));
   $("disable").addEventListener("click", () => sendActive({ type: "disable" }));
 
-  $("showTranslated").addEventListener("change", async (e) => {
-    await ext.storage.local.set({ showTranslated: e.target.checked });
-    sendActive({ type: "set-show-translated", value: e.target.checked });
+  $("showOriginal").addEventListener("change", async (e) => {
+    const showTranslated = !e.target.checked;   // checkbox is "Show original"
+    await ext.storage.local.set({ showTranslated });
+    sendActive({ type: "set-show-translated", value: showTranslated });
   });
 }
 
 async function init() {
   const s = await ext.storage.local.get(["endpoint", "showTranslated"]);
   $("endpoint").value = s.endpoint || "http://127.0.0.1:4000";
-  $("showTranslated").checked = s.showTranslated !== false;
+  $("showOriginal").checked = s.showTranslated === false;   // checked = show original
   wire();
   connect(); // auto-connect to the saved endpoint
 }
