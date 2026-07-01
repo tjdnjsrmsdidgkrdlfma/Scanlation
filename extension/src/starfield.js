@@ -36,7 +36,7 @@
     band = {
       cx: W * 0.5, cy: H * 0.5, ang,
       dx: Math.cos(ang), dy: Math.sin(ang),
-      half: Math.min(W, H) * 0.34,              // band half-width
+      half: Math.min(W, H) * 0.30,              // band half-width
       len: Math.hypot(W, H) * 1.15,
     };
     return true;
@@ -48,21 +48,21 @@
     return r < 0.55 ? "#e6b450" : "#f6d488";
   }
 
-  const drift = () => (Math.random() - 0.5) * 0.05;  // a hair of motion
+  const drift = () => (Math.random() - 0.5) * 0.02;  // a hair of motion (very slow)
 
   function seed() {
     // fine Milky-Way dust, clustered on the band (gaussian across it)
     dust = [];
-    const m = Math.max(60, Math.min(240, Math.round((W * H) / 720)));
+    const m = Math.max(90, Math.min(360, Math.round((W * H) / 500)));
     for (let i = 0; i < m; i++) {
       const along = (Math.random() - 0.5) * band.len;
       const perp = gauss() * band.half;
       dust.push({
         x: band.cx + along * band.dx - perp * band.dy,
         y: band.cy + along * band.dy + perp * band.dx,
-        r: 0.35 + Math.random() * 0.55,
+        r: 0.35 + Math.random() * 0.6,
         c: starColor(),
-        a: 0.12 + Math.random() * 0.28,
+        a: 0.18 + Math.random() * 0.32,
         vx: drift(), vy: drift(),
       });
     }
@@ -90,8 +90,8 @@
     ctx.rotate(band.ang);
     const g = ctx.createLinearGradient(0, -band.half, 0, band.half);
     g.addColorStop(0.0, "rgba(90,110,170,0)");
-    g.addColorStop(0.5, "rgba(150,150,200,0.07)");
-    g.addColorStop(0.62, "rgba(200,175,120,0.05)"); // faint warm core
+    g.addColorStop(0.5, "rgba(150,150,205,0.12)");
+    g.addColorStop(0.62, "rgba(205,178,122,0.09)"); // faint warm core
     g.addColorStop(1.0, "rgba(90,110,170,0)");
     ctx.fillStyle = g;
     ctx.fillRect(-band.len / 2, -band.half, band.len, band.half * 2);
