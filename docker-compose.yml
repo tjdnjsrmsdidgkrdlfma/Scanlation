@@ -3,8 +3,10 @@
 #   docker compose up -d --build
 #   → http://127.0.0.1:4000/admin  (install engines, pick models/langs/prompt)
 #
-# TLS + public exposure are the HOST's job: the container binds 127.0.0.1:4000
-# and the host nginx reverse-proxies your domain to it (see deploy/nginx.conf.example).
+# The image is core-only: engines are pip-installed from GitHub when you click
+# "install" in /admin (needs a reachable/public SCANLATION_ENGINE_REPO). TLS +
+# public exposure are the HOST's job: the container binds 127.0.0.1:4000 and the
+# host nginx reverse-proxies your domain to it (see deploy/nginx.conf.example).
 # LLM backends (ollama / llama.cpp) run outside the container; the translator
 # plugins reach them via host.docker.internal.
 services:
@@ -22,6 +24,9 @@ services:
       - data:/data         # state.json, sqlite cache, model weights, HF cache
     environment:
       SCANLATION_DEVICE: cpu               # ctd + mangaocr run on CPU here
+      # Engine source for /admin installs (defaults baked in the image). Pin a
+      # tag for reproducible deploys:
+      # SCANLATION_ENGINE_REF: v0.1.0
       # External LLM backends on the host (ollama on GPU, llama.cpp on Vulkan):
       OLLAMA_ENDPOINT: http://host.docker.internal:11434/api
       LLAMACPP_ENDPOINT: http://host.docker.internal:8080

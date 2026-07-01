@@ -1,52 +1,47 @@
 # Scanlation server — core-only image.
 #
-# Ships scanlation-sdk + scanlation-server (the `dummy` engine only). The real
-# engine plugins (ctd/mangaocr/ollama/llamacpp) are NOT installed here: their
-# *source* sits under /opt/engines and the admin page pip-installs the chosen
-# ones into the /plugins volume at runtime ("설치한 패키지 = 탑재 엔진" — installing the
-# package is how an engine appears, inside the container too). LLM backends
-# (ollama / llama.cpp) run outside; the translator plugins just point at them.
+# The image contains ONLY the core: scanlation-sdk + scanlation-server (the
+# `dummy` engine). No engine plugin code is baked in. The real engines
+# (ctd/mangaocr/ollama/llamacpp) are pip-installed from GitHub at runtime when
+# you click "install" in /admin — into the /plugins volume, so they survive
+# container recreation and their heavy deps (onnxruntime/torch) arrive only then.
+# LLM backends (ollama / llama.cpp) run outside; the translator plugins point at
+# them via env.
 #
 # Build context is the repo root:  docker build -t scanlation-server .
 FROM python:3.11-slim
 
-# Generic OS runtime libs that engine backends (onnxruntime / torch / opencv)
-# dlopen when loaded. These are shared C libraries, not plugin packages — the
-# core (opencv-headless deskew) needs libgomp/libglib too.
+# git   — runtime plugin install fetches engines via `pip install git+...`.
+# libgomp1/libglib2.0-0 — generic C runtime libs the engine backends
+#   (onnxruntime/torch/opencv) dlopen; the core (opencv-headless deskew) needs them too.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 \
+ && apt-get install -y --no-install-recommends git libgomp1 libglib2.0-0 \
  && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     SCANLATION_BASE_DIR=/data \
     SCANLATION_MODELS_DIR=/data/models \
-    SCANLATION_ENGINES_SRC=/opt/engines \
-    SCANLATION_SDK_SRC=/opt/engines/scanlation-sdk \
     SCANLATION_PLUGINS_DIR=/plugins \
     PYTHONPATH=/plugins \
     HF_HOME=/data/hf \
-    SCANLATION_DEVICE=cpu
+    SCANLATION_DEVICE=cpu \
+    SCANLATION_ENGINE_REPO=https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git \
+    SCANLATION_ENGINE_REF=main
 
-# Engine + sdk SOURCE (unbuilt, zero deps installed). scanlation-sdk lives here
-# too so it can be co-installed with each engine at runtime (pip can't fetch the
-# local scanlation-sdk from any index); the catalog scanner skips sdk/server.
-COPY packages/scanlation-sdk      /opt/engines/scanlation-sdk
-COPY packages/scanlation-ctd      /opt/engines/scanlation-ctd
-COPY packages/scanlation-mangaocr /opt/engines/scanlation-mangaocr
-COPY packages/scanlation-ollama   /opt/engines/scanlation-ollama
-COPY packages/scanlation-llamacpp /opt/engines/scanlation-llamacpp
-COPY packages/scanlation-server   /opt/scanlation-server
-
-# Core only: sdk + server. Editable so the packaged web/ (admin SPA) + tools/
-# assets resolve from the source tree. The dummy engine ships in the server pkg.
-RUN pip install -e /opt/engines/scanlation-sdk -e /opt/scanlation-server
+# Core only: sdk + server, installed non-editable (a real package, not a mounted
+# source tree). Build from the copied source, then discard it — the final image
+# carries no repo working tree, just the installed core (+ dummy engine).
+COPY packages/scanlation-sdk    /tmp/build/scanlation-sdk
+COPY packages/scanlation-server /tmp/build/scanlation-server
+RUN pip install /tmp/build/scanlation-sdk /tmp/build/scanlation-server \
+ && rm -rf /tmp/build
 
 # Non-root; /data (state, sqlite, weights, HF cache) and /plugins (runtime-
 # installed engine packages) are volumes it owns and writes to.
 RUN useradd -m -u 10001 app \
  && mkdir -p /data /plugins \
- && chown -R app:app /data /plugins /opt
+ && chown -R app:app /data /plugins
 USER app
 
 EXPOSE 4000

@@ -182,9 +182,11 @@ Firefox: `about:debugging` → 임시 부가 기능 로드 → [extension/manife
 
 **엔진 설치(명시적, 숨은 기본 동작 아님) — 두 층:**
 1. **패키지(코드)** — 엔진 플러그인은 별도 pip 패키지다. bare-metal은 `pip install`로, **Docker/런타임은
-   `/admin` 원클릭**으로 설치한다: `POST /manage_plugins/ {"plugins": {"ctd": true}}`가 미설치 시 엔진 소스를
-   `SCANLATION_PLUGINS_DIR`(Docker 볼륨)에 `pip install`해 무거운 백엔드 의존(onnxruntime/torch…)을 그때 끌어오고,
-   `entry_points`를 라이브 재발견한다. 설치 전엔 `/admin`에 "미설치"로만 뜨고 코어는 그 의존이 전혀 없다.
+   `/admin` 원클릭**으로 설치한다: `POST /manage_plugins/ {"plugins": {"ctd": true}}`가 미설치 시 엔진을
+   **GitHub에서 `pip install`**(`git+<repo>@<ref>#subdirectory=packages/scanlation-ctd`)해
+   `SCANLATION_PLUGINS_DIR`(Docker 볼륨)에 넣고, 무거운 백엔드 의존(onnxruntime/torch…)을 그때 끌어오며,
+   `entry_points`를 라이브 재발견한다. 이미지엔 엔진 코드가 **아예 없고**(core만), 설치 전엔 `/admin`에 "미설치"로만
+   뜬다. (dev/오프라인은 `SCANLATION_ENGINES_SRC`를 로컬 `packages/`로 두면 GitHub 대신 로컬 소스에서 설치.)
 2. **가중치** — 패키지가 깔린 뒤 `ctd`(ONNX)·`mangaocr`(HF) 가중치를 이어서 다운로드(같은 원클릭이 연달아 수행,
    또는 CLI `python tools/install.py`). `GET /get_plugin_data/`·`/get_settings/`가 엔진별 `installed_package`(패키지)
    /`installed`(가중치) 상태를 보고한다.
@@ -218,7 +220,9 @@ Firefox: `about:debugging` → 임시 부가 기능 로드 → [extension/manife
 | `SCANLATION_BASE_DIR` | 실행 위치(CWD) | `data/`(캐시, state.json) 루트; Docker/테스트는 명시 지정 |
 | `SCANLATION_MODELS_DIR` | `<base>/models` | 가중치 루트 |
 | `SCANLATION_PLUGINS_DIR` | `<base>/plugins` | `/admin`이 엔진 패키지를 pip 설치하는 위치(Docker: `/plugins` 볼륨) |
-| `SCANLATION_ENGINES_SRC` | 레포 `packages/` | 설치 가능한 엔진 **소스** 루트(Docker: `/opt/engines`) |
+| `SCANLATION_ENGINE_REPO` | 이 레포 GitHub URL | `/admin` 설치가 엔진을 받아오는 git 소스 |
+| `SCANLATION_ENGINE_REF` | `main` | 받아올 브랜치/태그(배포 고정용) |
+| `SCANLATION_ENGINES_SRC` | (미설정) | 설정 시 GitHub 대신 로컬 `packages/` 소스에서 설치(dev/오프라인) |
 | `HF_HOME` | HF 기본 | manga-ocr 가중치 캐시(Docker: `/data/hf`, 볼륨 영속) |
 | `SCANLATION_CTD_MODEL` / `_CTD_URL` | — / HF | CTD `.onnx` 명시 경로 / 설치 다운로드 URL |
 | `OLLAMA_ENDPOINT` | `…:11434/api` | ollama 백엔드 주소 (모델은 `/admin`) |
@@ -312,17 +316,21 @@ cd /path/to/manga && python -m http.server 8001    # 호스트에서
 
 ### Docker (P7)
 
-이미지는 **core만**(dummy 엔진). 실엔진은 `/admin`에서 설치할 때 볼륨에 pip 설치된다 —
-bare-metal의 "설치한 패키지 = 탑재 엔진"이 컨테이너에서도 그대로. LLM 백엔드(ollama)는 **컨테이너 밖**,
-HTTPS는 **호스트 nginx**가 담당(컨테이너는 `127.0.0.1:4000`만 바인딩).
+이미지는 **core만**(dummy 엔진) — 엔진 코드는 이미지에 **아예 없다.** 실엔진은 `/admin`에서 설치할 때
+**GitHub에서 `pip install`**(`git+…#subdirectory=packages/scanlation-<name>`)돼 `plugins` 볼륨에 들어간다.
+"설치한 패키지 = 탑재 엔진"이 컨테이너에서도 그대로. LLM 백엔드(ollama)는 **컨테이너 밖**, HTTPS는
+**호스트 nginx**가 담당(컨테이너는 `127.0.0.1:4000`만 바인딩).
+
+> **레포 접근 필요:** 컨테이너엔 git 자격증명이 없으므로 엔진을 받으려면 `SCANLATION_ENGINE_REPO`가
+> **공개 레포**여야 한다(비공개면 토큰 박은 URL 필요). 배포를 고정하려면 `SCANLATION_ENGINE_REF`를 태그로.
 
 ```bash
 docker compose up -d --build                 # core-only 이미지 빌드 + 기동
 curl -s http://127.0.0.1:4000/ | head -c 120 # handshake = dummy만
 ```
 1. **엔진 설치** — `http://127.0.0.1:4000/admin` 플러그인 탭에서 `ctd`·`mangaocr`(+원하면 `ollama`/`llamacpp`)
-   **설치**. 패키지가 `plugins` 볼륨에, 가중치가 `data` 볼륨에 받아진다(둘 다 재시작해도 유지). 첫 설치는
-   느림(onnxruntime/torch 다운로드) — 인터넷 필요.
+   **설치**. 패키지가 GitHub에서 `plugins` 볼륨에, 가중치가 `data` 볼륨에 받아진다(둘 다 재시작해도 유지).
+   첫 설치는 느림(git clone + onnxruntime/torch 다운로드) — 인터넷 필요.
 2. **모델·언어·프롬프트** — 같은 `/admin`에서 선택(→ `data/state.json` 영속). translator=`ollama`면 옵션 탭에서
    호스트 ollama의 pull된 모델을 드롭다운 선택. 컨테이너는 `host.docker.internal`로 호스트 ollama(`:11434`)에 접속.
 3. **HTTPS** — 호스트 nginx에 [deploy/nginx.conf.example](deploy/nginx.conf.example)을 반영(도메인·인증서 경로만 수정)
