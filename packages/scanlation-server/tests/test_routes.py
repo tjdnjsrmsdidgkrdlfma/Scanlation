@@ -108,6 +108,51 @@ def test_get_plugin_data_lists_engines():
     d = client().get("/get_plugin_data/").json()
     assert "dummy" in d                               # core always ships the dummy engine
     assert d["dummy"]["installed"] is True            # no downloadable assets
+    assert d["dummy"]["installed_package"] is True    # dummy is part of the core
+    # installable engines are listed too (from the registry if pip-installed, else
+    # from the catalog with installed_package=False)
+    for name in ("ctd", "mangaocr", "ollama", "llamacpp"):
+        assert name in d, name
+        assert "installed_package" in d[name]
+
+
+def test_catalog_discovers_engine_sources():
+    from app.plugins_install import catalog
+
+    c = catalog()
+    for name in ("ctd", "mangaocr", "ollama", "llamacpp"):
+        assert name in c, name
+    assert "detector" in c["ctd"].roles
+    assert "recognizer" in c["mangaocr"].roles
+    assert "translator" in c["ollama"].roles
+    assert c["ctd"].package == "scanlation-ctd"
+
+
+def test_install_package_builds_pip_target_command():
+    """The install runner shells out to `pip install --target=<volume> <source>`
+    (verified without actually installing)."""
+    from app import plugins_install as pi
+
+    entry = pi.catalog().get("ollama")
+    assert entry is not None
+    recorded = {}
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    orig = pi.subprocess.run
+    pi.subprocess.run = lambda cmd, **kw: (recorded.__setitem__("cmd", cmd), _Ok())[1]
+    try:
+        pi.install_package(entry)
+    finally:
+        pi.subprocess.run = orig
+
+    cmd = recorded["cmd"]
+    assert cmd[1:5] == ["-m", "pip", "install", "--target"]
+    assert str(pi.plugins_dir()) in cmd
+    assert cmd[-1] == str(entry.source)
 
 
 def test_manage_plugins_install():
@@ -130,6 +175,19 @@ def test_get_settings_shape():
     det = {e["name"]: e for e in d["engines"]["detector"]}
     assert "dummy" in det and "num_boxes" in det["dummy"]["schema"]
     assert det["dummy"]["schema"]["num_boxes"]["type"] == "int"
+
+
+def test_get_settings_merges_catalog():
+    """Installable-but-not-installed engines are merged in from the catalog so the
+    admin can install them; every entry carries the installed_package flag."""
+    d = client().get("/get_settings/").json()
+    names = set()
+    for role in ("detector", "recognizer", "translator"):
+        for e in d["engines"][role]:
+            names.add(e["name"])
+            assert "installed_package" in e
+    for name in ("ctd", "mangaocr", "ollama", "llamacpp"):
+        assert name in names, name
 
 
 def test_get_translator_models_shape():
@@ -190,8 +248,11 @@ TESTS = [
     test_set_models_validates,
     test_set_lang_validates,
     test_get_plugin_data_lists_engines,
+    test_catalog_discovers_engine_sources,
+    test_install_package_builds_pip_target_command,
     test_manage_plugins_install,
     test_get_settings_shape,
+    test_get_settings_merges_catalog,
     test_get_translator_models_shape,
     test_set_options_persists_and_clears,
     test_prompt_select_save_delete,

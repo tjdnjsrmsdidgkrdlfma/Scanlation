@@ -1,14 +1,17 @@
 """Plugin listing/management.
 
-/get_plugin_data/ lists every discovered engine (deduped by name). v1 ships all
-engines built-in, so /manage_plugins/ is a success no-op (runtime pip install of
-plugins is out of v1 scope).
+``/get_plugin_data/`` lists every engine — both the ones already installed
+(discovered via entry_points) and the ones merely *installable* (their source
+ships in the image but the package isn't pip-installed yet). ``/manage_plugins/``
+installs an engine: pip-install its package into the plugins volume if missing
+(so its heavy backend deps land only now), then download its weights.
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
 from .. import __version__
+from ..plugins_install import catalog, install_engine
 from ..registry import registry
 from ..schemas import ManagePluginsRequest
 
@@ -18,6 +21,7 @@ router = APIRouter()
 @router.get("/get_plugin_data/")
 def get_plugin_data() -> dict:
     resp: dict = {}
+    # installed (pip-present) engines, discovered via entry_points
     for role, mapping in registry.all_classes().items():
         for name, cls in mapping.items():
             if name in resp:  # dedupe shared names (e.g. 'dummy' in every role)
@@ -32,31 +36,36 @@ def get_plugin_data() -> dict:
                 "warning": getattr(cls, "warning", None),
                 "description": getattr(cls, "description", ""),
                 "version": __version__,
-                "installed": installed,
+                "installed": installed,          # weights present?
+                "installed_package": True,       # pip package present?
                 "roles": [role],
             }
+    # installable-but-not-installed engines (source shipped, package absent)
+    for name, entry in catalog().items():
+        if name in resp:
+            continue
+        resp[name] = {
+            "homepage": None,
+            "warning": None,
+            "description": entry.description,
+            "version": None,
+            "installed": False,
+            "installed_package": False,
+            "roles": list(entry.roles),
+        }
     return resp
 
 
 @router.post("/manage_plugins/")
 def manage_plugins(req: ManagePluginsRequest) -> dict:
-    """Install an engine's resources — the explicit one-click action backing the
-    popup's plugin tab. ``{plugins: {name: true}}`` installs (downloads weights);
-    ``false`` is a no-op (uninstall not in v1)."""
+    """Install engines — the explicit one-click action backing the admin plugin
+    tab. ``{plugins: {name: true}}`` pip-installs the package (if not already) and
+    downloads its weights; ``false`` is a no-op (uninstall not in scope)."""
     try:
         for name, want in req.plugins.items():
             if not want:
                 continue
-            targets = [
-                cls
-                for mapping in registry.all_classes().values()
-                for n, cls in mapping.items()
-                if n == name
-            ]
-            if not targets:
-                raise ValueError(f"unknown plugin: {name}")
-            for cls in targets:
-                cls().install()
+            install_engine(name)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)[:200])
     return {"status": "success"}

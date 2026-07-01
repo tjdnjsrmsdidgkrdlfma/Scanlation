@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 
 from .. import __version_array__
 from scanlation_sdk.context import LANGUAGES
+from ..plugins_install import catalog
 from ..prompts import BUILTIN_PROMPTS
 from ..registry import registry
 from ..schemas import SavePromptRequest, SelectPromptRequest, SetOptionsRequest
@@ -37,6 +38,11 @@ def _serialize_schema(cls) -> dict:
 
 
 def _engine_entries(role: str) -> list[dict]:
+    """Engines for a role, both installed (pip-present, from the registry) and
+    merely installable (source shipped, package not yet pip-installed — from the
+    catalog). ``installed_package`` distinguishes the two; ``installed`` = weights.
+    Only ``installed_package`` engines are selectable as models (they're in the
+    registry); catalog-only ones appear just in the plugin tab to be installed."""
     entries = []
     for name in registry.names(role):
         cls = registry.get_class(role, name)
@@ -51,8 +57,24 @@ def _engine_entries(role: str) -> list[dict]:
             "warning": getattr(cls, "warning", None),
             "homepage": getattr(cls, "homepage", None),
             "installed": installed,
+            "installed_package": True,
             "schema": _serialize_schema(cls),
             "options": dict(state.selection.options.get(name, {})),
+        })
+    installed_names = {e["name"] for e in entries}
+    for name, entry in catalog().items():
+        if name in installed_names or role not in entry.roles:
+            continue
+        entries.append({
+            "name": name,
+            "display_name": name,          # no class yet; rich meta arrives once installed
+            "description": entry.description,
+            "warning": None,
+            "homepage": None,
+            "installed": False,
+            "installed_package": False,
+            "schema": {},
+            "options": {},
         })
     return entries
 

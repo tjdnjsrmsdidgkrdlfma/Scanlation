@@ -35,9 +35,11 @@ const I18N = {
     "options.hint": "선택된 엔진의 옵션 (예: TSL 모델 태그)",
     "options.none": "설정 가능한 옵션이 없습니다.",
     "plugins.h2": "플러그인 설치",
-    "plugins.hint": "가중치/모델 원클릭 설치",
+    "plugins.hint": "패키지 + 가중치 원클릭 설치",
     "plugins.installed": "설치됨",
     "plugins.install": "설치",
+    "plugins.installWeights": "가중치 설치",
+    "plugins.notInstalledPkg": "패키지 미설치",
     "field.default": "(기본값)",
     "field.defaultPrefix": "기본",
     "field.pickModel": "— 모델 선택 —",
@@ -55,7 +57,7 @@ const I18N = {
     "confirm.deletePrompt": "커스텀 프롬프트 \"{name}\" 삭제?",
     "toast.deleted": "\"{name}\" 삭제됨",
     "toast.optionsSaved": "{engine} 옵션 저장됨",
-    "toast.installing": "{name} 설치 중… (가중치 다운로드)",
+    "toast.installing": "{name} 설치 중… (패키지 + 가중치, 오래 걸릴 수 있음)",
     "toast.installed": "{name} 설치 완료",
     "toast.installResult": "{name} 결과: {status}",
     "toast.installFail": "{name} 설치 실패: {msg}",
@@ -85,9 +87,11 @@ const I18N = {
     "options.hint": "Options for the selected engines (e.g. TSL model tag)",
     "options.none": "No configurable options.",
     "plugins.h2": "Plugin installation",
-    "plugins.hint": "One-click install of weights/models",
+    "plugins.hint": "One-click install of package + weights",
     "plugins.installed": "Installed",
     "plugins.install": "Install",
+    "plugins.installWeights": "Install weights",
+    "plugins.notInstalledPkg": "package not installed",
     "field.default": "(default)",
     "field.defaultPrefix": "default",
     "field.pickModel": "— pick a model —",
@@ -105,7 +109,7 @@ const I18N = {
     "confirm.deletePrompt": "Delete custom prompt \"{name}\"?",
     "toast.deleted": "\"{name}\" deleted",
     "toast.optionsSaved": "{engine} options saved",
-    "toast.installing": "Installing {name}… (downloading weights)",
+    "toast.installing": "Installing {name}… (package + weights, may take a while)",
     "toast.installed": "{name} installed",
     "toast.installResult": "{name} result: {status}",
     "toast.installFail": "{name} install failed: {msg}",
@@ -189,7 +193,10 @@ function renderModels() {
   const roles = { detector: "sel-detector", recognizer: "sel-recognizer", translator: "sel-translator" };
   for (const [role, id] of Object.entries(roles)) {
     const sel = $(id);
-    sel.innerHTML = DATA.engines[role].map(engineOption).join("");
+    // Only pip-installed engines are selectable (catalog-only ones aren't in the
+    // registry yet; install them in the plugin tab first).
+    const installed = DATA.engines[role].filter((e) => e.installed_package !== false);
+    sel.innerHTML = installed.map(engineOption).join("");
     sel.value = DATA.selection[role];
   }
 }
@@ -325,17 +332,24 @@ function renderPlugins() {
     }
   }
   const rows = Object.values(byName).map((e) => {
-    const badge = e.installed
-      ? `<span class="pill pill-ok">${t("plugins.installed")}</span>`
-      : `<button class="btn sm primary" data-install="${e.name}">${t("plugins.install")}</button>`;
+    // Two install layers: package (pip) then weights. Show the next needed step.
+    let action;
+    if (e.installed_package === false) {
+      action = `<button class="btn sm primary" data-install="${e.name}">${t("plugins.install")}</button>`;
+    } else if (!e.installed) {
+      action = `<button class="btn sm primary" data-install="${e.name}">${t("plugins.installWeights")}</button>`;
+    } else {
+      action = `<span class="pill pill-ok">${t("plugins.installed")}</span>`;
+    }
+    const pkgTag = e.installed_package === false ? ` <span class="proles">${t("plugins.notInstalledPkg")}</span>` : "";
     const warn = e.warning ? `<div class="pwarn">⚠ ${e.warning}</div>` : "";
     return `<div class="plugin">
         <div class="meta">
-          <div class="pname">${e.display_name} <span class="proles">${e.roles.join(", ")}</span></div>
+          <div class="pname">${e.display_name} <span class="proles">${e.roles.join(", ")}</span>${pkgTag}</div>
           <div class="pdesc">${e.description || ""}</div>
           ${warn}
         </div>
-        ${badge}
+        ${action}
       </div>`;
   });
   $("plugins").innerHTML = rows.join("");

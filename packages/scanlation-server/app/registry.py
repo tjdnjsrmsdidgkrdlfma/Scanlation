@@ -14,6 +14,8 @@ from __future__ import annotations
 from importlib.metadata import entry_points
 from typing import Any
 
+from .plugins_install import ensure_on_path
+
 ROLES: dict[str, str] = {
     "detector": "scanlation.detectors",
     "recognizer": "scanlation.recognizers",
@@ -38,6 +40,13 @@ class Registry:
                     self._classes[role][ep.name] = ep.load()
                 except Exception:  # noqa: BLE001 - a broken/absent plugin must not kill discovery
                     pass
+
+    def rediscover(self) -> None:
+        """Re-scan entry_points after a package is pip-installed at runtime (the
+        admin plugin installer). Clears the class map and rebuilds it; already
+        loaded instances are kept so an in-use engine isn't disturbed."""
+        self._classes = {r: {} for r in ROLES}
+        self._discover()
 
     # --- queries (no instantiation) ---
     def names(self, role: str) -> list[str]:
@@ -67,4 +76,5 @@ class Registry:
             inst.unload()
 
 
+ensure_on_path()  # volume-installed engine packages are importable before discovery
 registry = Registry()
