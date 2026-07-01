@@ -65,16 +65,26 @@ def mask_to_regions(
     orig_h: int,
     *,
     thresh: float = 0.3,
-    min_area: int = 16,
+    min_area: int = 200,
+    min_side: int = 12,
     unclip_ratio: float = 1.2,
     merge_px: int = 0,
+    merge_aspect: float = 1.0,
 ) -> list[Region]:
     """Convert a float mask (letterboxed coords) to original-pixel Regions.
 
     ``merge_px`` morphologically closes the binary mask first, bridging the
     gaps between adjacent glyphs so a text line/bubble becomes ONE region
     instead of one-region-per-character (manga-ocr needs whole lines, not
-    single characters). 0 disables merging.
+    single characters). 0 disables merging. ``merge_aspect`` makes the close
+    kernel taller than wide (>1) so glyphs bridge *along* a vertical JP column
+    without also fusing neighbouring columns into one blob.
+
+    Noise (SFX shards, ellipses, stray hearts) is dropped by two floors applied
+    in **original pixels** (resolution-independent, unlike the old det-grid
+    area): ``min_side`` on the rotated rect's short side — the single best
+    discriminator, since real text lines are never hairline-thin — and
+    ``min_area`` as an area backstop.
     """
     pad_w, pad_h = pad
     binary = (mask >= thresh).astype(np.uint8) * 255
@@ -82,25 +92,30 @@ def mask_to_regions(
         binary = binary[..., 0]
 
     if merge_px and merge_px > 0:
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (merge_px, merge_px))
+        kw = max(1, int(round(merge_px)))
+        kh = max(1, int(round(merge_px * (merge_aspect if merge_aspect > 0 else 1.0))))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kw, kh))
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
+    inv = 1.0 / ratio if ratio else 1.0
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     regions: list[Region] = []
     for cnt in contours:
-        if cv2.contourArea(cnt) < min_area:
-            continue
         rect = cv2.minAreaRect(cnt)               # ((cx,cy),(w,h),angle)
+        (_, _), (rw, rh), angle = rect
+        # rect dims in original pixels (ratio scales; letterbox pad only offsets)
+        ow, oh = rw * inv, rh * inv
+        if min(ow, oh) < min_side or (ow * oh) < min_area:
+            continue
         quad = cv2.boxPoints(rect).astype(np.float32)
         if unclip_ratio and unclip_ratio > 0:
             quad = _unclip(quad, unclip_ratio - 1.0)
 
         # map letterboxed -> original pixels
         quad = quad.copy()
-        quad[:, 0] = np.clip((quad[:, 0] - pad_w) / ratio, 0, orig_w - 1)
-        quad[:, 1] = np.clip((quad[:, 1] - pad_h) / ratio, 0, orig_h - 1)
+        quad[:, 0] = np.clip((quad[:, 0] - pad_w) * inv, 0, orig_w - 1)
+        quad[:, 1] = np.clip((quad[:, 1] - pad_h) * inv, 0, orig_h - 1)
 
-        (_, _), (rw, rh), angle = rect
         vertical = rh > rw  # taller than wide -> likely vertical JP line
         regions.append(Region.from_quad(quad, angle=float(angle), vertical=bool(vertical)))
     return regions

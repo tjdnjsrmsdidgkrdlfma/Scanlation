@@ -47,9 +47,11 @@ class CTDDetector(EngineBase):
     OPTION_SCHEMA = {
         "det_size": {"type": int, "default": 1024, "description": "Square inference size (letterboxed)."},
         "mask_threshold": {"type": float, "default": 0.3, "description": "Mask binarization threshold."},
-        "min_area": {"type": int, "default": 16, "description": "Drop mask blobs smaller than this (px^2)."},
+        "min_area": {"type": int, "default": 200, "description": "Drop boxes smaller than this (original px^2)."},
+        "min_side": {"type": int, "default": 12, "description": "Drop boxes whose short side is under this (original px) — cuts SFX shards/ellipses."},
         "unclip_ratio": {"type": float, "default": 1.2, "description": "Dilate quads outward (1.0 = none)."},
-        "merge_px": {"type": int, "default": 13, "description": "Morph-close kernel (mask px) to merge glyphs into lines/bubbles; 0 = per-character."},
+        "merge_px": {"type": int, "default": 16, "description": "Morph-close kernel (mask px) to merge glyphs into lines/bubbles; 0 = per-character."},
+        "merge_aspect": {"type": float, "default": 1.7, "description": "Merge kernel height/width (>1 merges down a vertical JP column, keeps columns apart)."},
     }
     SUPPORTED_SRC = ["ja", "en", "zh", "ko"]
 
@@ -178,7 +180,9 @@ class CTDDetector(EngineBase):
         return decode.mask_to_regions(
             mask, ratio, pad, orig_w, orig_h,
             thresh=float(options.get("mask_threshold", 0.3)),
-            min_area=int(options.get("min_area", 16)),
+            min_area=int(options.get("min_area", 200)),
+            min_side=int(options.get("min_side", 12)),
             unclip_ratio=float(options.get("unclip_ratio", 1.2)),
-            merge_px=int(options.get("merge_px", 13)),
+            merge_px=int(options.get("merge_px", 16)),
+            merge_aspect=float(options.get("merge_aspect", 1.7)),
         )

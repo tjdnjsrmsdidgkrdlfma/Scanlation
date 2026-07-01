@@ -34,6 +34,22 @@ const I18N = {
     "options.h2": "엔진 옵션",
     "options.hint": "선택된 엔진의 옵션 (예: TSL 모델 태그)",
     "options.none": "설정 가능한 옵션이 없습니다.",
+    // engine option descriptions (ko override of the server's English schema desc)
+    "opt.temperature": "샘플링 온도 (0 = 결정적)",
+    "opt.seed": "난수 시드",
+    "opt.top_p": "누클리어스 샘플링 p",
+    "opt.ctd.det_size": "정사각 추론 크기 (레터박스)",
+    "opt.ctd.mask_threshold": "마스크 이진화 임계값",
+    "opt.ctd.min_area": "이보다 작은 박스 제거 (원본 px²)",
+    "opt.ctd.min_side": "짧은 변이 이보다 얇은 박스 제거 (원본 px) — SFX 조각·말줄임표 컷",
+    "opt.ctd.unclip_ratio": "쿼드를 바깥으로 팽창 (1.0 = 안 함)",
+    "opt.ctd.merge_px": "글자를 줄/말풍선으로 병합하는 모폴로지 커널 (마스크 px); 0 = 글자별",
+    "opt.ctd.merge_aspect": "병합 커널 세로/가로 비 (>1이면 세로 컬럼 방향으로 병합, 컬럼끼리 유지)",
+    "opt.ollama.model": "ollama 모델 태그 (예: gemma4:31b). 필수 — /admin에서 선택",
+    "opt.ollama.num_ctx": "KV 캐시 컨텍스트 창 (번역 입력은 짧음)",
+    "opt.ollama.num_gpu": "GPU로 오프로드할 레이어 수",
+    "opt.llamacpp.model": "모델 id (서버 /v1/models). 필수 — /admin에서 선택",
+    "opt.llamacpp.max_tokens": "생성 최대 토큰 수",
     "plugins.h2": "플러그인 설치",
     "plugins.hint": "패키지 + 가중치 원클릭 설치",
     "plugins.installed": "설치됨",
@@ -242,7 +258,15 @@ function syncPromptEditor() {
 function findEngine(role, name) {
   return DATA.engines[role].find((e) => e.name === name);
 }
-function fieldInput(opt, spec, value) {
+// Localized option description: `opt.<engine>.<key>` then a generic `opt.<key>`
+// override from I18N[LANG], else the server's (English) schema description. Only
+// ko carries overrides, so en falls straight through to the server string.
+function optDesc(engine, opt, fallback) {
+  const m = I18N[LANG];
+  const v = m && (m["opt." + engine + "." + opt] || m["opt." + opt]);
+  return v || fallback || "";
+}
+function fieldInput(engine, opt, spec, value) {
   const type = spec.type;
   const has = value !== undefined && value !== null;
   if (type === "bool") {
@@ -253,7 +277,7 @@ function fieldInput(opt, spec, value) {
   const step = type === "float" ? ` step="any"` : "";
   const val = has ? String(value) : "";
   const ph = spec.default === "" || spec.default === undefined ? t("field.default") : `${t("field.defaultPrefix")}: ${spec.default}`;
-  return `<label>${opt} <span class="desc">${spec.description || ""}</span>
+  return `<label>${opt} <span class="desc">${optDesc(engine, opt, spec.description)}</span>
     <input type="${inputType}"${step} data-opt="${opt}" data-type="${type}" value="${val}" placeholder="${ph}"/></label>`;
 }
 function optBlock(role, e) {
@@ -262,12 +286,12 @@ function optBlock(role, e) {
   let fields = `<p class="opt-empty">${t("options.none")}</p>`;
   if (keys.length) {
     fields = `<div class="opt-fields">` +
-      keys.map((k) => fieldInput(k, schema[k], e.options[k])).join("") +
+      keys.map((k) => fieldInput(e.name, k, schema[k], e.options[k])).join("") +
       `</div><button class="btn primary sm" data-save-engine="${e.name}">${t("btn.save")}</button>`;
   }
   return `<div class="opt-block" data-engine="${e.name}">
       <span class="role">${role}</span>
-      <h3>${e.display_name} <span class="hint">${e.name}</span></h3>
+      <h3>${e.display_name}</h3>
       ${fields}
     </div>`;
 }
