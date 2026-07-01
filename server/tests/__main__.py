@@ -10,7 +10,6 @@ import sys
 
 from tests import (
     test_contracts,
-    test_ctd_decode,
     test_geometry,
     test_llamacpp,
     test_ollama,
@@ -22,7 +21,6 @@ from tests.helpers import run
 MODULES = [
     test_contracts,
     test_geometry,
-    test_ctd_decode,
     test_pipeline,
     test_routes,
     test_ollama,

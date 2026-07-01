@@ -6,7 +6,7 @@ import math
 import cv2
 import numpy as np
 
-from plugins.detector_ctd.decode import letterbox, mask_to_regions
+from scanlation_ctd.decode import letterbox, mask_to_regions
 
 
 def _rotated_quad(cx, cy, w, h, deg):
@@ -59,6 +59,6 @@ TESTS = [
 if __name__ == "__main__":
     import sys
 
-    from tests.helpers import run
+    from scanlation_sdk.testing import run
 
     sys.exit(run(TESTS, "test_ctd_decode"))

@@ -16,18 +16,19 @@ from PIL import Image
 def _model_available() -> bool:
     if os.environ.get("SCANLATION_CTD_MODEL"):
         return True
-    from app.config import settings
+    from scanlation_sdk.context import context
 
-    d = settings.models_dir / "ctd"
+    d = context.models_dir / "ctd"
     return d.is_dir() and any(d.glob("*.onnx"))
 
 
 def test_ctd_runs_without_crashing():
     if not _model_available():
         return "SKIP: CTD onnx weights not present"
-    from app.registry import registry
+    from scanlation_ctd.plugin import CTDDetector
 
-    detector = registry.get("detector", "ctd")
+    detector = CTDDetector()
+    detector.load()
     img = Image.new("RGB", (800, 1200), (255, 255, 255))
     regions = detector.detect(img, {})
     assert isinstance(regions, list)
@@ -36,9 +37,10 @@ def test_ctd_runs_without_crashing():
 def test_ctd_detects_text_on_fixture():
     if not (_model_available() and os.environ.get("SCANLATION_CTD_FIXTURE")):
         return "SKIP: needs weights + SCANLATION_CTD_FIXTURE manga page"
-    from app.registry import registry
+    from scanlation_ctd.plugin import CTDDetector
 
-    detector = registry.get("detector", "ctd")
+    detector = CTDDetector()
+    detector.load()
     img = Image.open(os.environ["SCANLATION_CTD_FIXTURE"]).convert("RGB")
     regions = detector.detect(img, {})
     assert len(regions) > 0
@@ -51,6 +53,6 @@ TESTS = [test_ctd_runs_without_crashing, test_ctd_detects_text_on_fixture]
 if __name__ == "__main__":
     import sys
 
-    from tests.helpers import run
+    from scanlation_sdk.testing import run
 
     sys.exit(run(TESTS, "test_ctd (slow)"))

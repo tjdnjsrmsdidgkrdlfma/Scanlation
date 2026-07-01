@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from app.config import settings
+from scanlation_sdk.context import context
 from scanlation_sdk.contracts import EngineBase, Region
 from . import decode
 
@@ -62,7 +62,7 @@ class CTDDetector(EngineBase):
     DEFAULT_URL = "https://huggingface.co/mayocream/comic-text-detector-onnx/resolve/main/comic-text-detector.onnx?download=true"
 
     def _ctd_dir(self) -> Path:
-        return settings.models_dir / "ctd"
+        return context.models_dir / "ctd"
 
     def is_installed(self) -> bool:
         import os
@@ -103,7 +103,7 @@ class CTDDetector(EngineBase):
         )
 
     def _providers(self) -> list[str]:
-        preferred = _PROVIDERS.get(settings.device.lower())
+        preferred = _PROVIDERS.get(context.device.lower())
         order = []
         if preferred:
             order.append(preferred)
