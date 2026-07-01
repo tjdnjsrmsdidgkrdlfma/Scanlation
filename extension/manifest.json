@@ -1,5 +1,5 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 2,
   "name": "Scanlation",
   "version": "0.1.0",
   "description": "In-place manga OCR + translation overlay. Works with the Scanlation server.",
@@ -8,17 +8,26 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "action": {
-    "default_title": "Scanlation",
+  "browser_action": {
+    "default_title": "Scanlation — settings",
     "default_popup": "popup.html",
     "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png" }
   },
-  "background": {
-    "service_worker": "src/service-worker.js",
-    "scripts": ["src/service-worker.js"]
+  "page_action": {
+    "default_title": "Scanlation: click to translate this tab",
+    "default_icon": { "16": "icons/icon-off16.png", "48": "icons/icon-off48.png" },
+    "show_matches": ["http://*/*", "https://*/*", "file:///*"]
   },
-  "permissions": ["activeTab", "scripting", "storage", "tabs", "contextMenus"],
-  "host_permissions": ["<all_urls>"],
+  "background": {
+    "scripts": ["src/background.js"],
+    "persistent": false
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "tabs",
+    "<all_urls>"
+  ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

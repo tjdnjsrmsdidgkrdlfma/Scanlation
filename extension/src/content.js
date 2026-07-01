@@ -310,6 +310,12 @@
     tracked.length = 0;
   }
 
+  // Tell the background page our on/off state so it can sync the page_action
+  // (address-bar) icon — whether toggled from that icon or the popup.
+  function reportState() {
+    try { ext.runtime.sendMessage({ type: "state", enabled }); } catch (e) { /* no background */ }
+  }
+
   function enable() {
     if (enabled) return;
     enabled = true;
@@ -319,6 +325,7 @@
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("resize", onResize, { passive: true });
+    reportState();
   }
 
   function disable() {
@@ -327,6 +334,7 @@
     if (observer) { observer.disconnect(); observer = null; }
     window.removeEventListener("resize", onResize);
     clearAll();
+    reportState();
   }
 
   let resizeTimer = null;
@@ -340,6 +348,7 @@
     switch (msg && msg.type) {
       case "enable": enable(); break;
       case "disable": disable(); break;
+      case "toggle": (enabled ? disable() : enable()); break;
       case "set-endpoint": cfg.endpoint = msg.endpoint; break;
       case "set-show-translated": cfg.showTranslated = !!msg.value; retext(); break;
       case "set-font-scale": cfg.fontScale = msg.value || 1; tracked.forEach(sizeFonts); break;
