@@ -118,8 +118,7 @@ const LANG_KEY = "scan_admin_lang";
 function initLang() {
   let saved = null;
   try { saved = localStorage.getItem(LANG_KEY); } catch (_) { /* private mode */ }
-  if (saved === "ko" || saved === "en") return saved;
-  return (navigator.language || "").toLowerCase().startsWith("ko") ? "ko" : "en";
+  return (saved === "ko" || saved === "en") ? saved : "en"; // English is the default
 }
 let LANG = initLang();
 

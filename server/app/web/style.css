@@ -63,12 +63,12 @@ body {
 .langtoggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .langopt {
   background: none; border: none; color: var(--muted);
-  padding: 7px 12px; font: inherit; font-size: 12px; font-weight: 600;
+  padding: 5px 10px; font: inherit; font-size: 12px; font-weight: 600;
   cursor: pointer; white-space: nowrap;
 }
 .langopt + .langopt { border-left: 1px solid var(--line); }
 .langopt:hover { color: var(--txt); }
-.langopt.active { background: var(--accent2); color: #fff; cursor: default; }
+.langopt.active { background: var(--line); color: var(--txt); cursor: default; }
 
 h1 { margin: 0; font-size: 18px; font-weight: 650; }
 h1 .muted { color: var(--muted); font-weight: 400; }
