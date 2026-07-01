@@ -82,6 +82,21 @@ def get_settings() -> dict:
     }
 
 
+@router.get("/get_translator_models/")
+def get_translator_models(engine: str | None = None) -> dict:
+    """Model tags installed on a translator's backend (ollama /api/tags,
+    llamacpp /v1/models), so the admin 'model' field can offer a picker.
+    Defaults to the active translator; [] if unreachable or not applicable."""
+    name = engine or state.selection.translator
+    if not registry.has("translator", name):
+        return {"models": []}
+    try:
+        models = registry.get_class("translator", name)().list_models()
+    except Exception:  # noqa: BLE001
+        models = []
+    return {"models": models}
+
+
 @router.post("/set_options/")
 def set_options(req: SetOptionsRequest) -> dict:
     """Persist per-engine option overrides. Engine must exist in some role."""

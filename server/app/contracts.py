@@ -77,6 +77,12 @@ class EngineBase:
         downloadable assets (dummy, external services) stay True."""
         return True
 
+    def list_models(self) -> list[str]:
+        """Model tags/names selectable from this engine's backend, for the admin
+        model picker (e.g. an LLM translator listing its server's pulled models).
+        [] = not applicable or the backend couldn't be reached; never raises."""
+        return []
+
     def install(self) -> None:
         """Fetch/prepare local resources — the explicit 'install' action (one-click
         from the popup / manage_plugins, or tools/install.py). No-op by default;

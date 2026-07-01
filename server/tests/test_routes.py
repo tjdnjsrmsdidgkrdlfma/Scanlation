@@ -123,6 +123,14 @@ def test_get_settings_shape(client):
     assert tr["ollama"]["schema"]["model"]["type"] == "str"
 
 
+def test_get_translator_models_shape(client):
+    # active translator is dummy (no backend) -> empty list, never errors
+    d = client.get("/get_translator_models/").json()
+    assert isinstance(d["models"], list) and d["models"] == []
+    # unknown engine -> empty, not a 4xx
+    assert client.get("/get_translator_models/", params={"engine": "nope"}).json()["models"] == []
+
+
 def test_set_options_persists_and_clears(client):
     r = client.post("/set_options/", json={"engine": "ollama", "options": {"model": "gemma-x", "num_ctx": 1024}})
     assert r.status_code == 200

@@ -56,6 +56,17 @@ class LlamaCppTranslator(EngineBase):
         self._client = httpx.Client(timeout=120.0)
         logger.info("llama.cpp translator ready (endpoint=%s model=%s)", self.endpoint, self.model)
 
+    def list_models(self) -> list[str]:
+        """Loaded model ids from `GET {endpoint}/v1/models`. [] if server is down."""
+        try:
+            import httpx
+
+            resp = httpx.get(f"{self.endpoint.rstrip('/')}/v1/models", timeout=4.0)
+            resp.raise_for_status()
+            return sorted(m["id"] for m in resp.json().get("data", []) if m.get("id"))
+        except Exception:  # noqa: BLE001 - backend unreachable is expected; picker just stays empty
+            return []
+
     def unload(self) -> None:
         if self._client is not None:
             self._client.close()

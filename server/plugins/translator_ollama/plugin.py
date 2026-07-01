@@ -56,6 +56,17 @@ class OllamaTranslator(EngineBase):
         self._client = httpx.Client(timeout=120.0)
         logger.info("ollama translator ready (endpoint=%s model=%s)", self.endpoint, self.model or "<unset>")
 
+    def list_models(self) -> list[str]:
+        """Pulled model tags from `GET {endpoint}/tags`. [] if ollama is down."""
+        try:
+            import httpx
+
+            resp = httpx.get(f"{self.endpoint}/tags", timeout=4.0)
+            resp.raise_for_status()
+            return sorted(m["name"] for m in resp.json().get("models", []) if m.get("name"))
+        except Exception:  # noqa: BLE001 - backend unreachable is expected; picker just stays empty
+            return []
+
     def unload(self) -> None:
         if self._client is not None:
             self._client.close()
