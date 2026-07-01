@@ -37,6 +37,22 @@ body {
 }
 .app { position: relative; z-index: 1; padding: 16px 16px 18px; }
 
+/* ---- brand -------------------------------------------------------------- */
+.brand { display: flex; align-items: center; gap: 11px; margin-bottom: 16px; }
+.mark {
+  width: 34px; height: 34px; border-radius: 9px;
+  box-shadow: 0 0 0 1px var(--line-soft), 0 4px 14px rgba(0, 0, 0, 0.5),
+              0 0 18px rgba(230, 180, 80, 0.18);
+}
+.brand-txt h1 {
+  margin: 0;
+  font: 700 19px/1 Georgia, "Times New Roman", serif;
+  letter-spacing: 0.3px;
+  background: linear-gradient(92deg, var(--gold-2), #fff 55%, var(--swirl));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.tagline { margin: 3px 0 0; font-size: 10.5px; letter-spacing: 0.4px; color: var(--muted); }
+
 /* ---- fields ------------------------------------------------------------- */
 .field { margin-bottom: 10px; }
 label {
