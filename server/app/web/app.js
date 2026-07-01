@@ -40,7 +40,8 @@ const I18N = {
     "plugins.install": "설치",
     "field.default": "(기본값)",
     "field.defaultPrefix": "기본",
-    "field.modelPlaceholder": "설치된 모델에서 선택하거나 입력 (비우면 기본값)",
+    "field.envDefault": "— 기본값 (실행 env) —",
+    "field.notInstalled": "(미설치)",
     "preset.builtin": "빌트인",
     "preset.builtinEdited": "빌트인·수정됨",
     "preset.custom": "커스텀",
@@ -89,7 +90,8 @@ const I18N = {
     "plugins.install": "Install",
     "field.default": "(default)",
     "field.defaultPrefix": "default",
-    "field.modelPlaceholder": "pick or type an installed model (blank = default)",
+    "field.envDefault": "— default (launch env) —",
+    "field.notInstalled": "(not installed)",
     "preset.builtin": "builtin",
     "preset.builtinEdited": "builtin · edited",
     "preset.custom": "custom",
@@ -270,13 +272,15 @@ function renderEngineOptions() {
     optBlock("translator", findEngine("translator", sel.translator)),
   ];
   $("engine-options").innerHTML = blocks.join("");
-  populateTranslatorModels();  // async: turns the translator 'model' field into a picker
+  setupModelPicker();  // async: swap the translator 'model' text field for a <select>
 }
 
-// Query the active translator backend for its installed models and attach them
-// as a <datalist> to the model field (still free-text / blank = default). If the
-// backend is unreachable the field silently stays a plain text input.
-async function populateTranslatorModels() {
+// Replace the active translator's free-text 'model' field with a <select> of the
+// backend's installed models, plus a "(default — env)" option (value "") that
+// clears the override. A saved value not in the list is kept as an option. If the
+// backend is unreachable (empty list) the plain text input is left untouched, so
+// a tag can still be typed.
+async function setupModelPicker() {
   const engine = DATA.selection.translator;
   const block = document.querySelector(`.opt-block[data-engine="${engine}"]`);
   const input = block && block.querySelector('input[data-opt="model"]');
@@ -285,12 +289,19 @@ async function populateTranslatorModels() {
   try {
     models = (await api(`/get_translator_models/?engine=${encodeURIComponent(engine)}`)).models || [];
   } catch (_) { return; }
-  if (!models.length) return;
-  let dl = $("modellist");
-  if (!dl) { dl = document.createElement("datalist"); dl.id = "modellist"; document.body.appendChild(dl); }
-  dl.innerHTML = models.map((m) => `<option value="${m}"></option>`).join("");
-  input.setAttribute("list", "modellist");
-  input.placeholder = t("field.modelPlaceholder");
+  if (!models.length) return;  // backend down -> keep the text input
+  const current = input.value;
+  const opts = [`<option value="">${t("field.envDefault")}</option>`];
+  if (current && !models.includes(current)) {
+    opts.push(`<option value="${current}">${current} ${t("field.notInstalled")}</option>`);
+  }
+  for (const m of models) opts.push(`<option value="${m}">${m}</option>`);
+  const sel = document.createElement("select");
+  sel.dataset.opt = "model";
+  sel.dataset.type = "str";
+  sel.innerHTML = opts.join("");
+  sel.value = current;
+  input.replaceWith(sel);
 }
 function collectOptions(blockEl) {
   const out = {};
