@@ -128,13 +128,12 @@ button.ghost:hover { border-color: var(--swirl); color: #fff; }
 
 /* ---- status ------------------------------------------------------------- */
 .status {
-  display: flex; align-items: center; gap: 7px;
-  margin-top: 7px; min-height: 15px; font-size: 11px; line-height: 1; color: var(--muted);
+  margin-top: 7px; min-height: 15px; font-size: 11px; line-height: 1.4; color: var(--muted);
 }
 .status::before {
-  content: ""; width: 7px; height: 7px; border-radius: 50%;
-  background: #4a5478; box-shadow: 0 0 6px rgba(74, 84, 120, 0.8); flex: none;
-  position: relative; top: 2px;   /* nudge down to the text's optical centre */
+  content: ""; display: inline-block; vertical-align: middle;
+  width: 7px; height: 7px; margin-right: 7px; border-radius: 50%;
+  background: #4a5478; box-shadow: 0 0 6px rgba(74, 84, 120, 0.8);
 }
 .status.ok { color: var(--ok); }
 .status.ok::before { background: var(--gold); box-shadow: 0 0 8px rgba(230, 180, 80, 0.9); }
