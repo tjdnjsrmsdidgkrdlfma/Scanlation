@@ -52,9 +52,10 @@ async function connect() {
     fillSelect($("lang_src"), d.Languages_src || [], nameOf(d.Languages_src || []), d.lang_src);
     fillSelect($("lang_dst"), d.Languages_dst || [], nameOf(d.Languages_dst || []), d.lang_dst);
 
-    fillSelect($("detector"), d.detectors || [], null, d.detector_selected);
-    fillSelect($("recognizer"), d.recognizers || [], null, d.recognizer_selected);
-    fillSelect($("translator"), d.translators || [], null, d.translator_selected);
+    // labels = display names (detectors_hr…), value stays the engine id
+    fillSelect($("detector"), d.detectors || [], d.detectors_hr, d.detector_selected);
+    fillSelect($("recognizer"), d.recognizers || [], d.recognizers_hr, d.recognizer_selected);
+    fillSelect($("translator"), d.translators || [], d.translators_hr, d.translator_selected);
 
     setStatus(`connected · v${(d.version || []).join(".")}`, "ok");
 
