@@ -40,7 +40,7 @@ _PROVIDERS = {
 
 class CTDDetector(EngineBase):
     name = "ctd"
-    display_name = "comic-text-detector (ONNX)"
+    display_name = "comic-text-detector"
     homepage = "https://github.com/dmMaze/comic-text-detector"
     description = "Manga/comic text detector. Segmentation mask -> rotated line quads."
     warning = "Requires an ONNX weight file (SCANLATION_CTD_MODEL or <models>/ctd/*.onnx)."

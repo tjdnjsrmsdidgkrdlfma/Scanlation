@@ -27,7 +27,7 @@ DEFAULT_ENDPOINT = "http://127.0.0.1:11434/api"
 
 class OllamaTranslator(EngineBase):
     name = "ollama"
-    display_name = "Ollama (LLM)"
+    display_name = "Ollama"
     homepage = "https://ollama.com"
     description = "LLM translation via a local ollama server (system-prompted, OCR-error tolerant)."
     warning = "Requires a running ollama server (OLLAMA_ENDPOINT) and a model pulled + selected in /admin."

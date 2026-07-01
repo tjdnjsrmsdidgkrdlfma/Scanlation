@@ -28,7 +28,7 @@ _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 class LlamaCppTranslator(EngineBase):
     name = "llamacpp"
-    display_name = "llama.cpp / OpenAI-compatible"
+    display_name = "llama.cpp"
     homepage = "https://github.com/ggml-org/llama.cpp"
     description = "Translation via an OpenAI-compatible /v1/chat/completions server (llama.cpp Vulkan, vllm, LM Studio...)."
     warning = "Requires a running server (LLAMACPP_ENDPOINT, default http://127.0.0.1:8080) with a model loaded."
