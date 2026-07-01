@@ -1,25 +1,30 @@
 """Runtime plugin (engine) installation — pip-install an engine package on demand.
 
 The core image/venv ships only ``dummy``. Real engines (ctd/mangaocr/ollama/
-llamacpp) are separate pip packages whose *source* sits unbuilt under
-``SCANLATION_ENGINES_SRC`` (Docker: ``/opt/engines``; bare-metal: the repo
-``packages/``), with **zero dependency on the core until installed**. The admin
-"install" button (``POST /manage_plugins/``) calls here to
-``pip install --target=$SCANLATION_PLUGINS_DIR <source>`` — pulling the package
-plus its heavy backend deps (onnxruntime/torch/httpx) into a persistent,
-``sys.path``-ed dir. In Docker that dir is a mounted volume, so installed engines
-survive container recreation; "설치한 패키지 = 탑재 엔진" holds inside the container too.
+llamacpp) are separate pip packages that live in this monorepo but are NOT in the
+core image. The admin "install" button (``POST /manage_plugins/``) pip-installs
+the chosen one into a persistent, ``sys.path``-ed dir (``SCANLATION_PLUGINS_DIR``,
+a mounted volume in Docker) — pulling the package + its heavy backend deps
+(onnxruntime/torch/httpx) only then. "설치한 패키지 = 탑재 엔진" holds inside the
+container too, and the install survives container recreation via the volume.
 
-Two layers, kept distinct:
-  * **package** (this module) — pip-install the plugin code + backend libs.
-  * **weights** (each plugin's ``install()``) — download model files.
-``install_engine()`` does package-then-weights; the registry is re-discovered
-live after a package lands so it appears without a restart.
+Where the package comes from:
+  * default — ``pip install "scanlation-ctd @ git+<repo>@<ref>#subdirectory=
+    packages/scanlation-ctd"`` (SCANLATION_ENGINE_REPO / _REF). No engine code is
+    baked into the image; it's fetched from GitHub at install time.
+  * dev/offline override — if ``SCANLATION_ENGINES_SRC`` points at the local
+    ``packages/`` tree, install from those source dirs instead (no network).
+scanlation-sdk is co-installed the same way (pip can't resolve the local/private
+sdk from an index). manga-ocr steers torch to the CPU wheel index.
 
-Catalog: each engine source dir is discovered by reading its ``pyproject.toml``
-(no import of the not-yet-installed package). ``name``/``description`` come from
-``[project]``; the engine name(s) and role(s) come from the
-``scanlation.<role>`` entry-point groups it declares.
+Two layers, kept distinct: **package** (this module, pip-install) and **weights**
+(each plugin's ``install()``). ``install_engine()`` does package-then-weights and
+re-discovers entry_points live so the engine appears without a restart.
+
+Catalog: the set of *installable* engines is a small static manifest here — it
+can't come from entry_points (those only list *installed* engines) nor from the
+source (the image has none). Installed engines are still discovered purely via
+entry_points in the registry; this manifest only drives the install UI.
 """
 from __future__ import annotations
 
@@ -28,29 +33,43 @@ import os
 import site
 import subprocess
 import sys
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from scanlation_sdk.context import context
 
-# entry-point group (in pyproject) -> our role name.
-_GROUP_TO_ROLE = {
-    "scanlation.detectors": "detector",
-    "scanlation.recognizers": "recognizer",
-    "scanlation.translators": "translator",
-}
+DEFAULT_REPO = "https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git"
 
-# Engine source dirs to ignore in the catalog: the core + sdk are not installable
-# engines (dummy already ships in the core). Only relevant to the bare-metal
-# fallback where SCANLATION_ENGINES_SRC = the whole `packages/` tree.
-_SKIP_PACKAGES = {"scanlation-sdk", "scanlation-server"}
-
-# Per-package extra pip args. manga-ocr pulls torch; the default PyPI linux wheel
-# is the multi-GB CUDA build, so steer it to the CPU index (its `+cpu` local
-# version outranks the plain wheel, so pip prefers it).
-_EXTRA_PIP_ARGS: dict[str, list[str]] = {
-    "scanlation-mangaocr": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
+# The installable engines. name = registry/engine name; package = pip/dist name
+# (and the packages/<package> subdir). Installed engines are found via
+# entry_points; this only lists what /admin can offer to install.
+_CATALOG: dict[str, dict] = {
+    "ctd": {
+        "package": "scanlation-ctd",
+        "roles": ["detector"],
+        "description": "comic-text-detector (ONNX) text-region detector.",
+        "pip_args": [],
+    },
+    "mangaocr": {
+        "package": "scanlation-mangaocr",
+        "roles": ["recognizer"],
+        "description": "manga-ocr Japanese recognizer (needs torch — CPU wheel).",
+        # steer torch to the CPU index (its +cpu local version outranks the plain
+        # PyPI CUDA wheel, so pip prefers it).
+        "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
+    },
+    "ollama": {
+        "package": "scanlation-ollama",
+        "roles": ["translator"],
+        "description": "LLM translation via a local ollama server.",
+        "pip_args": [],
+    },
+    "llamacpp": {
+        "package": "scanlation-llamacpp",
+        "roles": ["translator"],
+        "description": "LLM translation via an OpenAI-compatible /v1 server.",
+        "pip_args": [],
+    },
 }
 
 
@@ -58,39 +77,24 @@ _EXTRA_PIP_ARGS: dict[str, list[str]] = {
 class CatalogEntry:
     name: str                       # engine name = registry key (e.g. "ctd")
     package: str                    # pip/dist name (e.g. "scanlation-ctd")
-    source: Path                    # dir containing pyproject.toml
     description: str = ""
     roles: list[str] = field(default_factory=list)
     pip_args: list[str] = field(default_factory=list)
 
 
-# --- paths ----------------------------------------------------------------
+# --- paths / repo ---------------------------------------------------------
 def plugins_dir() -> Path:
     """Where engine packages are pip-installed (a mounted volume in Docker)."""
     env = os.environ.get("SCANLATION_PLUGINS_DIR")
     return Path(env) if env else context.base_dir / "plugins"
 
 
-def engines_src() -> Path:
-    """Root holding engine *source* dirs. Docker sets SCANLATION_ENGINES_SRC=
-    /opt/engines; bare-metal falls back to the repo `packages/` (this file lives
-    at packages/scanlation-server/app/plugins_install.py, so parents[2]=packages)."""
-    env = os.environ.get("SCANLATION_ENGINES_SRC")
-    if env:
-        return Path(env)
-    return Path(__file__).resolve().parents[2]
+def engine_repo() -> str:
+    return os.environ.get("SCANLATION_ENGINE_REPO", DEFAULT_REPO)
 
 
-def sdk_src() -> Path | None:
-    """The ``scanlation-sdk`` source dir, co-installed with each engine so pip can
-    satisfy the engine's ``scanlation-sdk`` dep from a local path (it's not on any
-    index). SCANLATION_SDK_SRC overrides; else it sits beside the engine sources."""
-    env = os.environ.get("SCANLATION_SDK_SRC")
-    if env:
-        p = Path(env)
-        return p if p.is_dir() else None
-    cand = engines_src() / "scanlation-sdk"
-    return cand if cand.is_dir() else None
+def engine_ref() -> str:
+    return os.environ.get("SCANLATION_ENGINE_REF", "main")
 
 
 def ensure_on_path() -> None:
@@ -107,63 +111,50 @@ def ensure_on_path() -> None:
         site.addsitedir(p)  # appends to sys.path (+ processes any .pth)
 
 
-# --- catalog (installable engines, read without importing them) -----------
+# --- catalog (installable engines) ----------------------------------------
 def catalog() -> dict[str, CatalogEntry]:
-    """Discover installable engines by parsing each source dir's pyproject.toml.
-    Keyed by engine name (the entry-point name, e.g. "ctd")."""
-    out: dict[str, CatalogEntry] = {}
-    root = engines_src()
-    if not root.is_dir():
-        return out
-    for d in sorted(root.iterdir()):
-        pp = d / "pyproject.toml"
-        if not pp.is_file():
-            continue
-        try:
-            data = tomllib.loads(pp.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError):
-            continue
-        proj = data.get("project", {})
-        pkg = proj.get("name", d.name)
-        if pkg in _SKIP_PACKAGES:
-            continue
-        eps = proj.get("entry-points") or {}
-        for group, mapping in eps.items():
-            role = _GROUP_TO_ROLE.get(group)
-            if not role or not isinstance(mapping, dict):
-                continue
-            for epname in mapping:
-                entry = out.get(epname)
-                if entry is None:
-                    out[epname] = CatalogEntry(
-                        name=epname,
-                        package=pkg,
-                        source=d,
-                        description=proj.get("description", ""),
-                        roles=[role],
-                        pip_args=_EXTRA_PIP_ARGS.get(pkg, []),
-                    )
-                elif role not in entry.roles:
-                    entry.roles.append(role)
-    return out
+    """The static manifest of installable engines, keyed by engine name."""
+    return {
+        name: CatalogEntry(
+            name=name,
+            package=spec["package"],
+            description=spec["description"],
+            roles=list(spec["roles"]),
+            pip_args=list(spec["pip_args"]),
+        )
+        for name, spec in _CATALOG.items()
+    }
 
 
 # --- install --------------------------------------------------------------
+def _install_sources(entry: CatalogEntry) -> list[str]:
+    """pip requirement strings for [sdk, engine]. Local source dirs when
+    SCANLATION_ENGINES_SRC points at the ``packages/`` tree (dev/offline); else
+    git+ from the repo (the Docker default — no engine code baked into the image).
+    sdk is co-installed so its (local/private) dep resolves without an index."""
+    src = os.environ.get("SCANLATION_ENGINES_SRC")
+    if src:
+        base = Path(src)
+        eng, sdk = base / entry.package, base / "scanlation-sdk"
+        if eng.is_dir() and sdk.is_dir():
+            return [str(sdk), str(eng)]
+    g = f"git+{engine_repo()}@{engine_ref()}"
+    return [
+        f"scanlation-sdk @ {g}#subdirectory=packages/scanlation-sdk",
+        f"{entry.package} @ {g}#subdirectory=packages/{entry.package}",
+    ]
+
+
 def install_package(entry: CatalogEntry) -> None:
     """pip-install the engine package (+ its deps) into ``plugins_dir()``.
     Raises RuntimeError with pip's stderr tail on failure."""
     target = plugins_dir()
     target.mkdir(parents=True, exist_ok=True)
-    sources = []
-    sdk = sdk_src()
-    if sdk is not None:  # co-install so the engine's scanlation-sdk dep resolves locally
-        sources.append(str(sdk))
-    sources.append(str(entry.source))
     cmd = [
         sys.executable, "-m", "pip", "install",
         "--target", str(target),
         *entry.pip_args,
-        *sources,
+        *_install_sources(entry),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:

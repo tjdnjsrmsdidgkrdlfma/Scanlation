@@ -116,7 +116,7 @@ def test_get_plugin_data_lists_engines():
         assert "installed_package" in d[name]
 
 
-def test_catalog_discovers_engine_sources():
+def test_catalog_lists_engines():
     from app.plugins_install import catalog
 
     c = catalog()
@@ -128,13 +128,15 @@ def test_catalog_discovers_engine_sources():
     assert c["ctd"].package == "scanlation-ctd"
 
 
-def test_install_package_builds_pip_target_command():
-    """The install runner shells out to `pip install --target=<volume> <source>`
-    (verified without actually installing)."""
+def test_install_package_builds_pip_git_command():
+    """Default install shells out to `pip install --target=<vol> <sdk git+> <engine
+    git+>` — no engine code is baked in; it's fetched from the repo. (Verified
+    without actually installing.)"""
+    import os
+
     from app import plugins_install as pi
 
-    entry = pi.catalog().get("ollama")
-    assert entry is not None
+    entry = pi.catalog()["ollama"]
     recorded = {}
 
     class _Ok:
@@ -142,17 +144,23 @@ def test_install_package_builds_pip_target_command():
         stderr = ""
         stdout = ""
 
-    orig = pi.subprocess.run
+    orig_run = pi.subprocess.run
+    orig_src = os.environ.pop("SCANLATION_ENGINES_SRC", None)  # force git mode
     pi.subprocess.run = lambda cmd, **kw: (recorded.__setitem__("cmd", cmd), _Ok())[1]
     try:
         pi.install_package(entry)
     finally:
-        pi.subprocess.run = orig
+        pi.subprocess.run = orig_run
+        if orig_src is not None:
+            os.environ["SCANLATION_ENGINES_SRC"] = orig_src
 
     cmd = recorded["cmd"]
     assert cmd[1:5] == ["-m", "pip", "install", "--target"]
     assert str(pi.plugins_dir()) in cmd
-    assert cmd[-1] == str(entry.source)
+    joined = " ".join(cmd)
+    assert "git+" in joined
+    assert "#subdirectory=packages/scanlation-ollama" in joined  # the engine
+    assert "#subdirectory=packages/scanlation-sdk" in joined     # co-installed sdk
 
 
 def test_manage_plugins_install():
@@ -248,8 +256,8 @@ TESTS = [
     test_set_models_validates,
     test_set_lang_validates,
     test_get_plugin_data_lists_engines,
-    test_catalog_discovers_engine_sources,
-    test_install_package_builds_pip_target_command,
+    test_catalog_lists_engines,
+    test_install_package_builds_pip_git_command,
     test_manage_plugins_install,
     test_get_settings_shape,
     test_get_settings_merges_catalog,

@@ -34,3 +34,8 @@ dummy = "plugins.dummy.plugin:DummyTranslator"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*", "plugins*"]
+
+# Ship the admin SPA (app/web/*.html,js,css) inside the wheel so a non-editable
+# install (Docker) serves /admin. Editable/dev installs read the source directly.
+[tool.setuptools.package-data]
+app = ["web/*"]
