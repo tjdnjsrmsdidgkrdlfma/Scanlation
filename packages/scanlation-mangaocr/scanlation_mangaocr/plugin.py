@@ -12,7 +12,7 @@ from typing import Any
 
 from PIL import Image
 
-from app.config import settings
+from scanlation_sdk.context import context
 from scanlation_sdk.contracts import EngineBase, Region
 
 logger = logging.getLogger("scanlation.mangaocr")
@@ -59,8 +59,8 @@ class MangaOcrRecognizer(EngineBase):
         from manga_ocr import MangaOcr  # lazy: torch + transformers
 
         # force CPU only when the device hint is cpu; rocm/cuda lets torch pick.
-        self._m = MangaOcr(force_cpu=(settings.device.lower() == "cpu"))
-        logger.info("manga-ocr loaded (force_cpu=%s)", settings.device.lower() == "cpu")
+        self._m = MangaOcr(force_cpu=(context.device.lower() == "cpu"))
+        logger.info("manga-ocr loaded (force_cpu=%s)", context.device.lower() == "cpu")
 
     def unload(self) -> None:
         self._m = None
