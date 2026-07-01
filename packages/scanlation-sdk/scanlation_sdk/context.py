@@ -17,9 +17,6 @@ LANGUAGES: dict[str, str] = {
     "ko": "Korean",
     "en": "English",
     "zh": "Chinese",
-    "es": "Spanish",
-    "fr": "French",
-    "de": "German",
 }
 
 # iso1 -> plain language name passed to translators (ollama wants "japanese").
