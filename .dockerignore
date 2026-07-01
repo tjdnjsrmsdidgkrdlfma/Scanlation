@@ -1,0 +1,32 @@
+# Build context = repo root. Keep it lean: only packages/ source is COPYed.
+venv/
+env/
+.git/
+.claude/
+
+# Python caches / build artifacts (editable install regenerates egg-info)
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime data / weights — never bake dev volumes into the image
+packages/**/data/
+packages/**/models/
+packages/**/crops/
+packages/**/samples/
+*.onnx
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Not needed in the server image
+extension/
+deploy/
+*.md
+*.annotated.png
+annotated.png
+.DS_Store
+Thumbs.db

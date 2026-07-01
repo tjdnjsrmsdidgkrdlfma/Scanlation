@@ -1,0 +1,34 @@
+# Scanlation server — single service (core-only image).
+#
+#   docker compose up -d --build
+#   → http://127.0.0.1:4000/admin  (install engines, pick models/langs/prompt)
+#
+# TLS + public exposure are the HOST's job: the container binds 127.0.0.1:4000
+# and the host nginx reverse-proxies your domain to it (see deploy/nginx.conf.example).
+# LLM backends (ollama / llama.cpp) run outside the container; the translator
+# plugins reach them via host.docker.internal.
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scanlation-server
+    container_name: scanlation-server
+    # localhost-only; the host nginx terminates TLS and proxies to this.
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - plugins:/plugins   # runtime-installed engine packages (survive recreation)
+      - data:/data         # state.json, sqlite cache, model weights, HF cache
+    environment:
+      SCANLATION_DEVICE: cpu               # ctd + mangaocr run on CPU here
+      # External LLM backends on the host (ollama on GPU, llama.cpp on Vulkan):
+      OLLAMA_ENDPOINT: http://host.docker.internal:11434/api
+      LLAMACPP_ENDPOINT: http://host.docker.internal:8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach host services from the container (Linux)
+    restart: unless-stopped
+
+volumes:
+  plugins:
+  data:

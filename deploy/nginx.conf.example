@@ -1,0 +1,40 @@
+# Host nginx reverse proxy for the Scanlation server container.
+#
+# The container binds 127.0.0.1:4000 (see docker-compose.yml). Your existing host
+# nginx terminates TLS for your domain and proxies to it — no nginx container, no
+# duplicate certs. Copy into e.g. /etc/nginx/sites-available/scanlation, adjust
+# server_name + cert paths, symlink into sites-enabled, `nginx -t && systemctl reload nginx`.
+
+server {
+    listen 80;
+    server_name scanlation.example.com;
+    # Redirect http -> https (drop if you handle this elsewhere).
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name scanlation.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/scanlation.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/scanlation.example.com/privkey.pem;
+
+    # The extension POSTs base64-encoded manga images; allow large request bodies.
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # First engine load (ONNX / manga-ocr) and LLM translate can be slow.
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+
+# NOTE: there is no auth. Restrict access at this layer if the domain is public
+# (e.g. `allow`/`deny`, HTTP basic auth, or a Cloudflare Access / VPN in front).
