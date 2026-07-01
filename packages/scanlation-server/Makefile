@@ -1,6 +1,6 @@
-# Dev tasks. Uses the repo-root venv (../venv). On Windows w/o make, run the
-# equivalent ../venv/Scripts/python commands directly (see README).
-PY ?= ../venv/Scripts/python
+# Dev tasks. Uses the repo-root venv (../../venv). On Windows w/o make, run the
+# equivalent ../../venv/Scripts/python commands directly (see README).
+PY ?= ../../venv/Scripts/python
 
 .PHONY: test test-ctd test-mangaocr serve viz install
 
@@ -19,5 +19,5 @@ serve:           ## run the API (uvicorn, single worker)
 viz:             ## visualize detection: make viz IMG=page.png
 	$(PY) tools/visualize.py "$(IMG)" --detector "$(or $(DET),ctd)"
 
-install:         ## editable install (registers entry_points)
-	$(PY) -m pip install -e .
+install:         ## editable core (sdk + server; dummy engine only, engines are separate pkgs)
+	$(PY) -m pip install -e ../scanlation-sdk -e .
