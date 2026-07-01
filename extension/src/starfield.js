@@ -19,11 +19,6 @@
 
   const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5; // ~[-1,1]
 
-  // randomized ONCE per popup open (not per resize) so each open looks a little
-  // different, but the band doesn't jump when the popup grows after Connect.
-  const ANG = -0.62 + (Math.random() - 0.5) * 0.5;   // Milky Way tilt
-  const COREF = (Math.random() - 0.5) * 0.26;        // where the bulge sits along it
-
   function resize() {
     const w = window.innerWidth, h = window.innerHeight;
     if (w === W && h === H) return false;
@@ -37,34 +32,13 @@
     baseGrad = ctx.createLinearGradient(0, 0, 0, H);
     baseGrad.addColorStop(0, "#0c1226");
     baseGrad.addColorStop(1, "#070a16");
+    const ang = -0.62;                          // Milky Way tilt
     band = {
-      cx: W * 0.5, cy: H * 0.5, ang: ANG,
-      dx: Math.cos(ANG), dy: Math.sin(ANG),
-      half: Math.min(W, H) * 0.26,              // band half-width (at the bulge)
-      len: Math.hypot(W, H) * 1.2,
+      cx: W * 0.5, cy: H * 0.5, ang,
+      dx: Math.cos(ang), dy: Math.sin(ang),
+      half: Math.min(W, H) * 0.25,              // band half-width
+      len: Math.hypot(W, H) * 1.15,
     };
-    band.core = COREF * band.len;               // bulge position along the band
-    // glow nodes strung along the band: bright wide bulge -> faint thin ends
-    band.glow = [];
-    const K = 7;
-    for (let i = 0; i < K; i++) {
-      const along = (i / (K - 1) - 0.5) * band.len * 0.98;
-      const d = (along - band.core) / (band.len * 0.30);
-      const prof = Math.exp(-d * d);            // 1 at the bulge -> 0 at the ends
-      band.glow.push({
-        x: band.cx + along * band.dx,
-        y: band.cy + along * band.dy,
-        R: band.half * (0.7 + 1.05 * prof),
-        a: 0.04 + 0.17 * prof,
-        col: "150,150,208",
-      });
-    }
-    // a warm accent right at the bulge
-    band.glow.push({
-      x: band.cx + band.core * band.dx,
-      y: band.cy + band.core * band.dy,
-      R: band.half * 1.15, a: 0.13, col: "210,182,126",
-    });
     return true;
   }
 
@@ -81,16 +55,15 @@
     dust = [];
     const m = Math.max(150, Math.min(560, Math.round((W * H) / 300)));
     for (let i = 0; i < m; i++) {
-      const along = band.core + gauss() * band.len * 0.34; // clustered at the bulge, tapering out
-      const d = (along - band.core) / (band.len * 0.30);
-      const prof = Math.exp(-d * d);                       // 1 at bulge -> 0 at ends
-      const perp = gauss() * band.half * (0.4 + 0.65 * prof); // narrower toward the ends
+      const along = (Math.random() - 0.5) * band.len;
+      const u = along / (band.len * 0.5);                          // -1 (end) .. 0 (centre) .. 1
+      const perp = gauss() * band.half * Math.max(0.1, 1 - u * u); // full at centre -> thin at ends
       dust.push({
         x: band.cx + along * band.dx - perp * band.dy,
         y: band.cy + along * band.dy + perp * band.dx,
         r: 0.35 + Math.random() * 0.6,
         c: starColor(),
-        a: (0.24 + Math.random() * 0.38) * (0.6 + 0.55 * prof), // brighter in the bulge
+        a: 0.26 + Math.random() * 0.40,
         vx: drift(), vy: drift(),
       });
     }
@@ -112,15 +85,20 @@
   }
 
   function drawBandGlow() {
+    ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    for (const b of band.glow) {
-      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.R);
-      g.addColorStop(0.0, `rgba(${b.col},${b.a})`);
-      g.addColorStop(0.55, `rgba(${b.col},${b.a * 0.45})`);
-      g.addColorStop(1.0, `rgba(${b.col},0)`);
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, W, H);
-    }
+    ctx.translate(band.cx, band.cy);
+    ctx.rotate(band.ang);
+    const g = ctx.createLinearGradient(0, -band.half, 0, band.half);
+    g.addColorStop(0.0, "rgba(90,110,170,0)");
+    g.addColorStop(0.5, "rgba(154,154,210,0.21)");
+    g.addColorStop(0.62, "rgba(210,182,126,0.15)"); // faint warm core
+    g.addColorStop(1.0, "rgba(90,110,170,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();                            // ellipse -> the band thins toward the ends
+    ctx.ellipse(0, 0, band.len / 2, band.half, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
   }
 
   function dot(p, a) {
