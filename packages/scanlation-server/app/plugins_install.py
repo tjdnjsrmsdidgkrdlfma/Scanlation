@@ -46,12 +46,14 @@ DEFAULT_REPO = "https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git"
 _CATALOG: dict[str, dict] = {
     "ctd": {
         "package": "scanlation-ctd",
+        "display_name": "comic-text-detector",
         "roles": ["detector"],
         "description": "comic-text-detector (ONNX) text-region detector.",
         "pip_args": [],
     },
     "mangaocr": {
         "package": "scanlation-mangaocr",
+        "display_name": "Manga OCR",
         "roles": ["recognizer"],
         "description": "manga-ocr Japanese recognizer (needs torch — CPU wheel).",
         # steer torch to the CPU index (its +cpu local version outranks the plain
@@ -60,12 +62,14 @@ _CATALOG: dict[str, dict] = {
     },
     "ollama": {
         "package": "scanlation-ollama",
+        "display_name": "Ollama",
         "roles": ["translator"],
         "description": "LLM translation via a local ollama server.",
         "pip_args": [],
     },
     "llamacpp": {
         "package": "scanlation-llamacpp",
+        "display_name": "llama.cpp",
         "roles": ["translator"],
         "description": "LLM translation via an OpenAI-compatible /v1 server.",
         "pip_args": [],
@@ -77,6 +81,7 @@ _CATALOG: dict[str, dict] = {
 class CatalogEntry:
     name: str                       # engine name = registry key (e.g. "ctd")
     package: str                    # pip/dist name (e.g. "scanlation-ctd")
+    display_name: str = ""          # human-readable name shown before install
     description: str = ""
     roles: list[str] = field(default_factory=list)
     pip_args: list[str] = field(default_factory=list)
@@ -118,6 +123,7 @@ def catalog() -> dict[str, CatalogEntry]:
         name: CatalogEntry(
             name=name,
             package=spec["package"],
+            display_name=spec.get("display_name") or name,
             description=spec["description"],
             roles=list(spec["roles"]),
             pip_args=list(spec["pip_args"]),

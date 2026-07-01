@@ -32,6 +32,7 @@ def get_plugin_data() -> dict:
             except Exception:  # noqa: BLE001
                 installed = False
             resp[name] = {
+                "display_name": getattr(cls, "display_name", name),
                 "homepage": getattr(cls, "homepage", None),
                 "warning": getattr(cls, "warning", None),
                 "description": getattr(cls, "description", ""),
@@ -45,6 +46,7 @@ def get_plugin_data() -> dict:
         if name in resp:
             continue
         resp[name] = {
+            "display_name": entry.display_name,
             "homepage": None,
             "warning": None,
             "description": entry.description,

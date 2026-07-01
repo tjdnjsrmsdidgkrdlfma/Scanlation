@@ -67,7 +67,7 @@ def _engine_entries(role: str) -> list[dict]:
             continue
         entries.append({
             "name": name,
-            "display_name": name,          # no class yet; rich meta arrives once installed
+            "display_name": entry.display_name,   # friendly name from the catalog (class not loaded yet)
             "description": entry.description,
             "warning": None,
             "homepage": None,
