@@ -56,13 +56,11 @@ async function connect() {
     fillSelect($("recognizer"), d.recognizers || [], null, d.recognizer_selected);
     fillSelect($("translator"), d.translators || [], null, d.translator_selected);
 
-    $("conn").hidden = false;
     setStatus(`connected · v${(d.version || []).join(".")}`, "ok");
 
     await ext.storage.local.set({ endpoint: endpoint() });
     sendActive({ type: "set-endpoint", endpoint: endpoint() });
   } catch (e) {
-    $("conn").hidden = true;
     setStatus("cannot reach server: " + (e.message || e), "err");
   }
 }
