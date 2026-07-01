@@ -322,16 +322,16 @@ cd /path/to/manga && python -m http.server 8001    # 호스트에서
 이미지는 **core만**(dummy 엔진) — 엔진 코드는 이미지에 **아예 없다.** 실엔진은 `/admin`에서 설치할 때
 **GitHub에서 `pip install`**(`git+…#subdirectory=packages/scanlation-<name>`)돼 `plugins` 볼륨에 들어간다.
 "설치한 패키지 = 탑재 엔진"이 컨테이너에서도 그대로. LLM 백엔드(ollama)는 **컨테이너 밖**, HTTPS는
-**호스트 nginx**가 담당(호스트에 `127.0.0.1:4001`만 publish; 컨테이너 내부 uvicorn은 4000).
+**호스트 nginx**가 담당(호스트에 `127.0.0.1:4010`만 publish; 컨테이너 내부 uvicorn은 4000).
 
 > **레포 접근 필요:** 컨테이너엔 git 자격증명이 없으므로 엔진을 받으려면 `SCANLATION_ENGINE_REPO`가
 > **공개 레포**여야 한다(비공개면 토큰 박은 URL 필요). 배포를 고정하려면 `SCANLATION_ENGINE_REF`를 태그로.
 
 ```bash
 docker compose up -d --build                 # core-only 이미지 빌드 + 기동
-curl -s http://127.0.0.1:4001/ | head -c 120 # handshake = dummy만
+curl -s http://127.0.0.1:4010/ | head -c 120 # handshake = dummy만
 ```
-1. **엔진 설치** — `http://127.0.0.1:4001/admin` 플러그인 탭에서 `ctd`·`mangaocr`(+원하면 `ollama`/`llamacpp`)
+1. **엔진 설치** — `http://127.0.0.1:4010/admin` 플러그인 탭에서 `ctd`·`mangaocr`(+원하면 `ollama`/`llamacpp`)
    **설치**. 패키지가 GitHub에서 `plugins` 볼륨에, 가중치가 `data` 볼륨에 받아진다(둘 다 재시작해도 유지).
    첫 설치는 느림(git clone + onnxruntime/torch 다운로드) — 인터넷 필요.
 2. **모델·언어·프롬프트** — 같은 `/admin`에서 선택(→ `data/state.json` 영속). translator=`ollama`면 옵션 탭에서
@@ -343,7 +343,7 @@ curl -s http://127.0.0.1:4001/ | head -c 120 # handshake = dummy만
 > `host.docker.internal`로는 **컨테이너가 못 붙는다**(컨테이너의 127.0.0.1은 자기 자신). 단일 호스트라면
 > compose에 **`network_mode: host`**를 주는 게 제일 깔끔하다(컨테이너가 호스트 네트워크를 그대로 써서
 > `127.0.0.1:11434`에 바로 접속; 이땐 `ports`/`extra_hosts`가 무시되고 uvicorn 바인드 포트가 곧 노출 포트 —
-> 기본 4000, 4001로 노출하려면 Dockerfile `CMD`의 `--port`를 4001로).
+> 기본 4000, 4010으로 노출하려면 Dockerfile `CMD`의 `--port`를 4010으로).
 > 아니면 ollama를 `OLLAMA_HOST=0.0.0.0:11434`로 열어 두면 된다(방화벽 주의).
 
 > LLM을 컨테이너로 옮기고 싶으면 `ollama/ollama:rocm` 이미지를 별도 서비스로 추가하고

@@ -1,11 +1,11 @@
 # Scanlation server — single service (core-only image).
 #
 #   docker compose up -d --build
-#   → http://127.0.0.1:4001/admin  (install engines, pick models/langs/prompt)
+#   → http://127.0.0.1:4010/admin  (install engines, pick models/langs/prompt)
 #
 # The image is core-only: engines are pip-installed from GitHub when you click
 # "install" in /admin (needs a reachable/public SCANLATION_ENGINE_REPO). TLS +
-# public exposure are the HOST's job: the container is published on 127.0.0.1:4001 and the
+# public exposure are the HOST's job: the container is published on 127.0.0.1:4010 and the
 # host nginx reverse-proxies your domain to it (see deploy/nginx.conf.example).
 # LLM backends (ollama / llama.cpp) run outside the container; the translator
 # plugins reach them via host.docker.internal.
@@ -17,9 +17,9 @@ services:
     image: scanlation-server
     container_name: scanlation-server
     # localhost-only; the host nginx terminates TLS and proxies to this.
-    # host 4001 -> container 4000 (uvicorn stays on 4000 inside).
+    # host 4010 -> container 4000 (uvicorn stays on 4000 inside).
     ports:
-      - "127.0.0.1:4001:4000"
+      - "127.0.0.1:4010:4000"
     volumes:
       - plugins:/plugins   # runtime-installed engine packages (survive recreation)
       - data:/data         # state.json, sqlite cache, model weights, HF cache
