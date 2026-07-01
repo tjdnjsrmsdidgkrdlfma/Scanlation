@@ -22,6 +22,7 @@
   function resize() {
     const w = window.innerWidth, h = window.innerHeight;
     if (w === W && h === H) return false;
+    const ow = W, oh = H;
     W = w; H = h;
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     cvs.width = Math.round(W * dpr);
@@ -39,6 +40,15 @@
       half: Math.min(W, H) * 0.25,              // band half-width
       len: Math.hypot(W, H) * 1.15,
     };
+    // On a later resize (e.g. the popup grows when #conn opens after Connect),
+    // rescale the existing sky instead of reseeding — otherwise a whole new set
+    // of stars pops in from the edges a few seconds after opening.
+    if (ow && oh && (dust.length || stars.length)) {
+      const sx = W / ow, sy = H / oh;
+      for (const p of dust) { p.x *= sx; p.y *= sy; }
+      for (const p of stars) { p.x *= sx; p.y *= sy; }
+      return false;
+    }
     return true;
   }
 
@@ -64,6 +74,17 @@
         r: 0.35 + Math.random() * 0.6,
         c: starColor(),
         a: 0.26 + Math.random() * 0.40,
+        vx: drift(), vy: drift(),
+      });
+    }
+    // a very few faint field stars OFF the band, so the empty sky isn't a total void
+    const f = Math.round(m * 0.09);
+    for (let i = 0; i < f; i++) {
+      dust.push({
+        x: Math.random() * W, y: Math.random() * H,
+        r: 0.3 + Math.random() * 0.5,
+        c: starColor(),
+        a: 0.08 + Math.random() * 0.15,
         vx: drift(), vy: drift(),
       });
     }

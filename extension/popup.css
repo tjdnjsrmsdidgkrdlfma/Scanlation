@@ -18,6 +18,8 @@
 
 * { box-sizing: border-box; }
 
+html { margin: 0; background: var(--ink); }  /* kill Firefox's white popup border */
+
 body {
   width: 304px;
   margin: 0;
@@ -64,13 +66,15 @@ input[type="text"], select {
   background: rgba(9, 13, 28, 0.75);
   border: 1px solid var(--line);
   border-radius: 8px;
-  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 input[type="text"]::placeholder { color: #5b6488; }
 input[type="text"]:focus, select:focus {
   outline: none;
   border-color: var(--gold);
-  background: rgba(12, 18, 38, 0.95);
+  /* background-color (not the `background` shorthand) so the select's caret
+     background-image isn't wiped — it was vanishing then sliding back in. */
+  background-color: rgba(12, 18, 38, 0.95);
   box-shadow: 0 0 0 3px rgba(230, 180, 80, 0.15);
 }
 select {
@@ -125,7 +129,7 @@ button.ghost:hover { border-color: var(--swirl); color: #fff; }
 /* ---- status ------------------------------------------------------------- */
 .status {
   display: flex; align-items: center; gap: 7px;
-  margin-top: 7px; min-height: 15px; font-size: 11px; color: var(--muted);
+  margin-top: 7px; min-height: 15px; font-size: 11px; line-height: 1; color: var(--muted);
 }
 .status::before {
   content: ""; width: 7px; height: 7px; border-radius: 50%;
