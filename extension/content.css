@@ -6,6 +6,8 @@
   position: relative;
   display: inline-block;
   line-height: 0; /* avoid extra inline whitespace under the image */
+  isolation: isolate; /* contain the boxes' huge z-index so it can't paint over
+                         the page's fixed/sticky chrome (headers, toolbars) */
 }
 
 .scanlation-box {
