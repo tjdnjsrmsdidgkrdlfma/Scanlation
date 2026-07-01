@@ -1,5 +1,8 @@
-"""Pydantic wire models. Field names/shapes are drop-in compatible with the
-existing ocr_extension client (verified against views.py / API.js / content.js).
+"""Pydantic wire models shared by the server and the bundled MV3 extension.
+
+Engine roles are named detector/recognizer/translator end-to-end (the old
+ocr_extension BOX/OCR/TSL vocabulary was dropped). Per-result item keys
+(ocr/tsl/box) are data fields, not roles, and stay as-is.
 """
 from __future__ import annotations
 
@@ -43,9 +46,9 @@ class SetManualRequest(BaseModel):
 
 # --- /set_models/ ----------------------------------------------------------
 class SetModelsRequest(BaseModel):
-    box_model_id: Optional[str] = None
-    ocr_model_id: Optional[str] = None
-    tsl_model_id: Optional[str] = None
+    detector: Optional[str] = None
+    recognizer: Optional[str] = None
+    translator: Optional[str] = None
 
 
 # --- /set_lang/ ------------------------------------------------------------

@@ -5,10 +5,6 @@
 const $ = (id) => document.getElementById(id);
 let DATA = null; // last /get_settings/ snapshot
 
-// Canonical role labels across the whole UI — match the wire protocol
-// (handshake BOXModels/OCRModels/TSLModels). Language-neutral, so not i18n'd.
-const ROLE_LABEL = { detector: "BOX", recognizer: "OCR", translator: "TSL" };
-
 // --- i18n -----------------------------------------------------------------
 // UI chrome only. Engine metadata (display_name/description/warning/option
 // descriptions) comes from the server already in English, so it isn't keyed
@@ -259,7 +255,7 @@ function optBlock(role, e) {
       `</div><button class="btn primary sm" data-save-engine="${e.name}">${t("btn.save")}</button>`;
   }
   return `<div class="opt-block" data-engine="${e.name}">
-      <span class="role">${ROLE_LABEL[role]}</span>
+      <span class="role">${role}</span>
       <h3>${e.display_name} <span class="hint">${e.name}</span></h3>
       ${fields}
     </div>`;
@@ -301,7 +297,7 @@ function renderPlugins() {
     const warn = e.warning ? `<div class="pwarn">⚠ ${e.warning}</div>` : "";
     return `<div class="plugin">
         <div class="meta">
-          <div class="pname">${e.display_name} <span class="proles">${e.roles.map((r) => ROLE_LABEL[r]).join(", ")}</span></div>
+          <div class="pname">${e.display_name} <span class="proles">${e.roles.join(", ")}</span></div>
           <div class="pdesc">${e.description || ""}</div>
           ${warn}
         </div>
@@ -315,9 +311,9 @@ function renderPlugins() {
 async function saveModels() {
   try {
     await postJSON("/set_models/", {
-      box_model_id: $("sel-detector").value,
-      ocr_model_id: $("sel-recognizer").value,
-      tsl_model_id: $("sel-translator").value,
+      detector: $("sel-detector").value,
+      recognizer: $("sel-recognizer").value,
+      translator: $("sel-translator").value,
     });
     await postJSON("/set_lang/", { lang_src: $("sel-lang_src").value, lang_dst: $("sel-lang_dst").value });
     toast(t("toast.modelsSaved"), "ok");

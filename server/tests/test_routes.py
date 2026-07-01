@@ -1,5 +1,5 @@
-"""Wire-protocol compatibility with the ocr_extension client, all via dummy
-engines (zero model risk). This is the test that proves md5/box/lazy are right.
+"""Wire-protocol tests, all via dummy engines (zero model risk). Proves the
+md5/box/lazy contract and the detector/recognizer/translator field names.
 """
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ def test_handshake_keys(client):
     d = r.json()
     for key in (
         "version", "Languages", "Languages_src", "Languages_dst", "Languages_hr",
-        "BOXModels", "OCRModels", "TSLModels",
-        "box_selected", "ocr_selected", "tsl_selected", "lang_src", "lang_dst",
+        "detectors", "recognizers", "translators",
+        "detector_selected", "recognizer_selected", "translator_selected", "lang_src", "lang_dst",
     ):
         assert key in d, key
-    assert "dummy" in d["BOXModels"]
+    assert "dummy" in d["detectors"]
     assert len(d["Languages"]) == len(d["Languages_hr"])
     assert d["lang_src"] == "ja" and d["lang_dst"] == "ko"
 
@@ -77,17 +77,17 @@ def test_set_manual_translation_wins(client):
 
 def test_get_active_options_shape(client):
     d = client.get("/get_active_options/").json()["options"]
-    assert set(d) == {"box_model", "ocr_model", "tsl_model"}
-    assert d["box_model"]["num_boxes"]["type"] == "int"
-    assert d["box_model"]["num_boxes"]["default"] == 2
+    assert set(d) == {"detector", "recognizer", "translator"}
+    assert d["detector"]["num_boxes"]["type"] == "int"
+    assert d["detector"]["num_boxes"]["default"] == 2
 
 
 def test_set_models_validates(client):
     assert client.post(
         "/set_models/",
-        json={"box_model_id": "dummy", "ocr_model_id": "dummy", "tsl_model_id": "dummy"},
+        json={"detector": "dummy", "recognizer": "dummy", "translator": "dummy"},
     ).status_code == 200
-    assert client.post("/set_models/", json={"box_model_id": "nope"}).status_code == 400
+    assert client.post("/set_models/", json={"detector": "nope"}).status_code == 400
 
 
 def test_set_lang_validates(client):

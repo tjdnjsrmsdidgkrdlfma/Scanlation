@@ -52,9 +52,9 @@ async function connect() {
     fillSelect($("lang_src"), d.Languages_src || [], nameOf(d.Languages_src || []), d.lang_src);
     fillSelect($("lang_dst"), d.Languages_dst || [], nameOf(d.Languages_dst || []), d.lang_dst);
 
-    fillSelect($("box_model"), d.BOXModels || [], null, d.box_selected);
-    fillSelect($("ocr_model"), d.OCRModels || [], null, d.ocr_selected);
-    fillSelect($("tsl_model"), d.TSLModels || [], null, d.tsl_selected);
+    fillSelect($("detector"), d.detectors || [], null, d.detector_selected);
+    fillSelect($("recognizer"), d.recognizers || [], null, d.recognizer_selected);
+    fillSelect($("translator"), d.translators || [], null, d.translator_selected);
 
     $("conn").hidden = false;
     setStatus(`connected · v${(d.version || []).join(".")}`, "ok");
@@ -77,11 +77,11 @@ function wire() {
 
   const setModels = () =>
     post("/set_models/", {
-      box_model_id: $("box_model").value,
-      ocr_model_id: $("ocr_model").value,
-      tsl_model_id: $("tsl_model").value,
+      detector: $("detector").value,
+      recognizer: $("recognizer").value,
+      translator: $("translator").value,
     });
-  ["box_model", "ocr_model", "tsl_model"].forEach((id) => $(id).addEventListener("change", setModels));
+  ["detector", "recognizer", "translator"].forEach((id) => $(id).addEventListener("change", setModels));
 
   $("enable").addEventListener("click", () => sendActive({ type: "enable" }));
   $("disable").addEventListener("click", () => sendActive({ type: "disable" }));

@@ -14,12 +14,7 @@ from ..state import state
 
 router = APIRouter()
 
-# wire role name -> (registry role, schema key)
-_ROLE = {
-    "box_model": ("detector", "box_model_id"),
-    "ocr_model": ("recognizer", "ocr_model_id"),
-    "tsl_model": ("translator", "tsl_model_id"),
-}
+ROLES = ("detector", "recognizer", "translator")
 
 
 def _serialize_schema(cls) -> dict:
@@ -34,15 +29,11 @@ def _serialize_schema(cls) -> dict:
 
 @router.post("/set_models/")
 def set_models(req: SetModelsRequest) -> dict:
-    pairs = [
-        ("detector", req.box_model_id),
-        ("recognizer", req.ocr_model_id),
-        ("translator", req.tsl_model_id),
-    ]
-    for role, name in pairs:
+    for role in ROLES:
+        name = getattr(req, role)
         if name and not registry.has(role, name):
             raise HTTPException(status_code=400, detail=f"unknown {role}: {name}")
-    state.set_models(req.box_model_id, req.ocr_model_id, req.tsl_model_id)
+    state.set_models(req.detector, req.recognizer, req.translator)
     return {}
 
 
@@ -58,12 +49,8 @@ def set_lang(req: SetLangRequest) -> dict:
 @router.get("/get_active_options/")
 def get_active_options() -> dict:
     sel = state.selection
-    selected = {
-        "box_model": ("detector", sel.detector),
-        "ocr_model": ("recognizer", sel.recognizer),
-        "tsl_model": ("translator", sel.translator),
-    }
     res: dict = {}
-    for wire_key, (role, name) in selected.items():
-        res[wire_key] = _serialize_schema(registry.get_class(role, name)) if registry.has(role, name) else {}
+    for role in ROLES:
+        name = getattr(sel, role)
+        res[role] = _serialize_schema(registry.get_class(role, name)) if registry.has(role, name) else {}
     return {"options": res}

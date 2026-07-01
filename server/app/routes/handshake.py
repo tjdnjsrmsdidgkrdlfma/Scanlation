@@ -1,7 +1,7 @@
 """GET / — handshake. Lightweight: lists languages/engines, loads no models.
 
-Keys are byte-for-byte what the ocr_extension client reads (verified against
-ocr_translate views.handshake).
+Engine roles use the same names end-to-end (detector/recognizer/translator);
+the old ocr_extension BOX/OCR/TSL wire vocabulary was dropped.
 """
 from __future__ import annotations
 
@@ -24,12 +24,12 @@ def handshake_payload() -> dict:
         "Languages_src": iso,
         "Languages_dst": iso,
         "Languages_hr": [LANGUAGES[k] for k in iso],
-        "BOXModels": registry.names("detector"),
-        "OCRModels": registry.names("recognizer"),
-        "TSLModels": registry.names("translator"),
-        "box_selected": sel.detector,
-        "ocr_selected": sel.recognizer,
-        "tsl_selected": sel.translator,
+        "detectors": registry.names("detector"),
+        "recognizers": registry.names("recognizer"),
+        "translators": registry.names("translator"),
+        "detector_selected": sel.detector,
+        "recognizer_selected": sel.recognizer,
+        "translator_selected": sel.translator,
         "lang_src": sel.lang_src,
         "lang_dst": sel.lang_dst,
     }

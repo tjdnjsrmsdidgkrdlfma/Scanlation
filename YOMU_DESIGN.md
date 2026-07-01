@@ -37,8 +37,13 @@
 
 ## 2. 검증된 Ground Truth (구현 시 반드시 지킬 것)
 
-### 2.1 확장이 말하는 wire 프로토콜 (drop-in 호환 유지 대상)
+### 2.1 확장이 말하는 wire 프로토콜 (원 설계: drop-in 호환 대상)
 출처: `ocr_translate/ocr_translate/views.py`, `ocr_extension/src/utils/API.js`, `.../content.js`.
+
+> ⚠ **이후 변경됨:** 구 `ocr_extension` drop-in 호환 목표는 폐기했다. 서버·번들 확장 둘 다
+> 이 레포 소유라, 역할 필드를 끝단까지 **detector/recognizer/translator**로 개명했다
+> (`BOXModels→detectors`, `box_selected→detector_selected`, `box_model_id→detector` 등).
+> 결과 아이템 키 `{ocr, tsl, box}`만 데이터 필드로 유지. 아래 표는 원 설계 기록.
 
 | 엔드포인트 | 요청 | 응답 |
 |---|---|---|
