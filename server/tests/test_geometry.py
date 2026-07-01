@@ -58,3 +58,18 @@ def test_zero_area_quad_is_safe():
     region = Region.from_quad([[10, 10], [10, 10], [10, 10], [10, 10]])
     crop = deskew_crop(img, region)
     assert crop.width >= 1 and crop.height >= 1
+
+
+TESTS = [
+    test_order_quad_orders_tl_tr_br_bl,
+    test_axis_aligned_deskew_is_exact_crop,
+    test_rotated_deskew_recovers_upright_size_and_content,
+    test_zero_area_quad_is_safe,
+]
+
+if __name__ == "__main__":
+    import sys
+
+    from tests.helpers import run
+
+    sys.exit(run(TESTS, "test_geometry"))

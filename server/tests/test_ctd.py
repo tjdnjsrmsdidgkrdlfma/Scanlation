@@ -1,16 +1,16 @@
 """CTD smoke test (slow). Skipped unless ONNX weights are present.
 
 Set SCANLATION_CTD_MODEL or drop an .onnx into <models>/ctd/. Provide a real
-manga page via SCANLATION_CTD_FIXTURE to assert region count > 0.
+manga page via SCANLATION_CTD_FIXTURE to assert region count > 0. Not part of
+the fast suite; run on its own (self-skips when weights are absent):
+
+    python -m tests.test_ctd
 """
 from __future__ import annotations
 
 import os
 
-import pytest
 from PIL import Image
-
-pytestmark = pytest.mark.slow
 
 
 def _model_available() -> bool:
@@ -22,8 +22,9 @@ def _model_available() -> bool:
     return d.is_dir() and any(d.glob("*.onnx"))
 
 
-@pytest.mark.skipif(not _model_available(), reason="CTD onnx weights not present")
 def test_ctd_runs_without_crashing():
+    if not _model_available():
+        return "SKIP: CTD onnx weights not present"
     from app.registry import registry
 
     detector = registry.get("detector", "ctd")
@@ -32,11 +33,9 @@ def test_ctd_runs_without_crashing():
     assert isinstance(regions, list)
 
 
-@pytest.mark.skipif(
-    not (_model_available() and os.environ.get("SCANLATION_CTD_FIXTURE")),
-    reason="needs weights + SCANLATION_CTD_FIXTURE manga page",
-)
 def test_ctd_detects_text_on_fixture():
+    if not (_model_available() and os.environ.get("SCANLATION_CTD_FIXTURE")):
+        return "SKIP: needs weights + SCANLATION_CTD_FIXTURE manga page"
     from app.registry import registry
 
     detector = registry.get("detector", "ctd")
@@ -45,3 +44,13 @@ def test_ctd_detects_text_on_fixture():
     assert len(regions) > 0
     for r in regions:
         assert r.polygon.shape == (4, 2)
+
+
+TESTS = [test_ctd_runs_without_crashing, test_ctd_detects_text_on_fixture]
+
+if __name__ == "__main__":
+    import sys
+
+    from tests.helpers import run
+
+    sys.exit(run(TESTS, "test_ctd (slow)"))

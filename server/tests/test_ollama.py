@@ -1,17 +1,15 @@
 """OllamaTranslator unit tests — request shape + parsing, HTTP mocked.
 
 ollama itself runs on a separate (Linux/ROCm) host, so these never hit the
-network: _generate is monkeypatched to capture the request body.
+network: _generate is replaced with a fake that captures the request body.
 """
 from __future__ import annotations
-
-import pytest
 
 from plugins.translator_ollama.plugin import OllamaTranslator
 
 
-@pytest.fixture
-def translator(monkeypatch):
+def _translator() -> OllamaTranslator:
+    """An OllamaTranslator whose _generate is faked; tr._captured holds the body."""
     tr = OllamaTranslator()
     captured: dict = {}
 
@@ -20,12 +18,13 @@ def translator(monkeypatch):
         captured.update(body)
         return {"response": "  안녕하세요  ", "done": True}
 
-    monkeypatch.setattr(tr, "_generate", fake_generate)
+    tr._generate = fake_generate
     tr._captured = captured
     return tr
 
 
-def test_builds_request_from_tuned_config(translator):
+def test_builds_request_from_tuned_config():
+    translator = _translator()
     out = translator.translate("こんにちは", "ja", "ko", {})
     assert out == "안녕하세요"  # response stripped
 
@@ -42,7 +41,8 @@ def test_builds_request_from_tuned_config(translator):
     assert o == {"temperature": 0.0, "seed": 42, "top_p": 1.0, "num_gpu": 31, "num_ctx": 512}
 
 
-def test_options_override(translator):
+def test_options_override():
+    translator = _translator()
     translator.translate("テスト文章です", "ja", "ko", {"num_ctx": 1024, "think": True, "temperature": 0.7})
     body = translator._captured
     assert body["think"] is True
@@ -50,7 +50,7 @@ def test_options_override(translator):
     assert body["options"]["temperature"] == 0.7
 
 
-def test_short_text_skips_model_call(monkeypatch):
+def test_short_text_skips_model_call():
     tr = OllamaTranslator()
     called = False
 
@@ -59,7 +59,21 @@ def test_short_text_skips_model_call(monkeypatch):
         called = True
         return {"response": "x"}
 
-    monkeypatch.setattr(tr, "_generate", fake)
+    tr._generate = fake
     assert tr.translate("あ", "ja", "ko", {}) == "あ"  # <=2 chars returned as-is
     assert tr.translate("  ", "ja", "ko", {}) == ""
     assert called is False
+
+
+TESTS = [
+    test_builds_request_from_tuned_config,
+    test_options_override,
+    test_short_text_skips_model_call,
+]
+
+if __name__ == "__main__":
+    import sys
+
+    from tests.helpers import run
+
+    sys.exit(run(TESTS, "test_ollama"))

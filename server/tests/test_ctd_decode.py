@@ -48,3 +48,17 @@ def test_mask_to_regions_empty_mask_is_empty():
     mask = np.zeros((128, 128), np.float32)
     regions = mask_to_regions(mask, 1.0, (0, 0), 128, 128)
     assert regions == []
+
+
+TESTS = [
+    test_letterbox_is_square_and_invertible,
+    test_mask_to_regions_recovers_rotated_rect,
+    test_mask_to_regions_empty_mask_is_empty,
+]
+
+if __name__ == "__main__":
+    import sys
+
+    from tests.helpers import run
+
+    sys.exit(run(TESTS, "test_ctd_decode"))

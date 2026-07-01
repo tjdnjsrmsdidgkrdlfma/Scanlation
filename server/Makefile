@@ -2,13 +2,16 @@
 # equivalent ../venv/Scripts/python commands directly (see README).
 PY ?= ../venv/Scripts/python
 
-.PHONY: test test-all serve run-cpu viz install
+.PHONY: test test-ctd test-mangaocr serve run-cpu viz install
 
-test:            ## unit tests, no models/GPU
-	$(PY) -m pytest -m "not slow" -q
+test:            ## fast unit suite, no models/GPU (hand-rolled runner)
+	$(PY) -m tests
 
-test-all:        ## include @slow (needs CTD weights)
-	$(PY) -m pytest -q
+test-ctd:        ## CTD model smoke (needs onnx weights; self-skips otherwise)
+	$(PY) -m tests.test_ctd
+
+test-mangaocr:   ## manga-ocr smoke (needs the package; self-skips otherwise)
+	$(PY) -m tests.test_mangaocr
 
 serve:           ## run the API (uvicorn, single worker)
 	$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 4000 --workers 1

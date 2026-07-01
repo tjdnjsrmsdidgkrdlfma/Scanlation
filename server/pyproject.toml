@@ -23,7 +23,6 @@ dependencies = [
 ctd = ["onnxruntime", "pyclipper"]
 # Recognition (P4) and translation (P5) plugins, added in later stages.
 mangaocr = ["manga-ocr"]
-dev = ["pytest"]
 
 # --- Built-in plugin discovery (1-tier entry_points). Third-party plugins
 # declaring the same groups are auto-discovered after `pip install`. A source
@@ -44,9 +43,3 @@ llamacpp = "plugins.translator_llamacpp.plugin:LlamaCppTranslator"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*", "plugins*"]
-
-[tool.pytest.ini_options]
-pythonpath = ["."]
-markers = [
-    "slow: requires real model weights / heavy deps (deselect with -m 'not slow')",
-]

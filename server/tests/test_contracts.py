@@ -36,3 +36,18 @@ def test_dummy_detector_emits_rotated_region():
     assert any(abs(a) > 1.0 for a in angles)  # at least one rotated quad
     for r in regions:
         assert isinstance(r.polygon, np.ndarray) and r.polygon.shape == (4, 2)
+
+
+TESTS = [
+    test_region_from_bbox_shape_and_wire,
+    test_region_from_quad_bbox_is_enclosing,
+    test_dummy_engines_satisfy_protocols,
+    test_dummy_detector_emits_rotated_region,
+]
+
+if __name__ == "__main__":
+    import sys
+
+    from tests.helpers import run
+
+    sys.exit(run(TESTS, "test_contracts"))

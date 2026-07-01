@@ -35,3 +35,16 @@ def test_dummy_pipeline_golden():
         assert len(item["box"]) == 4
         x0, y0, x1, y1 = item["box"]
         assert 0 <= x0 < x1 <= 400 and 0 <= y0 < y1 <= 300
+
+
+TESTS = [
+    test_reading_order_is_right_to_left_top_to_bottom,
+    test_dummy_pipeline_golden,
+]
+
+if __name__ == "__main__":
+    import sys
+
+    from tests.helpers import run
+
+    sys.exit(run(TESTS, "test_pipeline"))

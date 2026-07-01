@@ -1,13 +1,11 @@
 """LlamaCppTranslator unit tests — OpenAI-compatible request shape, HTTP mocked."""
 from __future__ import annotations
 
-import pytest
-
 from plugins.translator_llamacpp.plugin import LlamaCppTranslator
 
 
-@pytest.fixture
-def translator(monkeypatch):
+def _translator() -> LlamaCppTranslator:
+    """A LlamaCppTranslator whose _chat is faked; tr._captured holds the body."""
     tr = LlamaCppTranslator()
     captured: dict = {}
 
@@ -16,12 +14,13 @@ def translator(monkeypatch):
         captured.update(body)
         return {"choices": [{"message": {"content": "  <think>음...</think>안녕하세요  "}}]}
 
-    monkeypatch.setattr(tr, "_chat", fake_chat)
+    tr._chat = fake_chat
     tr._captured = captured
     return tr
 
 
-def test_builds_openai_chat_request(translator):
+def test_builds_openai_chat_request():
+    translator = _translator()
     out = translator.translate("こんにちは", "ja", "ko", {})
     assert out == "안녕하세요"  # stripped + <think> removed
 
@@ -36,14 +35,14 @@ def test_builds_openai_chat_request(translator):
     assert b["temperature"] == 0.0 and b["seed"] == 42 and b["top_p"] == 1.0 and b["max_tokens"] == 512
 
 
-def test_keep_think_when_disabled(monkeypatch):
+def test_keep_think_when_disabled():
     tr = LlamaCppTranslator()
-    monkeypatch.setattr(tr, "_chat", lambda body: {"choices": [{"message": {"content": "<think>x</think>네"}}]})
+    tr._chat = lambda body: {"choices": [{"message": {"content": "<think>x</think>네"}}]}
     out = tr.translate("テスト文章", "ja", "ko", {"strip_think": False})
     assert "<think>" in out
 
 
-def test_short_text_skips(monkeypatch):
+def test_short_text_skips():
     tr = LlamaCppTranslator()
     called = False
 
@@ -52,6 +51,20 @@ def test_short_text_skips(monkeypatch):
         called = True
         return {"choices": [{"message": {"content": "x"}}]}
 
-    monkeypatch.setattr(tr, "_chat", fake)
+    tr._chat = fake
     assert tr.translate("あ", "ja", "ko", {}) == "あ"
     assert called is False
+
+
+TESTS = [
+    test_builds_openai_chat_request,
+    test_keep_think_when_disabled,
+    test_short_text_skips,
+]
+
+if __name__ == "__main__":
+    import sys
+
+    from tests.helpers import run
+
+    sys.exit(run(TESTS, "test_llamacpp"))
