@@ -30,15 +30,13 @@ async function load() {
   try {
     DATA = await api("/get_settings/");
   } catch (e) {
-    $("conn").className = "pill pill-err";
-    $("conn").textContent = "서버 연결 실패";
+    toast("서버 응답 없음: " + e.message, "err");
     return;
   }
-  $("conn").className = "pill pill-ok";
-  $("conn").textContent = "연결됨";
   const v = DATA.version;
   if (Array.isArray(v)) $("version").textContent = "v" + v.join(".") + " · 서버 설정";
   $("app").hidden = false;
+  $("tabbar").hidden = false;
   renderModels();
   renderLangs();
   renderPrompt();
@@ -233,7 +231,17 @@ async function installPlugin(name) {
   } catch (e) { toast(`${name} 설치 실패: ` + e.message, "err"); }
 }
 
+// --- tabs -----------------------------------------------------------------
+function showView(name) {
+  document.querySelectorAll(".view").forEach((el) => el.classList.toggle("active", el.dataset.view === name));
+  document.querySelectorAll(".tab").forEach((el) => el.classList.toggle("active", el.dataset.view === name));
+}
+
 // --- wire up --------------------------------------------------------------
+$("tabbar").addEventListener("click", (ev) => {
+  const t = ev.target.closest(".tab");
+  if (t) showView(t.dataset.view);
+});
 $("save-models").addEventListener("click", saveModels);
 $("prompt-preset").addEventListener("change", syncPromptEditor);
 $("prompt-use").addEventListener("click", usePrompt);

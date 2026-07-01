@@ -22,27 +22,43 @@ body {
   font: 14px/1.5 -apple-system, "Segoe UI", Roboto, "Malgun Gothic", sans-serif;
 }
 
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(15, 17, 21, 0.92);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line);
+}
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--line);
-  position: sticky;
-  top: 0;
-  background: rgba(15, 17, 21, 0.92);
-  backdrop-filter: blur(6px);
-  z-index: 10;
+  padding: 16px 24px 12px;
 }
 
-.brand { display: flex; align-items: center; gap: 14px; }
-.logo {
-  width: 40px; height: 40px;
-  display: grid; place-items: center;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  border-radius: 10px;
-  font-size: 22px; font-weight: 700; color: #0b0d12;
+.brand { display: flex; flex-direction: column; }
+
+.tabbar {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  overflow-x: auto;
 }
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 10px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--txt); }
+.tab.active { color: var(--txt); border-bottom-color: var(--accent); }
+
 h1 { margin: 0; font-size: 18px; font-weight: 650; }
 h1 .muted { color: var(--muted); font-weight: 400; }
 .sub { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
@@ -62,6 +78,10 @@ main {
   border-radius: var(--radius);
   padding: 18px 20px;
 }
+
+/* tab views: only the active section is shown */
+.view { display: none; }
+.view.active { display: block; }
 .card h2 {
   margin: 0 0 16px;
   font-size: 15px;
@@ -118,8 +138,6 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 
 .pill { padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .pill-ok { background: rgba(74,222,128,.14); color: var(--ok); }
-.pill-warn { background: rgba(251,191,36,.14); color: var(--warn); }
-.pill-err { background: rgba(248,113,113,.14); color: var(--danger); }
 
 /* engine option blocks */
 .opt-block { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 12px; background: var(--card2); }

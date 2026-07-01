@@ -7,20 +7,25 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo">繁</span>
-      <div>
+  <div class="head">
+    <header class="topbar">
+      <div class="brand">
         <h1>Scanlation <span class="muted">Admin</span></h1>
         <p class="sub" id="version">서버 설정 · 모델 · 프롬프트</p>
       </div>
-    </div>
-    <div id="conn" class="pill pill-warn">연결 중…</div>
-  </header>
+    </header>
+
+    <nav class="tabbar" id="tabbar" hidden>
+      <button class="tab active" data-view="models">모델 · 언어</button>
+      <button class="tab" data-view="prompt">번역 프롬프트</button>
+      <button class="tab" data-view="options">엔진 옵션</button>
+      <button class="tab" data-view="plugins">플러그인</button>
+    </nav>
+  </div>
 
   <main id="app" hidden>
     <!-- 모델 선택 -->
-    <section class="card">
+    <section class="card view active" data-view="models">
       <h2>모델 선택 <span class="hint">마지막 선택이 서버에 저장되어 기본값이 됩니다</span></h2>
       <div class="grid3">
         <label>박스(detector)<select id="sel-detector"></select></label>
@@ -37,7 +42,7 @@
     </section>
 
     <!-- 번역 프롬프트 -->
-    <section class="card">
+    <section class="card view" data-view="prompt">
       <h2>번역 프롬프트 <span class="hint">LLM 시스템 프롬프트를 고르거나 직접 편집</span></h2>
       <div class="row">
         <label class="grow">프리셋
@@ -57,13 +62,13 @@
     </section>
 
     <!-- 엔진 옵션 -->
-    <section class="card">
+    <section class="card view" data-view="options">
       <h2>엔진 옵션 <span class="hint">선택된 엔진의 옵션 (예: 번역기 모델 태그)</span></h2>
       <div id="engine-options"></div>
     </section>
 
     <!-- 플러그인 설치 -->
-    <section class="card">
+    <section class="card view" data-view="plugins">
       <h2>플러그인 설치 <span class="hint">가중치/모델 원클릭 설치</span></h2>
       <div id="plugins"></div>
     </section>
