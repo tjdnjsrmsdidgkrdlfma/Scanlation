@@ -136,7 +136,7 @@ function applyLang() {
   document.documentElement.lang = LANG;
   document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
-  $("lang-toggle").textContent = LANG === "ko" ? "EN" : "KO";
+  document.querySelectorAll("#lang-toggle .langopt").forEach((el) => el.classList.toggle("active", el.dataset.lang === LANG));
 }
 
 // --- tiny fetch helpers ---------------------------------------------------
@@ -377,8 +377,10 @@ function showView(name) {
 }
 
 // --- wire up --------------------------------------------------------------
-$("lang-toggle").addEventListener("click", () => {
-  setLang(LANG === "ko" ? "en" : "ko");
+$("lang-toggle").addEventListener("click", (ev) => {
+  const opt = ev.target.closest(".langopt");
+  if (!opt || opt.dataset.lang === LANG) return;
+  setLang(opt.dataset.lang);
   applyLang();
   if (DATA) render();
 });
