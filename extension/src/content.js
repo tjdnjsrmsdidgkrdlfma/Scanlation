@@ -163,11 +163,38 @@
   }
 
   // ------------------------------------------------------------ overlay ----
+  // A bare image URL (e.g. i.pximg.net/x.jpg) renders as a browser-generated
+  // ImageDocument: UA styles center + shrink-to-fit the lone <img> and toggle
+  // full size on click. Once we wrap it those UA rules break — the image jumps
+  // to the flow origin and our absolutely-positioned boxes scroll off-screen.
+  // Detect it and take over layout so the overlay lines up on lone images too.
+  function isImageDocument() {
+    return typeof document.contentType === "string" && document.contentType.startsWith("image/");
+  }
+
+  function fixImageDocumentLayout(img) {
+    // The ImageDocument UA takes the lone <img> out of normal flow (shrink-to-fit
+    // + centering), which collapses our inline-block wrapper to 0 width and stacks
+    // every box at one point. Restore the image to normal flow so the wrapper
+    // sizes to it and the % box coords map onto the image.
+    img.className = "";              // drop UA "overflowing" / "shrinkToFit"
+    img.style.cursor = "default";    // was zoom-in/out
+    img.style.display = "block";     // block child -> inline-block wrapper sizes to it
+    img.style.position = "static";   // undo UA out-of-flow positioning
+    img.style.float = "none";
+    img.style.margin = "0";
+    img.style.maxWidth = "100vw";    // fit viewport; boxes are % so they scale with it
+    img.style.height = "auto";
+    document.body.style.margin = "0";
+    document.body.style.textAlign = "center"; // center the inline-block wrapper
+  }
+
   function wrap(img) {
     const wrapper = document.createElement("span");
     wrapper.className = "scanlation-wrapper";
     img.parentNode.insertBefore(wrapper, img);
     wrapper.appendChild(img);
+    if (isImageDocument()) fixImageDocumentLayout(img);
     return wrapper;
   }
 
