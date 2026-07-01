@@ -51,7 +51,7 @@
   }
 
   function build() {
-    SW = W || 304;
+    SW = W;                        // build at the current (real) popup width
     SH = Math.max(H, 560);        // generous fixed height so later growth reveals, never reseeds
     baseGrad = ctx.createLinearGradient(0, 0, 0, SH);
     baseGrad.addColorStop(0, "#0c1226");
@@ -167,13 +167,18 @@
 
   function frame() {
     fitCanvas();
-    if (W && !seeded) build();
+    // Build once when we first have a real width; rebuild only if the WIDTH
+    // changes (i.e. the first frame reported a not-yet-laid-out size). Height
+    // growth (popup expanding on Connect) does NOT rebuild — the fixed scene is
+    // just revealed further.
+    if (W > 0 && (!seeded || W !== SW)) build();
     if (seeded) { render(); t += 0.016; }
     raf = requestAnimationFrame(frame);
   }
 
   if (reduce) {
-    fitCanvas(); if (W) build(); render();
+    // one rAF so the popup has laid out (non-zero width) before building
+    requestAnimationFrame(() => { fitCanvas(); if (W > 0) build(); if (seeded) render(); });
   } else {
     frame();
     window.addEventListener("unload", () => cancelAnimationFrame(raf));
