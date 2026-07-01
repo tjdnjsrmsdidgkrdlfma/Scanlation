@@ -1,6 +1,6 @@
-# Dev tasks. Uses the repo-root venv (../.venv). On Windows w/o make, run the
-# equivalent ../.venv/Scripts/python commands directly (see README).
-PY ?= ../.venv/Scripts/python
+# Dev tasks. Uses the repo-root venv (../venv). On Windows w/o make, run the
+# equivalent ../venv/Scripts/python commands directly (see README).
+PY ?= ../venv/Scripts/python
 
 .PHONY: test test-all serve run-cpu viz install
 
