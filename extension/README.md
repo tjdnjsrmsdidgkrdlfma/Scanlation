@@ -18,26 +18,21 @@ unpacked* → select this `extension/` folder.
 
 ## Use
 
-1. Start the server (default `http://127.0.0.1:4010`).
-2. **Settings** — right-click the toolbar icon → *Settings* (opens the options
-   page). Confirm the **Server** URL → *Connect* (dropdowns fill from the
-   handshake), pick languages / engines. (Model/lang/prompt can also be set
-   server-side at `/admin`.)
-3. **Translate** — **click the toolbar icon** to toggle translation on the
-   active tab (one click, no popup). The icon **badge** shows state: `on` while
-   active, then the count of translated regions. Click again to turn off.
-   Click a box to copy the original text; *Show translated* (settings) flips
-   between translated / original.
+1. Start the server (`cd server && make serve`, default `http://127.0.0.1:4000`).
+2. Click the Scanlation toolbar icon → confirm the **Server** URL → *Connect*
+   (the dropdowns fill from the server handshake).
+3. Pick languages / engines, then **Enable on tab**. Boxes appear over images;
+   click a box to copy the original text; toggle *Show translated* for original.
 
 ## Files
 
 ```
-manifest.json          MV3 manifest (action=toggle, options_ui, service_worker, content_scripts)
+manifest.json          MV3 manifest (action, service_worker, content_scripts)
 content.css            overlay box styles
-options.html/css       settings page (dark) — server, langs, engines, show-translated
+popup.html/css         popup UI
 src/content.js         image discovery + md5 + lazy/work + overlay (self-contained)
-src/service-worker.js  icon-click toggle, badge, right-click Settings menu, image fetch, defaults
-src/options.js         handshake-driven settings controls
+src/service-worker.js  seeds default config into storage.local
+src/popup.js           handshake-driven controls
 icons/                 16/48/128
 ```
 

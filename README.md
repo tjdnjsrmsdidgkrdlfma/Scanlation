@@ -158,9 +158,8 @@ cd packages/scanlation-server
 
 `chrome://extensions` → 개발자 모드 → **압축해제 로드** → [extension/](extension/).
 Firefox: `about:debugging` → 임시 부가 기능 로드 → [extension/manifest.json](extension/manifest.json).
-설정은 **아이콘 우클릭 → Settings**(옵션 페이지)에서 Server 연결·언어/엔진 선택.
-번역은 **툴바 아이콘 클릭 = on/off 토글**(팝업 없음) — 배지가 상태(`on` → 번역 박스 개수)를 표시.
-다시 누르면 끔. (모델·언어·프롬프트는 서버 `/admin`에서도 설정 가능.)
+그 다음: 페이지 열고 **F5**(content script는 로드 시 주입), 아이콘 → **Connect** →
+**Enable on tab**.
 
 > **크로스오리진 이미지**(예: pixiv `i.pximg.net`)는 임의 HTTPS 페이지에서 못 읽음
 > (CORS + Referer 핫링크). 확실한 경로는 **로컬 페이지를 http로 서빙**(same-origin) —

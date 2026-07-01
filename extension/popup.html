@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>Scanlation</header>
+
+  <div class="field">
+    <label for="endpoint">Server</label>
+    <div class="inline">
+      <input id="endpoint" type="text" placeholder="http://127.0.0.1:4000" />
+      <button id="connect">Connect</button>
+    </div>
+    <div id="status" class="status"></div>
+  </div>
+
+  <section id="conn" hidden>
+    <div class="grid2">
+      <div class="field"><label for="lang_src">From</label><select id="lang_src"></select></div>
+      <div class="field"><label for="lang_dst">To</label><select id="lang_dst"></select></div>
+    </div>
+    <div class="field"><label for="detector">Detector</label><select id="detector"></select></div>
+    <div class="field"><label for="recognizer">Recognizer</label><select id="recognizer"></select></div>
+    <div class="field"><label for="translator">Translator</label><select id="translator"></select></div>
+
+    <div class="grid2">
+      <button id="enable" class="primary">Enable on tab</button>
+      <button id="disable">Disable</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="showTranslated" /> Show translated <small>(off = original)</small></label>
+  </section>
+
+  <script type="module" src="src/popup.js"></script>
+</body>
+</html>

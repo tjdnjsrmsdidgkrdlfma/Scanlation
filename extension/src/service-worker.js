@@ -1,12 +1,11 @@
 /* Scanlation MV3 service worker (module).
  * Non-persistent: the only durable state is storage.local (single source of
- * truth for endpoint/config). The toolbar icon is a one-click toggle (no popup):
- * clicking it enables/disables translation on the active tab; the badge reflects
- * state + count. Settings live on the options page (right-click icon → Settings). */
+ * truth for endpoint/config). The popup talks to the active tab's content
+ * script directly, so the worker just seeds defaults on install. */
 const ext = globalThis.browser || globalThis.chrome;
 
 const DEFAULTS = {
-  endpoint: "http://127.0.0.1:4010",
+  endpoint: "http://127.0.0.1:4000",
   showTranslated: true,
   fontScale: 1,
 };
@@ -18,48 +17,11 @@ ext.runtime.onInstalled.addListener(async () => {
     if (cur[k] === undefined) patch[k] = v;
   }
   if (Object.keys(patch).length) await ext.storage.local.set(patch);
-
-  // Right-click the toolbar icon → Settings (opens the options page).
-  try {
-    ext.contextMenus.removeAll(() => {
-      ext.contextMenus.create({ id: "settings", title: "Settings", contexts: ["action"] });
-    });
-  } catch (e) { /* contextMenus may be unavailable */ }
 });
 
-ext.contextMenus?.onClicked.addListener((info) => {
-  if (info.menuItemId === "settings") ext.runtime.openOptionsPage();
-});
-
-// --- toolbar icon = one-click translate toggle ----------------------------
-// The content script is auto-injected (content_scripts, <all_urls>). If it isn't
-// there yet (e.g. a tab open from before install), inject it, then toggle.
-async function toggleTab(tab) {
-  if (!tab || !tab.id) return;
-  try {
-    await ext.tabs.sendMessage(tab.id, { type: "toggle" });
-  } catch (e) {
-    try {
-      await ext.scripting.executeScript({ target: { tabId: tab.id }, files: ["src/content.js"] });
-      await ext.scripting.insertCSS({ target: { tabId: tab.id }, files: ["content.css"] });
-      await ext.tabs.sendMessage(tab.id, { type: "toggle" });
-    } catch (e2) { /* restricted page (chrome://, addons store, etc.) */ }
-  }
-}
-ext.action.onClicked.addListener(toggleTab);
-
-// --- badge (state + count) from the content script ------------------------
-function setBadge(tabId, enabled, count) {
-  if (tabId == null) return;
-  ext.action.setBadgeText({ tabId, text: enabled ? (count > 0 ? String(count) : "on") : "" });
-  if (ext.action.setBadgeBackgroundColor) {
-    ext.action.setBadgeBackgroundColor({ tabId, color: count > 0 ? "#4f7fd6" : "#8b93a3" });
-  }
-}
-
-// --- cross-origin image fetch on behalf of the content script -------------
-// The worker runs in the extension context with host_permissions, so it bypasses
-// the page's CORS (it cannot defeat server-side Referer hotlink protection).
+// Cross-origin image fetch on behalf of the content script. The worker runs in
+// the extension context with host_permissions, so it bypasses the page's CORS
+// (it cannot defeat server-side Referer hotlink protection, e.g. pixiv).
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -70,10 +32,6 @@ function blobToBase64(blob) {
 }
 
 ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg && msg.type === "badge") {
-    setBadge(sender.tab && sender.tab.id, !!msg.enabled, msg.count || 0);
-    return undefined;
-  }
   if (msg && msg.type === "fetch-image") {
     (async () => {
       try {
