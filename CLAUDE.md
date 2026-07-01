@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-이 저장소에서 Claude Code의 **대화·응답 방식** 지침. (PC 간 공유를 위해 커밋해 둔다. 프로젝트 사실·설계·워크플로는 [README.md](README.md) / [YOMU_DESIGN.md](YOMU_DESIGN.md) / 코드를 따른다.)
+이 저장소에서 Claude Code의 **대화·응답 방식** 지침. (PC 간 공유를 위해 커밋해 둔다. 프로젝트 사실·설계·워크플로는 [README.md](README.md) / [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md) / 코드를 따른다.)
 
 ## 커뮤니케이션
 - 모든 출력은 **한국어**로 작성한다 — 채팅 답변뿐 아니라 계획·요약 등 내가 쓰는 파일 내용까지. 코드·식별자·CLI 명령은 영어를 유지하고, 인라인 주석은 주변 스타일을 따른다(이 트리 주석은 영어).

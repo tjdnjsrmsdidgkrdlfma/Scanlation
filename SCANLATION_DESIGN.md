@@ -1,6 +1,6 @@
 # Greenfield 만화 OCR+번역 시스템 — 설계 & 핸드오프 문서
 
-> **작업 코드네임:** `yomu` (임시 — 자유롭게 변경. 폴더/패키지/도커 서비스명으로 쓰임)
+> **프로젝트명:** `Scanlation` (폴더/패키지/도커 서비스명으로 쓰임)
 > **라이선스:** TBD (단 전제: GPLv3 코드는 **복사 금지**, 알고리즘만 독립 재구현)
 > **이 문서의 목적:** 컨텍스트가 길어져 **새 세션에서 이어서 빌드**하기 위한 자족적(self-contained) 설계서. 사전 지식 없이 이 문서만으로 구현을 시작할 수 있도록 작성됨.
 
@@ -97,7 +97,7 @@
 
 ### 3.1 파일 구조
 ```
-yomu-server/
+scanlation-server/
   pyproject.toml            # FastAPI 앱 + 내장 플러그인 entry_points
   docker/{Dockerfile, docker-compose.yml, docker-compose.cpu.yml, nginx.default}
   app/
@@ -127,7 +127,7 @@ yomu-server/
 > 서로 다른 생태계에 독립 배포·버전·라이선스되는 두 제품이라서. 우리는 다르다:
 > - **솔로 + 와이어 계약 공동 진화** — 서버·확장이 같은 JSON 계약을 쓰고 함께 바뀐다. 한 리포면
 >   계약 변경(예: 역할 어휘 rename)을 **한 커밋**으로 반영; 나누면 두 리포·버전맞추기·비호환 창이 생긴다.
-> - **배포에 분리 불필요** — AMO는 `extension/` zip, Docker(P7)는 `server/`에서 빌드.
+> - **배포에 분리 불필요** — AMO는 `extension/` zip, Docker는 `packages/scanlation-server/`에서 빌드.
 > - **락인 없음** — 나중에 독립 배포/라이브러리 공개 같은 트리거가 생기면 히스토리 보존해 분리:
 >   `git subtree split --prefix=extension`(또는 `git filter-repo --subdirectory-filter extension`).
 >
@@ -136,13 +136,13 @@ yomu-server/
 ### 3.2 플러그인 발견 — 권장: entry_points 1단 + 내장 fallback
 프로젝트가 자기 내장 엔진을 pyproject에 3개 그룹으로 선언:
 ```toml
-[project.entry-points."yomu.detectors"]
+[project.entry-points."scanlation.detectors"]
 ctd   = "plugins.detector_ctd.plugin:CTDDetector"
 dummy = "plugins.dummy.plugin:DummyDetector"
-[project.entry-points."yomu.recognizers"]
+[project.entry-points."scanlation.recognizers"]
 mangaocr = "plugins.recognizer_mangaocr.plugin:MangaOcrRecognizer"
 dummy    = "plugins.dummy.plugin:DummyRecognizer"
-[project.entry-points."yomu.translators"]
+[project.entry-points."scanlation.translators"]
 ollama = "plugins.translator_ollama.plugin:OllamaTranslator"
 dummy  = "plugins.dummy.plugin:DummyTranslator"
 ```
@@ -203,7 +203,7 @@ for r in regions:
 **동시성:** 전역 `asyncio.Lock`("gpu_lock")으로 detect+recognize 보호(CTD ONNX + manga-ocr torch가 GPU 경합; ollama는 별 프로세스). 핸들러는 `async def`, CPU/GPU 작업은 락 안에서 `run_in_threadpool`로 실행(이벤트 루프 비차단). `uvicorn --workers 1`(VRAM 모델 1벌). 배치는 v1에서 순차 루프(페이지당 5~30영역).
 
 ### 3.6 캐시 + 수동 TM (`cache.py`)
-단일 sqlite(`data/yomu.sqlite`, WAL + 스레드락):
+단일 sqlite(`data/scanlation.sqlite`, WAL + 스레드락):
 ```
 images(md5 PK)
 ocr_runs(md5, src, dst, box, ocr, tsl, opt_hash, result_json, created_at)  PK(md5,src,dst,box,ocr,tsl,opt_hash)
@@ -293,7 +293,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 5. **세로/방향 정확성:** "기울기는 펴되 세로는 세로 유지"는 실제 세로 일본어+기울어진 SFX로 경험적 검증 필요 → visualize.py + crop 덤프로 P3~P4 튜닝.
 6. **엔진별 디바이스 배치는 런타임 정책(계약 아님):** CTD≠manga-ocr≠ollama 디바이스를 독립 설정 가능하게 → 코드변경 없이 CPU/GPU 이동.
 7. **uvicorn 단일 워커** 필수(VRAM 모델 1벌) → 프로세스 병렬 없음; asyncio 락+threadpool로 단일사용자 충분(멀티유저 원하면 재검토).
-8. **프로젝트 이름 미정:** 작업명 `yomu` — 폴더/패키지/도커명 일괄 변경 가능.
+8. **프로젝트 이름 결정:** `Scanlation` — 폴더/패키지/도커명에 반영됨.
 
 ---
 
