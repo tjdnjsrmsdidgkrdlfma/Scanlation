@@ -15,7 +15,7 @@ import hashlib
 import json
 import sqlite3
 import threading
-from typing import Any, Optional
+from typing import Optional
 
 from .config import settings
 

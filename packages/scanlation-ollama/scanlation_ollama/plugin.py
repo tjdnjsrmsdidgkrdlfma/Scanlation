@@ -18,7 +18,7 @@ import os
 from typing import Any
 
 from scanlation_sdk.contracts import EngineBase
-from scanlation_sdk.prompt import SYSTEM_PROMPT, build_prompt
+from scanlation_sdk.prompt import DEFAULT_SYSTEM_PROMPT, build_prompt
 
 logger = logging.getLogger("scanlation.ollama")
 
@@ -40,8 +40,6 @@ class OllamaTranslator(EngineBase):
         "top_p": {"type": float, "default": 1.0, "description": "Nucleus sampling p."},
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking' (slower; off for speed)."},
     }
-    SUPPORTED_SRC: list[str] = []  # any
-    SUPPORTED_DST: list[str] = []
 
     def __init__(self) -> None:
         self.endpoint = os.getenv("OLLAMA_ENDPOINT", DEFAULT_ENDPOINT)
@@ -93,7 +91,7 @@ class OllamaTranslator(EngineBase):
         body = {
             "model": model,
             "prompt": prompt,
-            "system": options.get("system_prompt") or SYSTEM_PROMPT,
+            "system": options.get("system_prompt") or DEFAULT_SYSTEM_PROMPT,
             "stream": False,
             "think": bool(options.get("think", False)),
             "options": {

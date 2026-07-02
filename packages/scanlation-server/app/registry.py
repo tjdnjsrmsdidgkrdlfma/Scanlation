@@ -71,11 +71,6 @@ class Registry:
             self._instances[key] = inst
         return self._instances[key]
 
-    def unload(self, role: str, name: str) -> None:
-        inst = self._instances.pop((role, name), None)
-        if inst is not None:
-            inst.unload()
-
 
 ensure_on_path()  # volume-installed engine packages are importable before discovery
 registry = Registry()

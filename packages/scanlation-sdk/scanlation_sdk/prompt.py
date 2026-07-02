@@ -3,10 +3,10 @@ user-turn template. Used by every LLM-backed translator plugin (ollama,
 llama.cpp, any OpenAI-compatible server) so the request shape stays consistent.
 
 The *active* system prompt is chosen in the server's admin page and flows to
-translators via the per-call options dict (``system_prompt``); ``SYSTEM_PROMPT``
-here is only the fallback for a bare ``translate()`` call (unit tests). The
-server core layers named presets (literal/natural/custom) on top of
-``DEFAULT_SYSTEM_PROMPT`` — that preset logic stays in the core, not here.
+translators via the per-call options dict (``system_prompt``);
+``DEFAULT_SYSTEM_PROMPT`` here is only the fallback for a bare ``translate()``
+call (unit tests). The server core layers named presets (literal/natural/custom)
+on top of it — that preset logic stays in the core, not here.
 """
 from __future__ import annotations
 
@@ -27,10 +27,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "Keep your internal reasoning to at most one short sentence. Do not over-analyze. Output the translation immediately."
 )
 
-# Backward-compat alias / fallback default for a bare translate() call.
-SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
-
-__all__ = ["DEFAULT_SYSTEM_PROMPT", "SYSTEM_PROMPT", "build_prompt"]
+__all__ = ["DEFAULT_SYSTEM_PROMPT", "build_prompt"]
 
 
 def build_prompt(text: str, src: str, dst: str, context: str = "") -> str:

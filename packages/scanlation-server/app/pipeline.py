@@ -12,7 +12,6 @@ from typing import Any
 from PIL import Image
 
 from .cache import cache
-from .config import settings
 from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
 from .geometry import deskew_crop
 

@@ -1,8 +1,9 @@
-"""Pydantic wire models shared by the server and the bundled MV3 extension.
+"""Pydantic wire models shared by the server and the bundled MV2 extension.
 
 Engine roles are named detector/recognizer/translator end-to-end (the old
 ocr_extension BOX/OCR/TSL vocabulary was dropped). Per-result item keys
-(ocr/tsl/box) are data fields, not roles, and stay as-is.
+(ocr/tsl/box) are data fields, not roles, and stay as-is. Only request bodies
+are modeled — responses are plain dicts (the wire shapes live in the routes).
 """
 from __future__ import annotations
 
@@ -19,22 +20,8 @@ class RunOcrTslRequest(BaseModel):
     force: Optional[bool] = False           # extension never sends this; re-run + overwrite
 
 
-class ResultItem(BaseModel):
-    ocr: str
-    tsl: str
-    box: list[int]                          # [x_min, y_min, x_max, y_max] == client [l,b,r,t]
-
-
-class RunOcrTslResponse(BaseModel):
-    result: list[ResultItem]
-
-
 # --- /run_tsl/ -------------------------------------------------------------
 class RunTslRequest(BaseModel):
-    text: str
-
-
-class RunTslResponse(BaseModel):
     text: str
 
 

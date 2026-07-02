@@ -18,7 +18,7 @@ import re
 from typing import Any
 
 from scanlation_sdk.contracts import EngineBase
-from scanlation_sdk.prompt import SYSTEM_PROMPT, build_prompt
+from scanlation_sdk.prompt import DEFAULT_SYSTEM_PROMPT, build_prompt
 
 logger = logging.getLogger("scanlation.llamacpp")
 
@@ -40,8 +40,6 @@ class LlamaCppTranslator(EngineBase):
         "max_tokens": {"type": int, "default": 512, "description": "Max tokens to generate."},
         "strip_think": {"type": bool, "default": True, "description": "Remove <think>...</think> from reasoning models."},
     }
-    SUPPORTED_SRC: list[str] = []
-    SUPPORTED_DST: list[str] = []
 
     def __init__(self) -> None:
         self.endpoint = os.getenv("LLAMACPP_ENDPOINT", DEFAULT_ENDPOINT)
@@ -91,7 +89,7 @@ class LlamaCppTranslator(EngineBase):
         body = {
             "model": model,
             "messages": [
-                {"role": "system", "content": options.get("system_prompt") or SYSTEM_PROMPT},
+                {"role": "system", "content": options.get("system_prompt") or DEFAULT_SYSTEM_PROMPT},
                 {"role": "user", "content": build_prompt(text, src, dst, options.get("context", ""))},
             ],
             "temperature": float(options.get("temperature", 0.0)),

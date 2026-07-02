@@ -12,7 +12,7 @@ server-internal (deskew, future inpaint).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
 
 import numpy as np
