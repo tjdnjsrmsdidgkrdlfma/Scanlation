@@ -22,6 +22,8 @@ ROLES: dict[str, str] = {
     "recognizer": "scanlation.recognizers",
     "translator": "scanlation.translators",
 }
+# The three role ids in fixed order — the single source everything else derives.
+ROLE_NAMES: tuple[str, ...] = tuple(ROLES)
 
 
 class Registry:

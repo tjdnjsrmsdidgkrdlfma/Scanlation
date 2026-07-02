@@ -9,6 +9,7 @@ from fastapi import APIRouter
 
 from .. import __version_array__
 from scanlation_sdk.context import LANGUAGES
+from ..engine_meta import engine_label
 from ..registry import registry
 from ..state import state
 
@@ -18,7 +19,7 @@ router = APIRouter()
 def _hr(role: str, names: list[str]) -> list[str]:
     """Human-readable engine labels (display_name, fallback to the id) parallel to
     the id list — the popup/extension shows these instead of raw ids."""
-    return [getattr(registry.get_class(role, n), "display_name", None) or n for n in names]
+    return [engine_label(registry.get_class(role, n), n) for n in names]
 
 
 def handshake_payload() -> dict:

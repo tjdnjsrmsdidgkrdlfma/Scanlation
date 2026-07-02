@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from .. import __version__
+from ..engine_meta import class_meta, safe_is_installed
 from ..plugins_install import catalog, install_engine
 from ..registry import registry
 from ..schemas import ManagePluginsRequest
@@ -27,18 +28,11 @@ def get_plugin_data() -> dict:
             if name in resp:  # dedupe an engine registered under multiple roles
                 resp[name]["roles"].append(role)
                 continue
-            try:  # cheap __init__ only (no load); is_installed checks the filesystem/cache
-                installed = cls().is_installed()
-            except Exception:  # noqa: BLE001
-                installed = False
             resp[name] = {
-                "display_name": getattr(cls, "display_name", name),
-                "homepage": getattr(cls, "homepage", None),
-                "warning": getattr(cls, "warning", None),
-                "description": getattr(cls, "description", ""),
+                **class_meta(cls, name),
                 "version": __version__,
-                "installed": installed,          # weights present?
-                "installed_package": True,       # pip package present?
+                "installed": safe_is_installed(cls),  # weights present?
+                "installed_package": True,            # pip package present?
                 "roles": [role],
             }
     # installable-but-not-installed engines (source shipped, package absent)

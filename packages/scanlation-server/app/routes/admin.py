@@ -18,23 +18,14 @@ from fastapi import APIRouter, HTTPException
 
 from .. import __version_array__
 from scanlation_sdk.context import LANGUAGES
+from ..engine_meta import class_meta, safe_is_installed, serialize_schema
 from ..plugins_install import catalog
 from ..prompts import BUILTIN_PROMPTS
-from ..registry import registry
+from ..registry import ROLE_NAMES, registry
 from ..schemas import SavePromptRequest, SelectPromptRequest, SetOptionsRequest
 from ..state import state
 
 router = APIRouter()
-
-
-def _serialize_schema(cls) -> dict:
-    out: dict = {}
-    for opt, spec in getattr(cls, "OPTION_SCHEMA", {}).items():
-        spec = dict(spec)
-        t = spec.get("type", str)
-        spec["type"] = getattr(t, "__name__", str(t))
-        out[opt] = spec
-    return out
 
 
 def _engine_entries(role: str) -> list[dict]:
@@ -46,19 +37,12 @@ def _engine_entries(role: str) -> list[dict]:
     entries = []
     for name in registry.names(role):
         cls = registry.get_class(role, name)
-        try:  # cheap __init__ only (no load) — is_installed checks fs/cache
-            installed = cls().is_installed()
-        except Exception:  # noqa: BLE001
-            installed = False
         entries.append({
             "name": name,
-            "display_name": getattr(cls, "display_name", name),
-            "description": getattr(cls, "description", ""),
-            "warning": getattr(cls, "warning", None),
-            "homepage": getattr(cls, "homepage", None),
-            "installed": installed,
+            **class_meta(cls, name),
+            "installed": safe_is_installed(cls),
             "installed_package": True,
-            "schema": _serialize_schema(cls),
+            "schema": serialize_schema(cls),
             "options": dict(state.selection.options.get(name, {})),
         })
     installed_names = {e["name"] for e in entries}
@@ -95,7 +79,7 @@ def get_settings() -> dict:
             "prompt_active": sel.prompt_active,
         },
         "languages": LANGUAGES,
-        "engines": {role: _engine_entries(role) for role in ("detector", "recognizer", "translator")},
+        "engines": {role: _engine_entries(role) for role in ROLE_NAMES},
         "prompts": {
             "active": sel.prompt_active,
             "builtin": BUILTIN_PROMPTS,
@@ -122,7 +106,7 @@ def get_translator_models(engine: str | None = None) -> dict:
 @router.post("/set_options/")
 def set_options(req: SetOptionsRequest) -> dict:
     """Persist per-engine option overrides. Engine must exist in some role."""
-    known = any(registry.has(role, req.engine) for role in registry.all_classes())
+    known = any(registry.has(role, req.engine) for role in ROLE_NAMES)
     if not known:
         raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
     state.set_options(req.engine, req.options)

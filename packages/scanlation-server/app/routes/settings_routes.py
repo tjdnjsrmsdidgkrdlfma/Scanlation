@@ -8,28 +8,17 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from scanlation_sdk.context import LANGUAGES
-from ..registry import registry
+from ..engine_meta import serialize_schema
+from ..registry import ROLE_NAMES, registry
 from ..schemas import SetLangRequest, SetModelsRequest
 from ..state import state
 
 router = APIRouter()
 
-ROLES = ("detector", "recognizer", "translator")
-
-
-def _serialize_schema(cls) -> dict:
-    out: dict = {}
-    for opt, spec in getattr(cls, "OPTION_SCHEMA", {}).items():
-        spec = dict(spec)
-        t = spec.get("type", str)
-        spec["type"] = getattr(t, "__name__", str(t))
-        out[opt] = spec
-    return out
-
 
 @router.post("/set_models/")
 def set_models(req: SetModelsRequest) -> dict:
-    for role in ROLES:
+    for role in ROLE_NAMES:
         name = getattr(req, role)
         if name and not registry.has(role, name):
             raise HTTPException(status_code=400, detail=f"unknown {role}: {name}")
@@ -50,7 +39,7 @@ def set_lang(req: SetLangRequest) -> dict:
 def get_active_options() -> dict:
     sel = state.selection
     res: dict = {}
-    for role in ROLES:
+    for role in ROLE_NAMES:
         name = getattr(sel, role)
-        res[role] = _serialize_schema(registry.get_class(role, name)) if registry.has(role, name) else {}
+        res[role] = serialize_schema(registry.get_class(role, name)) if registry.has(role, name) else {}
     return {"options": res}

@@ -12,6 +12,6 @@ router = APIRouter()
 
 @router.post("/set_manual_translation/")
 def set_manual_translation(req: SetManualRequest) -> dict:
-    s = state.selection
-    cache.put_translation(req.text, s.lang_src, s.lang_dst, "manual", req.translation)
+    sel = state.selection
+    cache.put_translation(req.text, sel.lang_src, sel.lang_dst, "manual", req.translation)
     return {}

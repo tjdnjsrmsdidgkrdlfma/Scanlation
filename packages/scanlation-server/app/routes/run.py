@@ -36,11 +36,11 @@ def _require(role: str, name: str) -> None:
 
 def _resolve():
     """Current (names, langs, engines-id) from selection."""
-    s = state.selection
+    sel = state.selection
     return (
-        s.detector, s.recognizer, s.translator,
-        s.lang_src, s.lang_dst,
-        f"{s.detector}+{s.recognizer}+{s.translator}",
+        sel.detector, sel.recognizer, sel.translator,
+        sel.lang_src, sel.lang_dst,
+        f"{sel.detector}+{sel.recognizer}+{sel.translator}",
     )
 
 
@@ -127,19 +127,19 @@ async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
 
 @router.post("/run_tsl/")
 async def run_tsl(req: RunTslRequest) -> dict:
-    s = state.selection
-    _require("translator", s.translator)
-    translator = registry.get("translator", s.translator)
-    opt_tsl = state.translator_options(s.translator, None)
+    sel = state.selection
+    _require("translator", sel.translator)
+    translator = registry.get("translator", sel.translator)
+    opt_tsl = state.translator_options(sel.translator, None)
     text = await run_in_threadpool(
-        translate_text, req.text, s.lang_src, s.lang_dst, translator, opt_tsl
+        translate_text, req.text, sel.lang_src, sel.lang_dst, translator, opt_tsl
     )
     return {"text": text}
 
 
 @router.get("/get_trans/")
 async def get_trans(text: str, lang_src: str | None = None, lang_dst: str | None = None) -> dict:
-    s = state.selection
-    src = lang_src or s.lang_src
-    dst = lang_dst or s.lang_dst
+    sel = state.selection
+    src = lang_src or sel.lang_src
+    dst = lang_dst or sel.lang_dst
     return {"translations": cache.get_translations(text, src, dst)}
