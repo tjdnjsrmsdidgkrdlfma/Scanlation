@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 
 from .. import __version_array__
 from scanlation_sdk.context import LANGUAGES
+from ..cache import cache
 from ..engine_meta import class_meta, safe_is_installed, serialize_schema
 from ..plugins_install import catalog
 from ..prompts import BUILTIN_PROMPTS
@@ -136,3 +137,10 @@ def delete_prompt(req: SelectPromptRequest) -> dict:
         raise HTTPException(status_code=400, detail="cannot delete a builtin prompt")
     state.delete_prompt(req.name)
     return {"status": "success", "active": state.selection.prompt_active}
+
+
+@router.post("/clear_cache/")
+def clear_cache() -> dict:
+    """Drop all cached page results so every page re-runs the full pipeline next
+    time. Translation memory (incl. manual corrections) is preserved."""
+    return {"status": "success", "cleared": cache.clear_runs()}

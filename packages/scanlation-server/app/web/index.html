@@ -24,6 +24,7 @@
       <button class="tab" data-view="prompt" data-i18n="tab.prompt">번역 프롬프트</button>
       <button class="tab" data-view="options" data-i18n="tab.options">엔진 옵션</button>
       <button class="tab" data-view="plugins" data-i18n="tab.plugins">플러그인</button>
+      <button class="tab" data-view="maintenance" data-i18n="tab.maintenance">유지보수</button>
     </nav>
   </div>
 
@@ -75,6 +76,18 @@
     <section class="card view" data-view="plugins">
       <h2><span data-i18n="plugins.h2">플러그인 설치</span> <span class="hint" data-i18n="plugins.hint">패키지 + 가중치 원클릭 설치</span></h2>
       <div id="plugins"></div>
+    </section>
+
+    <!-- 유지보수 -->
+    <section class="card view" data-view="maintenance">
+      <h2><span data-i18n="maint.h2">유지보수</span> <span class="hint" data-i18n="maint.hint">캐시 관리</span></h2>
+      <div class="row">
+        <div class="grow">
+          <strong data-i18n="maint.cache.title">페이지 캐시 비우기</strong>
+          <p class="note" data-i18n="maint.cache.desc">저장된 페이지 결과를 모두 지워 다음 접속 때 전 과정(검출·인식·번역)을 새로 실행합니다. 수동 교정(번역 메모리)은 보존됩니다.</p>
+        </div>
+        <button class="btn danger" id="clear-cache" data-i18n="maint.cache.btn">캐시 비우기</button>
+      </div>
     </section>
   </main>
 

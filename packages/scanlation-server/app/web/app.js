@@ -62,6 +62,12 @@ const I18N = {
     "plugins.install": "설치",
     "plugins.installWeights": "가중치 설치",
     "plugins.notInstalledPkg": "패키지 미설치",
+    "tab.maintenance": "유지보수",
+    "maint.h2": "유지보수",
+    "maint.hint": "캐시 관리",
+    "maint.cache.title": "페이지 캐시 비우기",
+    "maint.cache.desc": "저장된 페이지 결과를 모두 지워 다음 접속 때 전 과정(검출·인식·번역)을 새로 실행합니다. 수동 교정(번역 메모리)은 보존됩니다.",
+    "maint.cache.btn": "캐시 비우기",
     "field.default": "(기본값)",
     "field.defaultPrefix": "기본",
     "field.pickModel": "— 모델 선택 —",
@@ -77,6 +83,8 @@ const I18N = {
     "toast.enterName": "저장 이름을 입력하세요",
     "toast.savedApplied": "\"{name}\" 저장 & 적용됨",
     "confirm.deletePrompt": "커스텀 프롬프트 \"{name}\" 삭제?",
+    "confirm.clearCache": "페이지 캐시를 모두 비울까요? 수동 교정은 유지됩니다.",
+    "toast.cacheCleared": "캐시 비움 — 페이지 {n}개",
     "toast.deleted": "\"{name}\" 삭제됨",
     "toast.optionsSaved": "{engine} 옵션 저장됨",
     "toast.installing": "{name} 설치 중… (패키지 + 가중치, 오래 걸릴 수 있음)",
@@ -114,6 +122,12 @@ const I18N = {
     "plugins.install": "Install",
     "plugins.installWeights": "Install weights",
     "plugins.notInstalledPkg": "package not installed",
+    "tab.maintenance": "Maintenance",
+    "maint.h2": "Maintenance",
+    "maint.hint": "Cache management",
+    "maint.cache.title": "Clear page cache",
+    "maint.cache.desc": "Removes all cached page results so the full pipeline (detect · recognize · translate) re-runs next time. Manual corrections (translation memory) are kept.",
+    "maint.cache.btn": "Clear cache",
     "field.default": "(default)",
     "field.defaultPrefix": "default",
     "field.pickModel": "— pick a model —",
@@ -129,6 +143,8 @@ const I18N = {
     "toast.enterName": "Enter a name to save",
     "toast.savedApplied": "\"{name}\" saved & applied",
     "confirm.deletePrompt": "Delete custom prompt \"{name}\"?",
+    "confirm.clearCache": "Clear all page cache? Manual corrections are kept.",
+    "toast.cacheCleared": "Cache cleared — {n} page(s)",
     "toast.deleted": "\"{name}\" deleted",
     "toast.optionsSaved": "{engine} options saved",
     "toast.installing": "Installing {name}… (package + weights, may take a while)",
@@ -435,6 +451,13 @@ async function installPlugin(name) {
     await load();
   } catch (e) { toast(t("toast.installFail", { name, msg: e.message }), "err"); }
 }
+async function clearCache() {
+  if (!confirm(t("confirm.clearCache"))) return;
+  try {
+    const r = await postJSON("/clear_cache/", {});
+    toast(t("toast.cacheCleared", { n: r.cleared }), "ok");
+  } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
+}
 
 // --- tabs -----------------------------------------------------------------
 function showView(name) {
@@ -468,6 +491,7 @@ $("plugins").addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-install]");
   if (btn) installPlugin(btn.dataset.install);
 });
+$("clear-cache").addEventListener("click", clearCache);
 
 applyLang();
 load();

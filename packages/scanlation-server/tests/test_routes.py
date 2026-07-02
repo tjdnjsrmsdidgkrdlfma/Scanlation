@@ -262,6 +262,26 @@ def test_active_prompt_injected_into_translator_options():
     assert state.translator_options("dummy", None)["system_prompt"].startswith("From now on")
 
 
+def test_clear_cache_drops_runs_keeps_manual():
+    c = client()
+    p = payload(color=(7, 9, 11))  # unique md5
+    # a manual correction that must survive the clear
+    c.post("/set_manual_translation/", json={"text": "保存対象", "translation": "보존대상"})
+    # work -> populates ocr_runs; lazy hit confirms it's cached
+    assert c.post("/run_ocrtsl/", json={"md5": p["md5"], "contents": p["b64"]}).status_code == 200
+    assert c.post("/run_ocrtsl/", json={"md5": p["md5"]}).status_code == 200
+
+    r = c.post("/clear_cache/", json={})
+    assert r.status_code == 200
+    assert r.json()["status"] == "success" and r.json()["cleared"] >= 1
+
+    # ocr_runs gone -> lazy now misses (client would fall through to work)
+    assert c.post("/run_ocrtsl/", json={"md5": p["md5"]}).status_code == 404
+    # translation memory (manual) preserved
+    g = c.get("/get_trans/", params={"text": "保存対象"}).json()["translations"]
+    assert any(t["model"] == "manual" and t["text"] == "보존대상" for t in g)
+
+
 TESTS = [
     test_handshake_keys,
     test_run_ocrtsl_work_returns_boxes,
@@ -283,6 +303,7 @@ TESTS = [
     test_set_options_persists_and_clears,
     test_prompt_select_save_delete,
     test_active_prompt_injected_into_translator_options,
+    test_clear_cache_drops_runs_keeps_manual,
 ]
 
 if __name__ == "__main__":

@@ -74,6 +74,16 @@ class Cache:
             )
             self._conn.commit()
 
+    def clear_runs(self) -> int:
+        """Drop every cached page result so pages re-run the full pipeline on next
+        view. Translation memory (``translations``, incl. manual corrections) is
+        left untouched — machine translations are recomputed anyway, and manual
+        edits are user data. Returns the number of cached pages removed."""
+        with self._lock:
+            n = self._conn.execute("DELETE FROM ocr_runs").rowcount
+            self._conn.commit()
+        return n
+
     # --- translation memory ---
     def get_translations(self, src_text: str, src_lang: str, dst_lang: str) -> list[dict]:
         with self._lock:
