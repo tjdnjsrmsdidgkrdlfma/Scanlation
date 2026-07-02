@@ -168,7 +168,7 @@ cd packages/scanlation-server
 > **크로스오리진 이미지**(예: pixiv `i.pximg.net`)는 임의 HTTPS 페이지에서 못 읽음
 > (CORS + Referer 핫링크). 확실한 경로는 **로컬 페이지를 http로 서빙**(same-origin) —
 > 설계의 `make_viewer.py` 흐름. 확장은 핫링크 없는 크로스오리진 사이트 커버용으로 이미지
-> 페치를 서비스워커(host_permissions)로 우회하기도 함. 혼합 콘텐츠: `http://127.0.0.1:4000`은
+> 페치를 백그라운드(`<all_urls>` 호스트 권한)로 우회하기도 함. 혼합 콘텐츠: `http://127.0.0.1:4000`은
 > 허용됨(localhost는 보안 컨텍스트). 다른 호스트의 http 서버는 HTTPS 페이지에서 차단 →
 > SSH 터널 사용.
 

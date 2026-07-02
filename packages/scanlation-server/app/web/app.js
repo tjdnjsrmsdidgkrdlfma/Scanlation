@@ -5,6 +5,12 @@
 const $ = (id) => document.getElementById(id);
 let DATA = null; // last /get_settings/ snapshot
 
+// The three engine roles, in fixed order (mirrors the server's ROLE_NAMES).
+const ROLES = ["detector", "recognizer", "translator"];
+// An engine whose pip package is present (catalog-only entries send
+// installed_package:false and aren't selectable until installed).
+const pkgInstalled = (e) => e.installed_package !== false;
+
 // --- i18n -----------------------------------------------------------------
 // UI chrome only. Engine metadata (display_name/description/warning/option
 // descriptions) comes from the server already in English, so it isn't keyed
@@ -206,12 +212,11 @@ function engineOption(e) {
 }
 
 function renderModels() {
-  const roles = { detector: "sel-detector", recognizer: "sel-recognizer", translator: "sel-translator" };
-  for (const [role, id] of Object.entries(roles)) {
-    const sel = $(id);
+  for (const role of ROLES) {
+    const sel = $("sel-" + role);
     // Only pip-installed engines are selectable (catalog-only ones aren't in the
     // registry yet; install them in the plugin tab first).
-    const installed = DATA.engines[role].filter((e) => e.installed_package !== false);
+    const installed = DATA.engines[role].filter(pkgInstalled);
     sel.innerHTML = installed.map(engineOption).join("");
     sel.value = DATA.selection[role];
   }
@@ -297,11 +302,7 @@ function optBlock(role, e) {
 }
 function renderEngineOptions() {
   const sel = DATA.selection;
-  const blocks = [
-    optBlock("detector", findEngine("detector", sel.detector)),
-    optBlock("recognizer", findEngine("recognizer", sel.recognizer)),
-    optBlock("translator", findEngine("translator", sel.translator)),
-  ];
+  const blocks = ROLES.map((role) => optBlock(role, findEngine(role, sel[role])));
   $("engine-options").innerHTML = blocks.join("");
   setupModelPicker();  // async: swap the translator 'model' text field for a <select>
 }
@@ -349,7 +350,7 @@ function collectOptions(blockEl) {
 // --- plugins --------------------------------------------------------------
 function renderPlugins() {
   const byName = {};
-  for (const role of ["detector", "recognizer", "translator"]) {
+  for (const role of ROLES) {
     for (const e of DATA.engines[role]) {
       if (!byName[e.name]) byName[e.name] = { ...e, roles: [] };
       byName[e.name].roles.push(role);
@@ -358,14 +359,14 @@ function renderPlugins() {
   const rows = Object.values(byName).map((e) => {
     // Two install layers: package (pip) then weights. Show the next needed step.
     let action;
-    if (e.installed_package === false) {
+    if (!pkgInstalled(e)) {
       action = `<button class="btn sm primary" data-install="${e.name}">${t("plugins.install")}</button>`;
     } else if (!e.installed) {
       action = `<button class="btn sm primary" data-install="${e.name}">${t("plugins.installWeights")}</button>`;
     } else {
       action = `<span class="pill pill-ok">${t("plugins.installed")}</span>`;
     }
-    const pkgTag = e.installed_package === false ? ` <span class="proles">${t("plugins.notInstalledPkg")}</span>` : "";
+    const pkgTag = !pkgInstalled(e) ? ` <span class="proles">${t("plugins.notInstalledPkg")}</span>` : "";
     const warn = e.warning ? `<div class="pwarn">⚠ ${e.warning}</div>` : "";
     return `<div class="plugin">
         <div class="meta">
