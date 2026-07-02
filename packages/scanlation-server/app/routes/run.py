@@ -59,6 +59,38 @@ def _work_sync(img, det_name, rec_name, tsl_name, src, dst, opt_box, opt_ocr, op
     )
 
 
+def _decode_image(contents: str) -> Image.Image:
+    """base64 string -> RGB PIL image; 400 on anything malformed."""
+    try:
+        binary = base64.b64decode(contents)
+        return Image.open(io.BytesIO(binary)).convert("RGB")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"bad image: {exc}")
+
+
+async def _run_deduped(id_, compute):
+    """Run the async ``compute`` once per in-flight ``id_``: concurrent requests
+    for the same key await the first computation instead of repeating the model
+    work. The result (or the failure) is shared with every waiter."""
+    existing = state.inflight.get(id_)
+    if existing is not None:
+        return await existing
+
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    state.inflight[id_] = fut
+    try:
+        result = await compute()
+        fut.set_result(result)
+        return result
+    except Exception as exc:  # noqa: BLE001 - hand the same failure to any waiters, then re-raise
+        if not fut.done():
+            fut.set_exception(exc)
+        raise
+    finally:
+        state.inflight.pop(id_, None)
+
+
 @router.post("/run_ocrtsl/")
 async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
     det, rec, tsl, src, dst, engines = _resolve()
@@ -90,39 +122,22 @@ async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
     _require("recognizer", rec)
     _require("translator", tsl)
 
-    # Dedupe concurrent identical requests onto one computation.
-    id_ = (req.md5, src, dst, engines, oh)
-    existing = state.inflight.get(id_)
-    if existing is not None:
-        return {"result": await existing}
-
-    loop = asyncio.get_running_loop()
-    fut: asyncio.Future = loop.create_future()
-    state.inflight[id_] = fut
-    try:
-        try:
-            binary = base64.b64decode(req.contents)
-            img = Image.open(io.BytesIO(binary)).convert("RGB")
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=400, detail=f"bad image: {exc}")
-
+    async def _compute():
+        img = _decode_image(req.contents)
         async with state.gpu_lock:
             result = await run_in_threadpool(
                 _work_sync, img, det, rec, tsl, src, dst, opt_box, opt_ocr, opt_tsl
             )
         cache.put_run(req.md5, src, dst, engines, oh, result)
-        fut.set_result(result)
-        return {"result": result}
-    except HTTPException as exc:
-        if not fut.done():
-            fut.set_exception(exc)
+        return result
+
+    try:
+        result = await _run_deduped((req.md5, src, dst, engines, oh), _compute)
+    except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
-        if not fut.done():
-            fut.set_exception(exc)
         raise HTTPException(status_code=500, detail=str(exc))
-    finally:
-        state.inflight.pop(id_, None)
+    return {"result": result}
 
 
 @router.post("/run_tsl/")
