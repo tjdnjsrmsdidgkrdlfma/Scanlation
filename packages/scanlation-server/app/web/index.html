@@ -19,12 +19,6 @@
       </div>
     </header>
 
-    <div class="tokenbar">
-      <input id="token" type="password" autocomplete="off" spellcheck="false"
-             data-i18n-ph="auth.tokenPh" placeholder="X-Auth-Token (blank if none)"
-             style="width:100%;max-width:340px;padding:6px 9px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;opacity:0.85;" />
-    </div>
-
     <nav class="tabbar" id="tabbar" hidden>
       <button class="tab active" data-view="models" data-i18n="tab.models">모델 · 언어</button>
       <button class="tab" data-view="prompt" data-i18n="tab.prompt">번역 프롬프트</button>
@@ -98,6 +92,19 @@
   </main>
 
   <div id="toast" class="toast" hidden></div>
+
+  <!-- login gate: only shown when the server requires a token -->
+  <div id="gate" class="gate" hidden>
+    <form id="gate-form" class="gate-card">
+      <h2 data-i18n="gate.title">관리자 인증</h2>
+      <p class="note" data-i18n="gate.hint">이 서버는 접근 토큰이 필요합니다.</p>
+      <input id="gate-token" type="password" autocomplete="current-password" spellcheck="false"
+             data-i18n-ph="auth.tokenPh" placeholder="X-Auth-Token" />
+      <button type="submit" class="btn primary" data-i18n="gate.submit">입력</button>
+      <p id="gate-err" class="gate-err" data-i18n="gate.wrong" hidden>토큰이 올바르지 않습니다.</p>
+    </form>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

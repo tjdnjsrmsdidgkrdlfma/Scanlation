@@ -191,6 +191,24 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .toast.ok { border-color: var(--ok); }
 .toast.err { border-color: var(--danger); }
 
+/* login gate — shown only when the server requires a token and we don't have a
+   valid one; covers the whole page so the app stays hidden until authenticated */
+.gate {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(15, 17, 21, 0.97); padding: 24px;
+}
+.gate[hidden] { display: none; }  /* the class sets display:flex; keep `hidden` working */
+.gate-card {
+  width: 100%; max-width: 360px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 22px 22px 20px; display: flex; flex-direction: column; gap: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.gate-card h2 { margin: 0; font-size: 16px; font-weight: 650; }
+.gate-card .note { margin: 0; }
+.gate-err { color: var(--danger); font-size: 12px; margin: 0; }
+
 @media (max-width: 680px) {
   .grid3, .grid2, .opt-fields { grid-template-columns: 1fr; }
   .row { flex-direction: column; align-items: stretch; }

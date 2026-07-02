@@ -92,7 +92,10 @@ const I18N = {
     "toast.installResult": "{name} 결과: {status}",
     "toast.installFail": "{name} 설치 실패: {msg}",
     "auth.tokenPh": "X-Auth-Token (없으면 비움)",
-    "auth.needed": "인증 필요 — 토큰을 입력하세요",
+    "gate.title": "관리자 인증",
+    "gate.hint": "이 서버는 접근 토큰이 필요합니다.",
+    "gate.submit": "입력",
+    "gate.wrong": "토큰이 올바르지 않습니다.",
   },
   en: {
     "brand.sub": "Server settings · models · prompts",
@@ -154,7 +157,10 @@ const I18N = {
     "toast.installResult": "{name} result: {status}",
     "toast.installFail": "{name} install failed: {msg}",
     "auth.tokenPh": "X-Auth-Token (blank if none)",
-    "auth.needed": "Auth required — enter the token",
+    "gate.title": "Admin access",
+    "gate.hint": "This server requires an access token.",
+    "gate.submit": "Enter",
+    "gate.wrong": "Invalid token.",
   },
 };
 
@@ -215,14 +221,27 @@ function toast(msg, kind) {
 }
 
 // --- load + render --------------------------------------------------------
-async function load() {
+// The login gate covers the page until we hold a token the server accepts. It
+// only ever appears when the server actually requires one (401); with auth off
+// (or a valid stored token) load() succeeds straight away and the gate stays hidden.
+function showGate(wrong) {
+  $("gate").hidden = false;
+  $("gate-err").hidden = !wrong;
+  const el = $("gate-token");
+  el.value = getToken();
+  el.focus();
+}
+function hideGate() { $("gate").hidden = true; }
+
+async function load({ wrong = false } = {}) {
   try {
     DATA = await api("/get_settings/");
   } catch (e) {
-    if (e.status === 401) { toast(t("auth.needed"), "err"); $("token").focus(); return; }
+    if (e.status === 401) { showGate(wrong); return; }
     toast(t("toast.noServer", { msg: e.message }), "err");
     return;
   }
+  hideGate();
   render();
 }
 // Re-render everything from the cached DATA (no refetch). Called on load and
@@ -509,8 +528,11 @@ $("plugins").addEventListener("click", (ev) => {
   if (btn) installPlugin(btn.dataset.install);
 });
 $("clear-cache").addEventListener("click", clearCache);
-$("token").value = getToken();
-$("token").addEventListener("change", () => { setToken($("token").value.trim()); load(); });
+$("gate-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  setToken($("gate-token").value.trim());
+  load({ wrong: true });   // a still-401 after an explicit entry = wrong token
+});
 
 applyLang();
 load();
