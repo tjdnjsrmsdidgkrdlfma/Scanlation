@@ -10,9 +10,11 @@ from scanlation_sdk.contracts import (
     Region,
     Translator,
 )
+from scanlation_sdk.http_translator import HttpTranslatorBase
 
 __all__ = [
     "EngineBase",
+    "HttpTranslatorBase",
     "Region",
     "Detector",
     "Recognizer",

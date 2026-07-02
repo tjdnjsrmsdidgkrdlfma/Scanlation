@@ -8,29 +8,23 @@ shape are the user's working setup. Key tunings:
   * temperature=0, seed=42, top_p=1.0, num_gpu=31  -> deterministic, GPU-resident
 
 ollama runs as a separate service (env OLLAMA_ENDPOINT, default
-http://127.0.0.1:11434/api). The HTTP call is isolated in _generate() so the
-request-building logic is unit-testable without a live server.
+http://127.0.0.1:11434/api). The client lifecycle + guardrails live in
+HttpTranslatorBase; only the /generate body shape + response field are here.
+The HTTP call is isolated in _generate() so request-building is unit-testable.
 """
 from __future__ import annotations
 
-import logging
-import os
-from typing import Any
-
-from scanlation_sdk.contracts import EngineBase
-from scanlation_sdk.prompt import DEFAULT_SYSTEM_PROMPT, build_prompt
-
-logger = logging.getLogger("scanlation.ollama")
-
-DEFAULT_ENDPOINT = "http://127.0.0.1:11434/api"
+from scanlation_sdk.http_translator import HttpTranslatorBase
 
 
-class OllamaTranslator(EngineBase):
+class OllamaTranslator(HttpTranslatorBase):
     name = "ollama"
     display_name = "Ollama"
     homepage = "https://ollama.com"
     description = "LLM translation via a local ollama server (system-prompted, OCR-error tolerant)."
     warning = "Requires a running ollama server (OLLAMA_ENDPOINT) and a model pulled + selected in /admin."
+    ENDPOINT_ENV = "OLLAMA_ENDPOINT"
+    DEFAULT_ENDPOINT = "http://127.0.0.1:11434/api"
     OPTION_SCHEMA = {
         "model": {"type": str, "default": "", "description": "ollama model tag (e.g. gemma4:31b). Required — pick it in /admin."},
         "num_ctx": {"type": int, "default": 512, "description": "KV-cache context window (translation inputs are short)."},
@@ -41,57 +35,21 @@ class OllamaTranslator(EngineBase):
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking' (slower; off for speed)."},
     }
 
-    def __init__(self) -> None:
-        self.endpoint = os.getenv("OLLAMA_ENDPOINT", DEFAULT_ENDPOINT)
-        self._client = None
-
-    def load(self) -> None:
-        if self._client is not None:
-            return
-        import httpx
-
-        self._client = httpx.Client(timeout=120.0)
-        logger.info("ollama translator ready (endpoint=%s)", self.endpoint)
-
-    def list_models(self) -> list[str]:
-        """Pulled model tags from `GET {endpoint}/tags`. [] if ollama is down."""
-        try:
-            import httpx
-
-            resp = httpx.get(f"{self.endpoint}/tags", timeout=4.0)
-            resp.raise_for_status()
-            return sorted(m["name"] for m in resp.json().get("models", []) if m.get("name"))
-        except Exception:  # noqa: BLE001 - backend unreachable is expected; picker just stays empty
-            return []
-
-    def unload(self) -> None:
-        if self._client is not None:
-            self._client.close()
-            self._client = None
-
     def _generate(self, body: dict) -> dict:
-        """POST /generate. Isolated so request-building is testable w/o a server."""
-        if self._client is None:
-            self.load()
-        resp = self._client.post(f"{self.endpoint}/generate", json=body)
-        resp.raise_for_status()
-        return resp.json()
+        """POST /generate. Kept as the unit-test seam (tests fake this)."""
+        return self._post("/generate", body)
 
-    def translate(self, text: str, src: str, dst: str, options: dict[str, Any]) -> str:
-        text = text.strip()
-        if len(text) <= 2:  # punctuation/short tokens: not worth a model call
-            return text
+    def _models_url(self) -> str:
+        return f"{self.endpoint}/tags"
 
-        options = options or {}
-        model = options.get("model")
-        if not model:
-            raise ValueError("no ollama model selected — pick one in /admin")
-        prompt = build_prompt(text, src, dst, options.get("context", ""))
+    def _parse_models(self, payload: dict) -> list[str]:
+        return [m["name"] for m in payload.get("models", []) if m.get("name")]
 
+    def _translate(self, model: str, system: str, prompt: str, options: dict) -> str:
         body = {
             "model": model,
             "prompt": prompt,
-            "system": options.get("system_prompt") or DEFAULT_SYSTEM_PROMPT,
+            "system": system,
             "stream": False,
             "think": bool(options.get("think", False)),
             "options": {
