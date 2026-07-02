@@ -7,18 +7,8 @@ from __future__ import annotations
 
 import sys
 
-from scanlation_sdk.testing import run
+from scanlation_sdk.testing import run_modules
 from tests import test_ctd, test_ctd_decode
 
-MODULES = [test_ctd_decode, test_ctd]
-
-
-def main() -> int:
-    rc = 0
-    for mod in MODULES:
-        rc |= run(mod.TESTS, mod.__name__)
-    return rc
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run_modules([test_ctd_decode, test_ctd]))

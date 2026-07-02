@@ -27,3 +27,13 @@ def run(tests, title: str) -> int:
         status = "O" if res == "PASSED" else ("-" if res.startswith("SKIP") else "X")
         print(f"  {status} {name}: {res}")
     return 0 if all(r == "PASSED" or r.startswith("SKIP") for r in results.values()) else 1
+
+
+def run_modules(modules) -> int:
+    """Run every module's ``TESTS`` list (each test module defines ``TESTS``).
+    Returns 0 if all modules passed/skipped, else 1 — the exit code a package's
+    ``python -m tests`` should use. Replaces the identical loop each package had."""
+    rc = 0
+    for mod in modules:
+        rc |= run(mod.TESTS, mod.__name__)
+    return rc

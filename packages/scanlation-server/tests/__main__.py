@@ -14,22 +14,7 @@ from tests import (
     test_pipeline,
     test_routes,
 )
-from tests.helpers import run
-
-MODULES = [
-    test_contracts,
-    test_geometry,
-    test_pipeline,
-    test_routes,
-]
-
-
-def main() -> int:
-    rc = 0
-    for mod in MODULES:
-        rc |= run(mod.TESTS, mod.__name__)
-    return rc
-
+from tests.helpers import run_modules
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run_modules([test_contracts, test_geometry, test_pipeline, test_routes]))
