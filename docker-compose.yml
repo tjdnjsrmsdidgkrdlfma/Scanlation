@@ -25,10 +25,10 @@ services:
       - data:/data         # state.json, sqlite cache, model weights, HF cache
     environment:
       SCANLATION_DEVICE: cpu               # ctd + mangaocr run on CPU here
-      # Public deploy: set a secret to require the X-Auth-Token header on the API
-      # + admin (enter the same value in the extension popup and /admin). Unset =
-      # no auth. Strongly recommended when exposed to the internet.
-      # SCANLATION_AUTH_TOKEN: change-me-to-a-long-random-secret
+      # Public deploy: require the X-Auth-Token header on the API + admin. Put the
+      # secret in a gitignored .env next to this file (SCANLATION_AUTH_TOKEN=...);
+      # empty/absent = no auth. Enter the same value in the extension popup + /admin.
+      SCANLATION_AUTH_TOKEN: ${SCANLATION_AUTH_TOKEN:-}
       # Engine source for /admin installs (defaults baked in the image). Pin a
       # tag for reproducible deploys:
       # SCANLATION_ENGINE_REF: v0.1.0
