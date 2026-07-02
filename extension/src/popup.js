@@ -94,7 +94,7 @@ function wire() {
 
 async function init() {
   const s = await ext.storage.local.get(["endpoint", "showTranslated"]);
-  $("endpoint").value = s.endpoint || "http://127.0.0.1:4000";
+  $("endpoint").value = s.endpoint || "http://127.0.0.1:4010";
   $("showOriginal").checked = s.showTranslated === false;   // checked = show original
   wire();
   connect(); // auto-connect to the saved endpoint

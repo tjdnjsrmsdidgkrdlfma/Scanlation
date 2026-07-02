@@ -1,4 +1,4 @@
-/* Scanlation content script (clean-room, MV3, no bundler).
+/* Scanlation content script (clean-room, MV2 / Firefox, no bundler).
  * Finds images on the page, sends them to the Scanlation server, and overlays
  * the returned translation boxes. Wire contract matches the server exactly:
  *   - md5 is computed over the base64 STRING (not raw bytes)
@@ -88,7 +88,7 @@
   }
 
   // -------------------------------------------------------------- state ----
-  const cfg = { endpoint: "http://127.0.0.1:4000", showTranslated: true, fontScale: 1 };
+  const cfg = { endpoint: "http://127.0.0.1:4010", showTranslated: true };
   let enabled = false;
   let observer = null;
   const processed = new WeakSet();
@@ -97,10 +97,9 @@
 
   async function loadConfig() {
     try {
-      const r = await ext.storage.local.get(["endpoint", "showTranslated", "fontScale"]);
+      const r = await ext.storage.local.get(["endpoint", "showTranslated"]);
       if (r.endpoint) cfg.endpoint = r.endpoint;
       if (typeof r.showTranslated === "boolean") cfg.showTranslated = r.showTranslated;
-      if (typeof r.fontScale === "number") cfg.fontScale = r.fontScale;
     } catch (e) { /* storage may be unavailable in some frames */ }
   }
 
@@ -136,12 +135,12 @@
       const res = await fetch(el.src);
       if (res.ok) return blobToBase64(await res.blob());
     } catch (e) { /* CORS / network -> try the worker */ }
-    // 2) service worker fetch — has host_permissions, so it bypasses page CORS
-    //    (cannot beat Referer hotlink protection, e.g. pixiv i.pximg.net)
+    // 2) background fetch — the extension has cross-origin host access, so it
+    //    bypasses page CORS (cannot beat Referer hotlinking, e.g. pixiv i.pximg.net)
     try {
       const r = await ext.runtime.sendMessage({ type: "fetch-image", url: el.src });
       if (r && r.ok) return r.base64;
-    } catch (e) { /* worker unavailable -> last resort */ }
+    } catch (e) { /* background unavailable -> last resort */ }
     // 3) canvas re-encode — only succeeds if the image isn't cross-origin tainted
     return blobToBase64(await canvasBlob(el));
   }
@@ -206,18 +205,30 @@
     return wrapper;
   }
 
+  // box is [x_min, y_min, x_max, y_max] in natural px -> fractions (0-1) of the
+  // natural size, so they map onto either % CSS or displayed-px equally.
+  function boxFractions(box, nw, nh) {
+    const [l, b, r, t] = box;
+    return { left: l / nw, top: b / nh, w: (r - l) / nw, h: (t - b) / nh };
+  }
+
+  // Text follows the show-original toggle; the full text is also the hover title.
+  function setBoxText(box) {
+    box.textContent = cfg.showTranslated ? box.dataset.tsl : box.dataset.ocr;
+    box.title = box.textContent;
+  }
+
   function makeBox(item, nw, nh) {
-    const [l, b, r, t] = item.box; // [x_min, y_min, x_max, y_max]
+    const f = boxFractions(item.box, nw, nh);
     const div = document.createElement("div");
     div.className = "scanlation-box";
-    div.style.left = (l / nw) * 100 + "%";
-    div.style.top = (b / nh) * 100 + "%";
-    div.style.width = ((r - l) / nw) * 100 + "%";
-    div.style.height = ((t - b) / nh) * 100 + "%";
+    div.style.left = f.left * 100 + "%";
+    div.style.top = f.top * 100 + "%";
+    div.style.width = f.w * 100 + "%";
+    div.style.height = f.h * 100 + "%";
     div.dataset.ocr = item.ocr;
     div.dataset.tsl = item.tsl;
-    div.textContent = cfg.showTranslated ? item.tsl : item.ocr;
-    div.title = div.textContent; // full text on hover, even if the box clips it
+    setBoxText(div);
     div.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -231,13 +242,13 @@
     const dispH = entry.img.clientHeight || entry.img.height || 1;
     const [nw, nh] = naturalSize(entry.img);
     for (const box of entry.boxes) {
-      const [l, b, r, t] = JSON.parse(box.dataset.boxraw);
-      const wpx = ((r - l) / nw) * dispW;
-      const hpx = ((t - b) / nh) * dispH;
+      const f = boxFractions(JSON.parse(box.dataset.boxraw), nw, nh);
+      const wpx = f.w * dispW;
+      const hpx = f.h * dispH;
       // size font by text length vs box area so long text shrinks to fit
       const len = Math.max(1, (box.textContent || "").length);
       let fs = Math.sqrt((wpx * hpx * 0.8) / len);
-      fs = Math.max(7, Math.min(fs, hpx)) * cfg.fontScale; // never taller than the box
+      fs = Math.max(7, Math.min(fs, hpx)); // never taller than the box
       box.style.fontSize = fs + "px";
     }
   }
@@ -283,10 +294,7 @@
   // -------------------------------------------------------------- toggle ---
   function retext() {
     for (const entry of tracked) {
-      for (const box of entry.boxes) {
-        box.textContent = cfg.showTranslated ? box.dataset.tsl : box.dataset.ocr;
-        box.title = box.textContent;
-      }
+      for (const box of entry.boxes) setBoxText(box);
       sizeFonts(entry); // text length changed -> refit
     }
   }
@@ -351,8 +359,6 @@
       case "toggle": (enabled ? disable() : enable()); break;
       case "set-endpoint": cfg.endpoint = msg.endpoint; break;
       case "set-show-translated": cfg.showTranslated = !!msg.value; retext(); break;
-      case "set-font-scale": cfg.fontScale = msg.value || 1; tracked.forEach(sizeFonts); break;
-      case "status": return Promise.resolve({ enabled, count: tracked.length });
       default: break;
     }
     return undefined;

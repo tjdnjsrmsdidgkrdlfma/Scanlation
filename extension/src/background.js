@@ -9,7 +9,7 @@
  * icon or the popup's Enable/Disable. Only durable state is storage.local. */
 const ext = globalThis.browser || globalThis.chrome;
 
-const DEFAULTS = { endpoint: "http://127.0.0.1:4010", showTranslated: true, fontScale: 1 };
+const DEFAULTS = { endpoint: "http://127.0.0.1:4010", showTranslated: true };
 const ICON_ON = { 16: "icons/icon16.png", 48: "icons/icon48.png" };
 const ICON_OFF = { 16: "icons/icon-off16.png", 48: "icons/icon-off48.png" };
 const TITLE_ON = "Scanlation: translating — click to stop";

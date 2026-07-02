@@ -23,9 +23,7 @@
     "persistent": false
   },
   "permissions": [
-    "activeTab",
     "storage",
-    "tabs",
     "<all_urls>"
   ],
   "content_scripts": [

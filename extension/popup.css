@@ -150,6 +150,3 @@ button.ghost:hover { border-color: var(--swirl); color: #fff; }
   letter-spacing: normal; font-weight: 400;
 }
 .chk input { width: auto; accent-color: var(--gold); cursor: pointer; }
-small { color: var(--muted); }
-
-section[hidden] { display: none; }
