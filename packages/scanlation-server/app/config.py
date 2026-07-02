@@ -34,6 +34,10 @@ class Settings:
     default_lang_src: str = field(default_factory=lambda: _env("SCANLATION_LANG_SRC", "ja"))
     default_lang_dst: str = field(default_factory=lambda: _env("SCANLATION_LANG_DST", "ko"))
 
+    # Shared secret gating the API/admin (sent as the X-Auth-Token header). Empty
+    # = no auth (local/dev; the current default). Set it to lock a public deploy.
+    auth_token: str = field(default_factory=lambda: _env("SCANLATION_AUTH_TOKEN", ""))
+
     # --- filesystem + device: delegated to the shared SDK context (single env
     #     source of truth, also read by every engine plugin) ---
     @property

@@ -4,6 +4,14 @@ const ext = globalThis.browser || globalThis.chrome;
 
 const $ = (id) => document.getElementById(id);
 const endpoint = () => $("endpoint").value.trim().replace(/\/$/, "");
+const token = () => $("token").value.trim();
+// Headers for a server call: JSON + the optional auth token (blank => omitted).
+const authHeaders = (base) => {
+  const h = base ? { ...base } : {};
+  const t = token();
+  if (t) h["X-Auth-Token"] = t;
+  return h;
+};
 
 function setStatus(text, kind) {
   const el = $("status");
@@ -32,7 +40,7 @@ async function sendActive(msg) {
 async function post(path, body) {
   const r = await fetch(endpoint() + path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   return r.ok;
@@ -41,7 +49,8 @@ async function post(path, body) {
 async function connect() {
   setStatus("connecting…");
   try {
-    const r = await fetch(endpoint() + "/");
+    const r = await fetch(endpoint() + "/", { headers: authHeaders() });
+    if (r.status === 401) throw new Error("auth failed — check the token");
     if (!r.ok) throw new Error("HTTP " + r.status);
     const d = await r.json();
 
@@ -59,8 +68,9 @@ async function connect() {
 
     setStatus(`connected · v${(d.version || []).join(".")}`, "ok");
 
-    await ext.storage.local.set({ endpoint: endpoint() });
+    await ext.storage.local.set({ endpoint: endpoint(), token: token() });
     sendActive({ type: "set-endpoint", endpoint: endpoint() });
+    sendActive({ type: "set-token", token: token() });
   } catch (e) {
     setStatus("cannot reach server: " + (e.message || e), "err");
   }
@@ -93,8 +103,9 @@ function wire() {
 }
 
 async function init() {
-  const s = await ext.storage.local.get(["endpoint", "showTranslated"]);
+  const s = await ext.storage.local.get(["endpoint", "showTranslated", "token"]);
   $("endpoint").value = s.endpoint || "http://127.0.0.1:4010";
+  $("token").value = s.token || "";
   $("showOriginal").checked = s.showTranslated === false;   // checked = show original
   wire();
   connect(); // auto-connect to the saved endpoint

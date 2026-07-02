@@ -88,7 +88,7 @@
   }
 
   // -------------------------------------------------------------- state ----
-  const cfg = { endpoint: "http://127.0.0.1:4010", showTranslated: true };
+  const cfg = { endpoint: "http://127.0.0.1:4010", showTranslated: true, token: "" };
   let enabled = false;
   let observer = null;
   const processed = new WeakSet();
@@ -97,9 +97,10 @@
 
   async function loadConfig() {
     try {
-      const r = await ext.storage.local.get(["endpoint", "showTranslated"]);
+      const r = await ext.storage.local.get(["endpoint", "showTranslated", "token"]);
       if (r.endpoint) cfg.endpoint = r.endpoint;
       if (typeof r.showTranslated === "boolean") cfg.showTranslated = r.showTranslated;
+      if (typeof r.token === "string") cfg.token = r.token;
     } catch (e) { /* storage may be unavailable in some frames */ }
   }
 
@@ -148,8 +149,10 @@
   // ------------------------------------------------------------- server ----
   async function runOcr(md5hash, base64, options) {
     const url = cfg.endpoint.replace(/\/$/, "") + "/run_ocrtsl/";
+    const headers = { "Content-Type": "application/json" };
+    if (cfg.token) headers["X-Auth-Token"] = cfg.token;
     const post = (body) =>
-      fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
     // lazy: md5 only. A cache miss returns non-2xx -> fall through to work.
     let res = await post({ md5: md5hash, options });
     if (!res.ok) res = await post({ md5: md5hash, contents: base64, options });
@@ -358,6 +361,7 @@
       case "disable": disable(); break;
       case "toggle": (enabled ? disable() : enable()); break;
       case "set-endpoint": cfg.endpoint = msg.endpoint; break;
+      case "set-token": cfg.token = msg.token || ""; break;
       case "set-show-translated": cfg.showTranslated = !!msg.value; retext(); break;
       default: break;
     }

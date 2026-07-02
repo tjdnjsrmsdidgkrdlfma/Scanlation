@@ -157,7 +157,7 @@ cd packages/scanlation-server
 - **유지보수** — **캐시 비우기**(`POST /clear_cache/`): 저장된 모든 캐시(페이지 결과 `ocr_runs` +
   번역 기록 `translations`)를 지워 다음 접속 때 전 과정을 재실행.
 
-> 인증 없음(로컬/LAN 전용). 외부 노출 시 리버스 프록시 뒤에 둘 것.
+> **인증**: `SCANLATION_AUTH_TOKEN`을 설정하면 API·admin이 `X-Auth-Token` 헤더를 요구한다(미설정=무인증, 로컬/LAN 기본값). 외부 노출(공개 도메인) 시엔 이 토큰을 설정하고 확장 팝업·`/admin`에 같은 값을 입력할 것 — 안 그러면 번역 API로 GPU가 무단 사용될 수 있다. `OPTIONS`(CORS preflight)와 `/admin` 정적 쉘은 면제(쉘은 토큰 없으면 API가 401이라 무해).
 
 ### 확장 로드
 
@@ -225,6 +225,7 @@ cd packages/scanlation-server
 | 변수 | 기본 | 의미 |
 |---|---|---|
 | `SCANLATION_DEVICE` | `cpu` | `cpu` / `rocm` / `dml` provider 힌트(항상 CPU fallback) |
+| `SCANLATION_AUTH_TOKEN` | (빈 값) | 설정 시 모든 API·admin이 `X-Auth-Token` 헤더를 요구(빈 값=무인증). 확장 팝업·`/admin`에 같은 값 입력. `OPTIONS`·`/admin` 정적은 면제 |
 | `SCANLATION_DETECTOR` / `_RECOGNIZER` / `_TRANSLATOR` | (빈 값) | 최초 기동 기본 엔진(빈 값=미선택; 이후 `/admin`이 덮어씀) |
 | `SCANLATION_LANG_SRC` / `_DST` | `ja` / `ko` | 최초 기동 기본 언어(이후 `/admin`) |
 | `SCANLATION_BASE_DIR` | 실행 위치(CWD) | `data/`(캐시, state.json) 루트; Docker/테스트는 명시 지정 |

@@ -269,6 +269,41 @@ def test_clear_cache_drops_runs_and_translations():
     assert c.get("/get_trans/", params={"text": text}).json()["translations"] == []
 
 
+def test_auth_token_gates_when_set():
+    from app.config import settings
+    c = client()
+    settings.auth_token = "s3cret"
+    try:
+        assert c.get("/").status_code == 401                                  # no token
+        assert c.get("/", headers={"X-Auth-Token": "nope"}).status_code == 401  # wrong token
+        assert c.get("/", headers={"X-Auth-Token": "s3cret"}).status_code == 200  # right token
+        # a mutating endpoint is gated too
+        assert c.post("/set_lang/", json={"lang_src": "ja", "lang_dst": "ko"}).status_code == 401
+        # the /admin static shell stays open so the token can be entered
+        assert c.get("/admin/").status_code == 200
+    finally:
+        settings.auth_token = ""
+    assert c.get("/").status_code == 200  # cleared -> open again (current default)
+
+
+def test_auth_preflight_open_and_401_carries_cors():
+    from app.config import settings
+    c = client()
+    settings.auth_token = "s3cret"
+    try:
+        # CORS preflight (no token) must pass, else the extension's cross-origin calls die
+        pre = c.options("/run_ocrtsl/", headers={
+            "Origin": "https://example.com", "Access-Control-Request-Method": "POST",
+        })
+        assert pre.status_code < 400
+        # the 401 still carries CORS headers (CORS middleware is outermost)
+        r = c.get("/", headers={"Origin": "https://example.com"})
+        assert r.status_code == 401
+        assert r.headers.get("access-control-allow-origin") == "*"
+    finally:
+        settings.auth_token = ""
+
+
 TESTS = [
     test_handshake_keys,
     test_run_ocrtsl_work_returns_boxes,
@@ -290,6 +325,8 @@ TESTS = [
     test_prompt_select_save_delete,
     test_active_prompt_injected_into_translator_options,
     test_clear_cache_drops_runs_and_translations,
+    test_auth_token_gates_when_set,
+    test_auth_preflight_open_and_401_carries_cors,
 ]
 
 if __name__ == "__main__":

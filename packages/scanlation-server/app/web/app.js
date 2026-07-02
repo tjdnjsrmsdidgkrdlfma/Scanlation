@@ -91,6 +91,8 @@ const I18N = {
     "toast.installed": "{name} 설치 완료",
     "toast.installResult": "{name} 결과: {status}",
     "toast.installFail": "{name} 설치 실패: {msg}",
+    "auth.tokenPh": "X-Auth-Token (없으면 비움)",
+    "auth.needed": "인증 필요 — 토큰을 입력하세요",
   },
   en: {
     "brand.sub": "Server settings · models · prompts",
@@ -151,6 +153,8 @@ const I18N = {
     "toast.installed": "{name} installed",
     "toast.installResult": "{name} result: {status}",
     "toast.installFail": "{name} install failed: {msg}",
+    "auth.tokenPh": "X-Auth-Token (blank if none)",
+    "auth.needed": "Auth required — enter the token",
   },
 };
 
@@ -178,12 +182,24 @@ function applyLang() {
   document.querySelectorAll("#lang-toggle .langopt").forEach((el) => el.classList.toggle("active", el.dataset.lang === LANG));
 }
 
+// --- auth token (optional; sent as X-Auth-Token) --------------------------
+const TOKEN_KEY = "scan_admin_token";
+const getToken = () => { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (_) { return ""; } };
+const setToken = (v) => { try { localStorage.setItem(TOKEN_KEY, v); } catch (_) { /* ignore */ } };
+
 // --- tiny fetch helpers ---------------------------------------------------
 async function api(path, opts) {
-  const res = await fetch(path, opts);
+  const o = { ...(opts || {}) };
+  const tok = getToken();
+  o.headers = { ...(o.headers || {}), ...(tok ? { "X-Auth-Token": tok } : {}) };
+  const res = await fetch(path, o);
   let body = null;
   try { body = await res.json(); } catch (_) { /* may be empty */ }
-  if (!res.ok) throw new Error((body && body.detail) || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error((body && body.detail) || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return body;
 }
 const postJSON = (path, data) =>
@@ -203,6 +219,7 @@ async function load() {
   try {
     DATA = await api("/get_settings/");
   } catch (e) {
+    if (e.status === 401) { toast(t("auth.needed"), "err"); $("token").focus(); return; }
     toast(t("toast.noServer", { msg: e.message }), "err");
     return;
   }
@@ -492,6 +509,8 @@ $("plugins").addEventListener("click", (ev) => {
   if (btn) installPlugin(btn.dataset.install);
 });
 $("clear-cache").addEventListener("click", clearCache);
+$("token").value = getToken();
+$("token").addEventListener("change", () => { setToken($("token").value.trim()); load(); });
 
 applyLang();
 load();
