@@ -535,4 +535,8 @@ $("gate-form").addEventListener("submit", (ev) => {
 });
 
 applyLang();
+// No token yet? Show the login scene immediately (before the get_settings round
+// trip) so the app UI never flashes first. A valid stored token skips straight
+// to load(); auth-off servers just hide the gate the moment load() succeeds.
+if (!getToken()) showGate(false);
 load();
