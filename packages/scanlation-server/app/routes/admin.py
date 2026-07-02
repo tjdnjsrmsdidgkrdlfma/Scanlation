@@ -141,6 +141,6 @@ def delete_prompt(req: SelectPromptRequest) -> dict:
 
 @router.post("/clear_cache/")
 def clear_cache() -> dict:
-    """Drop all cached page results so every page re-runs the full pipeline next
-    time. Translation memory (incl. manual corrections) is preserved."""
-    return {"status": "success", "cleared": cache.clear_runs()}
+    """Drop all cached data (page results + translation log) so every page re-runs
+    the full pipeline next time."""
+    return {"status": "success", "cleared": cache.clear()}

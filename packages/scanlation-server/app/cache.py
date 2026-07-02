@@ -1,11 +1,11 @@
-"""SQLite result cache + manual translation memory (TM).
+"""SQLite result cache + translation memory (TM).
 
 Two concerns:
   * ocr_runs  — a whole page's result keyed by (md5, langs, engines, opt_hash).
                 Powers the lazy flow: client POSTs md5 only; a hit returns the
                 stored result without re-running models.
-  * translations — every (src_text, langs, model)->dst_text. model='manual'
-                   wins (favor_manual) so user corrections persist.
+  * translations — every (src_text, langs, model)->dst_text, exposed by
+                   /get_trans/ (a translation log; not consulted by the pipeline).
 
 WAL + a process lock keep it safe under the threadpool that runs blocking work.
 """
@@ -74,13 +74,12 @@ class Cache:
             )
             self._conn.commit()
 
-    def clear_runs(self) -> int:
-        """Drop every cached page result so pages re-run the full pipeline on next
-        view. Translation memory (``translations``, incl. manual corrections) is
-        left untouched — machine translations are recomputed anyway, and manual
-        edits are user data. Returns the number of cached pages removed."""
+    def clear(self) -> int:
+        """Drop all cached data — page results and the translation log — so
+        everything is recomputed fresh on next use. Returns the rows removed."""
         with self._lock:
             n = self._conn.execute("DELETE FROM ocr_runs").rowcount
+            n += self._conn.execute("DELETE FROM translations").rowcount
             self._conn.commit()
         return n
 
@@ -89,20 +88,10 @@ class Cache:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT model, dst_text FROM translations WHERE src_text=? AND src_lang=? AND dst_lang=? "
-                "ORDER BY (model='manual') DESC, created_at DESC",
+                "ORDER BY created_at DESC",
                 (src_text, src_lang, dst_lang),
             ).fetchall()
         return [{"model": r[0], "text": r[1]} for r in rows]
-
-    def best_translation(self, src_text: str, src_lang: str, dst_lang: str) -> Optional[dict]:
-        rows = self.get_translations(src_text, src_lang, dst_lang)
-        if not rows:
-            return None
-        if settings.favor_manual:
-            for r in rows:
-                if r["model"] == "manual":
-                    return r
-        return rows[0]
 
     def put_translation(self, src_text: str, src_lang: str, dst_lang: str, model: str, dst_text: str) -> None:
         with self._lock:

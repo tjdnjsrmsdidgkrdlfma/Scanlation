@@ -86,19 +86,6 @@ def test_run_tsl_and_get_trans_roundtrip():
     assert "dummy" in models
 
 
-def test_set_manual_translation_wins():
-    c = client()
-    text = "手動テスト"
-    c.post("/set_manual_translation/", json={"text": text, "translation": "수동번역"})
-
-    g = c.get("/get_trans/", params={"text": text}).json()["translations"]
-    assert any(t["model"] == "manual" and t["text"] == "수동번역" for t in g)
-
-    # run_tsl must honor the manual override
-    r = c.post("/run_tsl/", json={"text": text})
-    assert r.json()["text"] == "수동번역"
-
-
 def test_get_active_options_shape():
     d = client().get("/get_active_options/").json()["options"]
     assert set(d) == {"detector", "recognizer", "translator"}
@@ -262,24 +249,24 @@ def test_active_prompt_injected_into_translator_options():
     assert state.translator_options("dummy", None)["system_prompt"].startswith("From now on")
 
 
-def test_clear_cache_drops_runs_keeps_manual():
+def test_clear_cache_drops_runs_and_translations():
     c = client()
     p = payload(color=(7, 9, 11))  # unique md5
-    # a manual correction that must survive the clear
-    c.post("/set_manual_translation/", json={"text": "保存対象", "translation": "보존대상"})
-    # work -> populates ocr_runs; lazy hit confirms it's cached
+    text = "全消去対象の文章"
+    # populate both caches: a page result (ocr_runs) + a translation log entry
     assert c.post("/run_ocrtsl/", json={"md5": p["md5"], "contents": p["b64"]}).status_code == 200
-    assert c.post("/run_ocrtsl/", json={"md5": p["md5"]}).status_code == 200
+    assert c.post("/run_ocrtsl/", json={"md5": p["md5"]}).status_code == 200  # lazy hit = cached
+    c.post("/run_tsl/", json={"text": text})
+    assert c.get("/get_trans/", params={"text": text}).json()["translations"]  # non-empty
 
     r = c.post("/clear_cache/", json={})
     assert r.status_code == 200
     assert r.json()["status"] == "success" and r.json()["cleared"] >= 1
 
-    # ocr_runs gone -> lazy now misses (client would fall through to work)
+    # page cache gone -> lazy now misses (client would fall through to work)
     assert c.post("/run_ocrtsl/", json={"md5": p["md5"]}).status_code == 404
-    # translation memory (manual) preserved
-    g = c.get("/get_trans/", params={"text": "保存対象"}).json()["translations"]
-    assert any(t["model"] == "manual" and t["text"] == "보존대상" for t in g)
+    # translation log gone too
+    assert c.get("/get_trans/", params={"text": text}).json()["translations"] == []
 
 
 TESTS = [
@@ -289,7 +276,6 @@ TESTS = [
     test_no_engine_installed_is_400,
     test_lazy_miss_then_work_then_cached_hit,
     test_run_tsl_and_get_trans_roundtrip,
-    test_set_manual_translation_wins,
     test_get_active_options_shape,
     test_set_models_validates,
     test_set_lang_validates,
@@ -303,7 +289,7 @@ TESTS = [
     test_set_options_persists_and_clears,
     test_prompt_select_save_delete,
     test_active_prompt_injected_into_translator_options,
-    test_clear_cache_drops_runs_keeps_manual,
+    test_clear_cache_drops_runs_and_translations,
 ]
 
 if __name__ == "__main__":

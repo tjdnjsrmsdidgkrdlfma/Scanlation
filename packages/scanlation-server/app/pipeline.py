@@ -40,10 +40,7 @@ def assign_reading_order(regions: list[Region], vertical_hint: bool = False) -> 
 def translate_text(
     text: str, src: str, dst: str, translator: Translator, options: dict
 ) -> str:
-    """Translate one text, honoring manual TM overrides and caching machine output."""
-    best = cache.best_translation(text, src, dst)
-    if best is not None and best["model"] == "manual":
-        return best["text"]
+    """Translate one text and record the machine result in the TM (for /get_trans/)."""
     tsl = translator.translate(text, src, dst, options)
     model = getattr(translator, "name", "machine")
     cache.put_translation(text, src, dst, model, tsl)

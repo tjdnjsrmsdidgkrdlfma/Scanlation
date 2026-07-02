@@ -25,12 +25,6 @@ class RunTslRequest(BaseModel):
     text: str
 
 
-# --- /set_manual_translation/ ---------------------------------------------
-class SetManualRequest(BaseModel):
-    text: str
-    translation: str
-
-
 # --- /set_models/ ----------------------------------------------------------
 class SetModelsRequest(BaseModel):
     detector: Optional[str] = None

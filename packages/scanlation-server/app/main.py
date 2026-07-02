@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
-from .routes import admin, handshake, manual, plugins, run, settings_routes
+from .routes import admin, handshake, plugins, run, settings_routes
 
 # Admin page assets ship with the code (not the data volume), so resolve them
 # relative to this package, never to SCANLATION_BASE_DIR.
@@ -39,7 +39,6 @@ def create_app() -> FastAPI:
     )
     app.include_router(handshake.router)
     app.include_router(run.router)
-    app.include_router(manual.router)
     app.include_router(settings_routes.router)
     app.include_router(plugins.router)
     app.include_router(admin.router)

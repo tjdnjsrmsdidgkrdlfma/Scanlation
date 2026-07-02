@@ -34,9 +34,6 @@ class Settings:
     default_lang_src: str = field(default_factory=lambda: _env("SCANLATION_LANG_SRC", "ja"))
     default_lang_dst: str = field(default_factory=lambda: _env("SCANLATION_LANG_DST", "ko"))
 
-    # Manual translations win over machine ones in the TM lookup.
-    favor_manual: bool = True
-
     # --- filesystem + device: delegated to the shared SDK context (single env
     #     source of truth, also read by every engine plugin) ---
     @property
