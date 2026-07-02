@@ -16,6 +16,19 @@ import numpy as np
 
 from scanlation_sdk.contracts import Region
 
+# Single source of truth for the mask-decode tuning defaults. The plugin's
+# OPTION_SCHEMA defaults, its detect() fallbacks, AND mask_to_regions()'s own
+# keyword defaults all read these — so a standalone decode call (e.g. the tests)
+# behaves exactly like the live pipeline instead of silently disabling merging.
+DEFAULTS = {
+    "mask_threshold": 0.3,   # decode calls this `thresh`
+    "min_area": 200,
+    "min_side": 12,
+    "unclip_ratio": 1.2,
+    "merge_px": 16,
+    "merge_aspect": 1.7,
+}
+
 
 def letterbox(img: np.ndarray, new_size: int, pad_value: int = 114):
     """Resize keeping aspect ratio, pad to a square new_size. YOLO-style.
@@ -64,12 +77,12 @@ def mask_to_regions(
     orig_w: int,
     orig_h: int,
     *,
-    thresh: float = 0.3,
-    min_area: int = 200,
-    min_side: int = 12,
-    unclip_ratio: float = 1.2,
-    merge_px: int = 0,
-    merge_aspect: float = 1.0,
+    thresh: float = DEFAULTS["mask_threshold"],
+    min_area: int = DEFAULTS["min_area"],
+    min_side: int = DEFAULTS["min_side"],
+    unclip_ratio: float = DEFAULTS["unclip_ratio"],
+    merge_px: int = DEFAULTS["merge_px"],
+    merge_aspect: float = DEFAULTS["merge_aspect"],
 ) -> list[Region]:
     """Convert a float mask (letterboxed coords) to original-pixel Regions.
 
@@ -109,6 +122,7 @@ def mask_to_regions(
             continue
         quad = cv2.boxPoints(rect).astype(np.float32)
         if unclip_ratio and unclip_ratio > 0:
+            # unclip_ratio is "1.0 = no expansion"; _unclip wants the extra fraction.
             quad = _unclip(quad, unclip_ratio - 1.0)
 
         # map letterboxed -> original pixels

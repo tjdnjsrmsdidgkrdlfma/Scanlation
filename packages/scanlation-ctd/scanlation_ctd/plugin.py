@@ -19,9 +19,11 @@ the slow CTD test is skipped.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -44,21 +46,25 @@ class CTDDetector(EngineBase):
     homepage = "https://github.com/dmMaze/comic-text-detector"
     description = "Manga/comic text detector. Segmentation mask -> rotated line quads."
     warning = "Requires an ONNX weight file (SCANLATION_CTD_MODEL or <models>/ctd/*.onnx)."
+    # Tuning defaults come from decode.DEFAULTS (single source shared with the
+    # mask decoder + detect() fallbacks) so the schema can never drift from it.
     OPTION_SCHEMA = {
         "det_size": {"type": int, "default": 1024, "description": "Square inference size (letterboxed)."},
-        "mask_threshold": {"type": float, "default": 0.3, "description": "Mask binarization threshold."},
-        "min_area": {"type": int, "default": 200, "description": "Drop boxes smaller than this (original px^2)."},
-        "min_side": {"type": int, "default": 12, "description": "Drop boxes whose short side is under this (original px) — cuts SFX shards/ellipses."},
-        "unclip_ratio": {"type": float, "default": 1.2, "description": "Dilate quads outward (1.0 = none)."},
-        "merge_px": {"type": int, "default": 16, "description": "Morph-close kernel (mask px) to merge glyphs into lines/bubbles; 0 = per-character."},
-        "merge_aspect": {"type": float, "default": 1.7, "description": "Merge kernel height/width (>1 merges down a vertical JP column, keeps columns apart)."},
+        "mask_threshold": {"type": float, "default": decode.DEFAULTS["mask_threshold"], "description": "Mask binarization threshold."},
+        "min_area": {"type": int, "default": decode.DEFAULTS["min_area"], "description": "Drop boxes smaller than this (original px^2)."},
+        "min_side": {"type": int, "default": decode.DEFAULTS["min_side"], "description": "Drop boxes whose short side is under this (original px) — cuts SFX shards/ellipses."},
+        "unclip_ratio": {"type": float, "default": decode.DEFAULTS["unclip_ratio"], "description": "Dilate quads outward (1.0 = none)."},
+        "merge_px": {"type": int, "default": decode.DEFAULTS["merge_px"], "description": "Morph-close kernel (mask px) to merge glyphs into lines/bubbles; 0 = per-character."},
+        "merge_aspect": {"type": float, "default": decode.DEFAULTS["merge_aspect"], "description": "Merge kernel height/width (>1 merges down a vertical JP column, keeps columns apart)."},
     }
     SUPPORTED_SRC = ["ja", "en", "zh", "ko"]
+    DEFAULT_DET_SIZE = 1024
 
     def __init__(self) -> None:
         self._session = None
         self._input_name: str | None = None
-        self._det_size = 1024
+        self._det_size = self.DEFAULT_DET_SIZE
+        self._static_size: int | None = None  # set if the ONNX pins its input size
 
     # --- weights / install ---
     DEFAULT_URL = "https://huggingface.co/mayocream/comic-text-detector-onnx/resolve/main/comic-text-detector.onnx?download=true"
@@ -67,8 +73,6 @@ class CTDDetector(EngineBase):
         return context.models_dir / "ctd"
 
     def is_installed(self) -> bool:
-        import os
-
         env = os.environ.get("SCANLATION_CTD_MODEL")
         if env and Path(env).is_file():
             return True
@@ -79,7 +83,6 @@ class CTDDetector(EngineBase):
         """Download the ONNX weights (~95MB). Explicit — never called by load()."""
         if self.is_installed():
             return
-        import os
         import urllib.request
 
         url = os.environ.get("SCANLATION_CTD_URL", self.DEFAULT_URL)
@@ -91,8 +94,6 @@ class CTDDetector(EngineBase):
         logger.info("CTD weights installed -> %s (%d bytes)", dst, dst.stat().st_size)
 
     def _resolve_model_path(self) -> Path:
-        import os
-
         env = os.environ.get("SCANLATION_CTD_MODEL")
         if env and Path(env).is_file():
             return Path(env)
@@ -122,12 +123,15 @@ class CTDDetector(EngineBase):
         providers = [p for p in self._providers() if p in available] or ["CPUExecutionProvider"]
         self._session = ort.InferenceSession(str(model_path), providers=providers)
         self._input_name = self._session.get_inputs()[0].name
-        # static input size if the export pins it, else keep the option default
+        # If the export pins a static input size, we MUST feed exactly that (a
+        # different det_size option would make session.run fail). Record it so
+        # detect() can honor it and ignore a mismatching option.
         shape = self._session.get_inputs()[0].shape
-        if isinstance(shape[-1], int) and shape[-1] > 0:
-            self._det_size = int(shape[-1])
-        logger.info("CTD loaded %s providers=%s det_size=%d", model_path.name,
-                    self._session.get_providers(), self._det_size)
+        self._static_size = int(shape[-1]) if (isinstance(shape[-1], int) and shape[-1] > 0) else None
+        if self._static_size:
+            self._det_size = self._static_size
+        logger.info("CTD loaded %s providers=%s det_size=%d static=%s", model_path.name,
+                    self._session.get_providers(), self._det_size, self._static_size is not None)
 
     def unload(self) -> None:
         self._session = None
@@ -160,7 +164,7 @@ class CTDDetector(EngineBase):
     def detect(self, image: Image.Image, options: dict[str, Any]) -> list[Region]:
         if self._session is None:
             self.load()
-        det_size = int(options.get("det_size", self._det_size))
+        det_size = self._det_size_for(options)
         img = np.asarray(image.convert("RGB"))
         orig_h, orig_w = img.shape[:2]
 
@@ -173,16 +177,29 @@ class CTDDetector(EngineBase):
 
         # mask is at the network's spatial resolution; rescale to det_size grid
         if mask.shape[:2] != (det_size, det_size):
-            import cv2
-
             mask = cv2.resize(mask, (det_size, det_size), interpolation=cv2.INTER_LINEAR)
 
+        d = decode.DEFAULTS
         return decode.mask_to_regions(
             mask, ratio, pad, orig_w, orig_h,
-            thresh=float(options.get("mask_threshold", 0.3)),
-            min_area=int(options.get("min_area", 200)),
-            min_side=int(options.get("min_side", 12)),
-            unclip_ratio=float(options.get("unclip_ratio", 1.2)),
-            merge_px=int(options.get("merge_px", 16)),
-            merge_aspect=float(options.get("merge_aspect", 1.7)),
+            thresh=float(options.get("mask_threshold", d["mask_threshold"])),
+            min_area=int(options.get("min_area", d["min_area"])),
+            min_side=int(options.get("min_side", d["min_side"])),
+            unclip_ratio=float(options.get("unclip_ratio", d["unclip_ratio"])),
+            merge_px=int(options.get("merge_px", d["merge_px"])),
+            merge_aspect=float(options.get("merge_aspect", d["merge_aspect"])),
         )
+
+    def _det_size_for(self, options: dict[str, Any]) -> int:
+        """The inference size to letterbox to. A model with a pinned (static)
+        input size wins over the option — feeding any other size would crash
+        session.run — and a mismatching option is logged and ignored."""
+        if self._static_size is not None:
+            requested = options.get("det_size")
+            if requested is not None and int(requested) != self._static_size:
+                logger.warning(
+                    "det_size=%s ignored: this ONNX has a fixed %dx%d input",
+                    requested, self._static_size, self._static_size,
+                )
+            return self._static_size
+        return int(options.get("det_size", self._det_size))

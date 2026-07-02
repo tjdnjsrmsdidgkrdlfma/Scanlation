@@ -50,10 +50,45 @@ def test_mask_to_regions_empty_mask_is_empty():
     assert regions == []
 
 
+def test_min_side_drops_thin_shards():
+    """A hairline sliver (SFX shard) is dropped by the min_side floor even when
+    its area clears min_area — min_side is the key noise discriminator."""
+    size = 256
+    mask = np.zeros((size, size), np.float32)
+    mask[100:103, 60:180] = 1.0  # 3px tall x 120px wide: area 360 > min_area, side 3 < 12
+
+    dropped = mask_to_regions(mask, 1.0, (0, 0), size, size,
+                              thresh=0.5, min_area=200, min_side=12, merge_px=0)
+    assert dropped == []
+    # control: a permissive min_side keeps it (area alone would not have cut it)
+    kept = mask_to_regions(mask, 1.0, (0, 0), size, size,
+                           thresh=0.5, min_area=200, min_side=2, merge_px=0)
+    assert len(kept) == 1
+
+
+def test_merge_px_joins_adjacent_blobs():
+    """merge_px morph-closes the mask so adjacent glyphs fuse into one line/bubble
+    region instead of one-per-blob (manga-ocr wants whole lines)."""
+    size = 256
+    mask = np.zeros((size, size), np.float32)
+    mask[100:130, 60:90] = 1.0    # blob A (30x30)
+    mask[100:130, 100:130] = 1.0  # blob B (30x30), a 10px gap from A
+
+    apart = mask_to_regions(mask, 1.0, (0, 0), size, size,
+                            thresh=0.5, min_area=200, min_side=12, merge_px=0)
+    assert len(apart) == 2
+    merged = mask_to_regions(mask, 1.0, (0, 0), size, size,
+                             thresh=0.5, min_area=200, min_side=12,
+                             merge_px=16, merge_aspect=1.0)
+    assert len(merged) == 1
+
+
 TESTS = [
     test_letterbox_is_square_and_invertible,
     test_mask_to_regions_recovers_rotated_rect,
     test_mask_to_regions_empty_mask_is_empty,
+    test_min_side_drops_thin_shards,
+    test_merge_px_joins_adjacent_blobs,
 ]
 
 if __name__ == "__main__":
