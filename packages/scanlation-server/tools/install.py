@@ -11,17 +11,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import _bootstrap  # noqa: F401 - side effects: add package root to sys.path, UTF-8 stdio
 
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(encoding="utf-8")
-    except Exception:  # noqa: BLE001
-        pass
-
-from app.registry import registry
+from app.plugins_install import find_class
 
 
 def main() -> None:
@@ -30,9 +23,7 @@ def main() -> None:
     args = ap.parse_args()
 
     for name in args.engines or ["ctd", "mangaocr"]:
-        cls = next(
-            (m[name] for m in registry.all_classes().values() if name in m), None
-        )
+        cls = find_class(name)
         if cls is None:
             print(f"{name}: unknown engine", file=sys.stderr)
             continue

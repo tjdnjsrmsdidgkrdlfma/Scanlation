@@ -176,7 +176,9 @@ def refresh_registry() -> None:
     registry.rediscover()
 
 
-def _find_class(name: str):
+def find_class(name: str):
+    """The engine class registered under ``name`` in any role, or None. Shared by
+    install_engine and tools/install.py so the role-crossing lookup lives once."""
     from .registry import registry
 
     for mapping in registry.all_classes().values():
@@ -190,14 +192,14 @@ def install_engine(name: str) -> dict:
     rediscover), then download its weights. ``name`` is the engine/registry name.
     Returns a small status dict; raises ValueError/RuntimeError on failure."""
     result: dict = {}
-    cls = _find_class(name)
+    cls = find_class(name)
     if cls is None:  # package not installed yet -> pip install from the catalog
         entry = catalog().get(name)
         if entry is None:
             raise ValueError(f"unknown plugin: {name}")
         install_package(entry)
         refresh_registry()
-        cls = _find_class(name)
+        cls = find_class(name)
         if cls is None:
             raise RuntimeError(f"{name} installed but not discovered (check entry_points)")
         result["package"] = "installed"

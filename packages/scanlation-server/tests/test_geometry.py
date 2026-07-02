@@ -1,13 +1,12 @@
 """Deskew unit tests — the highest-risk math, covered with no models."""
 from __future__ import annotations
 
-import math
-
 import numpy as np
 from PIL import Image, ImageDraw
 
 from scanlation_sdk.contracts import Region
 from app.geometry import deskew_crop, order_quad
+from tests.fake_engines import _rotated_quad
 
 
 def test_order_quad_orders_tl_tr_br_bl():
@@ -28,13 +27,6 @@ def test_axis_aligned_deskew_is_exact_crop():
     assert crop.size == (100, 50)
     # interior is the black fill
     assert crop.getpixel((50, 25)) == (0, 0, 0)
-
-
-def _rotated_quad(cx, cy, w, h, deg):
-    a = math.radians(deg)
-    ca, sa = math.cos(a), math.sin(a)
-    base = [(-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)]
-    return [(cx + x * ca - y * sa, cy + x * sa + y * ca) for x, y in base]
 
 
 def test_rotated_deskew_recovers_upright_size_and_content():

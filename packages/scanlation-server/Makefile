@@ -2,16 +2,12 @@
 # equivalent ../../venv/Scripts/python commands directly (see README).
 PY ?= ../../venv/Scripts/python
 
-.PHONY: test test-ctd test-mangaocr serve viz install
+.PHONY: test serve viz install
 
 test:            ## fast unit suite, no models/GPU (hand-rolled runner)
 	$(PY) -m tests
-
-test-ctd:        ## CTD model smoke (needs onnx weights; self-skips otherwise)
-	$(PY) -m tests.test_ctd
-
-test-mangaocr:   ## manga-ocr smoke (needs the package; self-skips otherwise)
-	$(PY) -m tests.test_mangaocr
+	# engine smokes (ctd/mangaocr/...) live in their own packages: run
+	# `../../venv/Scripts/python -m tests` from packages/scanlation-<engine>/
 
 serve:           ## run the API (uvicorn, single worker)
 	$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 4000 --workers 1

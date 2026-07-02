@@ -1,8 +1,8 @@
 """Fast test suite: ``python -m tests`` (from server/).
 
-Runs every model-free module. The slow model smokes (test_ctd, test_mangaocr)
-are run on their own: ``python -m tests.test_ctd`` — they self-skip when the
-weights/package aren't present.
+Runs every model-free module. The slow model smokes live in each engine package
+(``packages/scanlation-<engine>/tests/``); run ``python -m tests`` from there —
+they self-skip when the weights/package aren't present.
 """
 from __future__ import annotations
 
