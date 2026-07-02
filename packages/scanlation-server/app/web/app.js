@@ -68,6 +68,12 @@ const I18N = {
     "maint.cache.title": "캐시 비우기",
     "maint.cache.desc": "저장된 모든 캐시(페이지 결과 + 번역 기록)를 지워 다음 접속 때 전 과정(검출·인식·번역)을 새로 실행합니다.",
     "maint.cache.btn": "캐시 비우기",
+    "tab.behavior": "동작",
+    "behavior.h2": "동작",
+    "behavior.hint": "확장 동작 설정",
+    "behavior.minDim.label": "최소 이미지 변 (px)",
+    "behavior.minDim.desc": "이미지의 짧은 변이 이 값보다 작으면 아이콘·배너로 보고 번역하지 않습니다. 확장이 접속 시 이 값을 받아 적용합니다. 0 = 모든 이미지 번역.",
+    "toast.behaviorSaved": "동작 설정 저장됨",
     "field.default": "(기본값)",
     "field.defaultPrefix": "기본",
     "field.pickModel": "— 모델 선택 —",
@@ -133,6 +139,12 @@ const I18N = {
     "maint.cache.title": "Clear cache",
     "maint.cache.desc": "Removes all cached data (page results + translation log) so the full pipeline (detect · recognize · translate) re-runs next time.",
     "maint.cache.btn": "Clear cache",
+    "tab.behavior": "Behavior",
+    "behavior.h2": "Behavior",
+    "behavior.hint": "Extension behavior settings",
+    "behavior.minDim.label": "Min image side (px)",
+    "behavior.minDim.desc": "Images whose shorter side is under this are treated as icons/banners and not translated. The extension picks this up on connect. 0 = translate everything.",
+    "toast.behaviorSaved": "Behavior settings saved",
     "field.default": "(default)",
     "field.defaultPrefix": "default",
     "field.pickModel": "— pick a model —",
@@ -256,6 +268,7 @@ function render() {
   renderPrompt();
   renderEngineOptions();
   renderPlugins();
+  renderBehavior();
 }
 
 function engineOption(e) {
@@ -432,6 +445,11 @@ function renderPlugins() {
   $("plugins").innerHTML = rows.join("");
 }
 
+// --- behavior (client settings, delivered to the extension via handshake) -
+function renderBehavior() {
+  $("min-image-dim").value = DATA.selection.min_image_dim;
+}
+
 // --- actions --------------------------------------------------------------
 async function saveModels() {
   try {
@@ -494,6 +512,14 @@ async function clearCache() {
     toast(t("toast.cacheCleared", { n: r.cleared }), "ok");
   } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
 }
+async function saveBehavior() {
+  try {
+    const n = parseInt($("min-image-dim").value, 10);
+    await postJSON("/set_client_config/", { min_image_dim: Number.isFinite(n) ? n : 0 });
+    toast(t("toast.behaviorSaved"), "ok");
+    await load();
+  } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
+}
 
 // --- tabs -----------------------------------------------------------------
 function showView(name) {
@@ -528,6 +554,7 @@ $("plugins").addEventListener("click", (ev) => {
   if (btn) installPlugin(btn.dataset.install);
 });
 $("clear-cache").addEventListener("click", clearCache);
+$("save-behavior").addEventListener("click", saveBehavior);
 $("gate-form").addEventListener("submit", (ev) => {
   ev.preventDefault();
   setToken($("gate-token").value.trim());

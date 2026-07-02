@@ -23,7 +23,12 @@ from ..engine_meta import class_meta, safe_is_installed, serialize_schema
 from ..plugins_install import catalog
 from ..prompts import BUILTIN_PROMPTS
 from ..registry import ROLE_NAMES, registry
-from ..schemas import SavePromptRequest, SelectPromptRequest, SetOptionsRequest
+from ..schemas import (
+    SavePromptRequest,
+    SelectPromptRequest,
+    SetClientConfigRequest,
+    SetOptionsRequest,
+)
 from ..state import state
 
 router = APIRouter()
@@ -78,6 +83,7 @@ def get_settings() -> dict:
             "lang_src": sel.lang_src,
             "lang_dst": sel.lang_dst,
             "prompt_active": sel.prompt_active,
+            "min_image_dim": sel.min_image_dim,
         },
         "languages": LANGUAGES,
         "engines": {role: _engine_entries(role) for role in ROLE_NAMES},
@@ -137,6 +143,16 @@ def delete_prompt(req: SelectPromptRequest) -> dict:
         raise HTTPException(status_code=400, detail="cannot delete a builtin prompt")
     state.delete_prompt(req.name)
     return {"status": "success", "active": state.selection.prompt_active}
+
+
+@router.post("/set_client_config/")
+def set_client_config(req: SetClientConfigRequest) -> dict:
+    """Persist extension-behavior settings (동작 tab). Currently: min_image_dim
+    (the image filter's shorter-side px). Delivered to the extension via GET /."""
+    if req.min_image_dim is not None and req.min_image_dim < 0:
+        raise HTTPException(status_code=400, detail="min_image_dim must be >= 0")
+    state.set_client_config(min_image_dim=req.min_image_dim)
+    return {"status": "success", "min_image_dim": state.selection.min_image_dim}
 
 
 @router.post("/clear_cache/")

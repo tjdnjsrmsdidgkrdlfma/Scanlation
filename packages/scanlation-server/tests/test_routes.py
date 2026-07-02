@@ -269,6 +269,23 @@ def test_clear_cache_drops_runs_and_translations():
     assert c.get("/get_trans/", params={"text": text}).json()["translations"] == []
 
 
+def test_client_config_min_image_dim():
+    c = client()
+    # handshake + get_settings expose the current value
+    assert "min_image_dim" in c.get("/").json()
+    assert "min_image_dim" in c.get("/get_settings/").json()["selection"]
+    try:
+        # set it -> reflected in both the handshake and the admin snapshot
+        r = c.post("/set_client_config/", json={"min_image_dim": 120})
+        assert r.status_code == 200 and r.json()["min_image_dim"] == 120
+        assert c.get("/").json()["min_image_dim"] == 120
+        assert c.get("/get_settings/").json()["selection"]["min_image_dim"] == 120
+        # negative -> 400
+        assert c.post("/set_client_config/", json={"min_image_dim": -5}).status_code == 400
+    finally:
+        c.post("/set_client_config/", json={"min_image_dim": 80})  # cleanup
+
+
 def test_auth_token_gates_when_set():
     from app.config import settings
     c = client()
@@ -325,6 +342,7 @@ TESTS = [
     test_prompt_select_save_delete,
     test_active_prompt_injected_into_translator_options,
     test_clear_cache_drops_runs_and_translations,
+    test_client_config_min_image_dim,
     test_auth_token_gates_when_set,
     test_auth_preflight_open_and_401_carries_cors,
 ]

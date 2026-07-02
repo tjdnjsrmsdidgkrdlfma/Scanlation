@@ -28,6 +28,9 @@ class Selection:
     # Active LLM system-prompt preset name (see app.prompts) + user-saved presets.
     prompt_active: str = "default"
     prompts: dict[str, str] = field(default_factory=dict)
+    # Client behavior (delivered to the extension via the handshake): skip images
+    # whose shorter side is under this many px (icons/banners). 0 = no filter.
+    min_image_dim: int = settings.min_image_dim
 
 
 class AppState:
@@ -73,6 +76,12 @@ class AppState:
     def set_langs(self, lang_src: str, lang_dst: str) -> None:
         self.selection.lang_src = lang_src
         self.selection.lang_dst = lang_dst
+        self.save()
+
+    def set_client_config(self, *, min_image_dim: int | None = None) -> None:
+        """Persist extension-behavior settings (the /admin 동작 tab)."""
+        if min_image_dim is not None:
+            self.selection.min_image_dim = max(0, int(min_image_dim))
         self.save()
 
     def set_options(self, engine_name: str, options: dict[str, Any]) -> None:

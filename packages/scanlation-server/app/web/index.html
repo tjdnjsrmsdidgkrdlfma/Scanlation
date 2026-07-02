@@ -24,6 +24,7 @@
       <button class="tab" data-view="prompt" data-i18n="tab.prompt">번역 프롬프트</button>
       <button class="tab" data-view="options" data-i18n="tab.options">엔진 옵션</button>
       <button class="tab" data-view="plugins" data-i18n="tab.plugins">플러그인</button>
+      <button class="tab" data-view="behavior" data-i18n="tab.behavior">동작</button>
       <button class="tab" data-view="maintenance" data-i18n="tab.maintenance">유지보수</button>
     </nav>
   </div>
@@ -76,6 +77,18 @@
     <section class="card view" data-view="plugins">
       <h2><span data-i18n="plugins.h2">플러그인 설치</span> <span class="hint" data-i18n="plugins.hint">패키지 + 가중치 원클릭 설치</span></h2>
       <div id="plugins"></div>
+    </section>
+
+    <!-- 동작 (확장 클라이언트 동작 설정) -->
+    <section class="card view" data-view="behavior">
+      <h2><span data-i18n="behavior.h2">동작</span> <span class="hint" data-i18n="behavior.hint">확장 동작 설정</span></h2>
+      <div class="row">
+        <label class="grow"><span data-i18n="behavior.minDim.label">최소 이미지 변 (px)</span>
+          <input id="min-image-dim" type="number" min="0" step="1" />
+        </label>
+        <button class="btn primary" id="save-behavior" data-i18n="btn.save">저장</button>
+      </div>
+      <p class="note" data-i18n="behavior.minDim.desc">이미지의 짧은 변이 이 값보다 작으면 아이콘·배너로 보고 번역하지 않습니다. 확장이 접속 시 이 값을 받아 적용합니다. 0 = 모든 이미지 번역.</p>
     </section>
 
     <!-- 유지보수 -->

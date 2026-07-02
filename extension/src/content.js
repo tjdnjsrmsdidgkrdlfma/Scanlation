@@ -88,7 +88,7 @@
   }
 
   // -------------------------------------------------------------- state ----
-  const cfg = { endpoint: "http://127.0.0.1:4010", showTranslated: true, token: "" };
+  const cfg = { endpoint: "http://127.0.0.1:4010", showTranslated: true, token: "", minImageDim: 80 };
   let enabled = false;
   let observer = null;
   const processed = new WeakSet();
@@ -97,10 +97,11 @@
 
   async function loadConfig() {
     try {
-      const r = await ext.storage.local.get(["endpoint", "showTranslated", "token"]);
+      const r = await ext.storage.local.get(["endpoint", "showTranslated", "token", "minImageDim"]);
       if (r.endpoint) cfg.endpoint = r.endpoint;
       if (typeof r.showTranslated === "boolean") cfg.showTranslated = r.showTranslated;
       if (typeof r.token === "string") cfg.token = r.token;
+      if (typeof r.minImageDim === "number") cfg.minImageDim = r.minImageDim;
     } catch (e) { /* storage may be unavailable in some frames */ }
   }
 
@@ -274,7 +275,7 @@
   async function processImage(img) {
     if (!enabled || processed.has(img) || processing.has(img)) return;
     const [nw, nh] = naturalSize(img);
-    if (nw * nh < 100 * 100) return; // skip tiny / icons
+    if (Math.min(nw, nh) < cfg.minImageDim) return; // skip icons/thin banners (shorter-side px; from /admin)
     processing.add(img);
     try {
       const base64 = await imageToBase64(img);
@@ -362,6 +363,7 @@
       case "toggle": (enabled ? disable() : enable()); break;
       case "set-endpoint": cfg.endpoint = msg.endpoint; break;
       case "set-token": cfg.token = msg.token || ""; break;
+      case "set-min-image-dim": if (typeof msg.value === "number") cfg.minImageDim = msg.value; break;
       case "set-show-translated": cfg.showTranslated = !!msg.value; retext(); break;
       default: break;
     }

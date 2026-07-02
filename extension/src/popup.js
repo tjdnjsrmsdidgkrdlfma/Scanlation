@@ -68,9 +68,12 @@ async function connect() {
 
     setStatus(`connected · v${(d.version || []).join(".")}`, "ok");
 
-    await ext.storage.local.set({ endpoint: endpoint(), token: token() });
+    const store = { endpoint: endpoint(), token: token() };
+    if (typeof d.min_image_dim === "number") store.minImageDim = d.min_image_dim;
+    await ext.storage.local.set(store);
     sendActive({ type: "set-endpoint", endpoint: endpoint() });
     sendActive({ type: "set-token", token: token() });
+    if (typeof d.min_image_dim === "number") sendActive({ type: "set-min-image-dim", value: d.min_image_dim });
   } catch (e) {
     setStatus("cannot reach server: " + (e.message || e), "err");
   }

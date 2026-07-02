@@ -45,6 +45,7 @@ def handshake_payload() -> dict:
         "translator_selected": sel.translator,
         "lang_src": sel.lang_src,
         "lang_dst": sel.lang_dst,
+        "min_image_dim": sel.min_image_dim,   # extension image filter (shorter-side px)
     }
 
 

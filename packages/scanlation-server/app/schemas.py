@@ -57,3 +57,8 @@ class SavePromptRequest(BaseModel):
 
 class SelectPromptRequest(BaseModel):
     name: str
+
+
+# --- admin: /set_client_config/ (동작 tab) ---------------------------------
+class SetClientConfigRequest(BaseModel):
+    min_image_dim: Optional[int] = None   # extension image filter (shorter-side px)

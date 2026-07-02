@@ -45,6 +45,14 @@ class Settings:
         default_factory=lambda: int(_env("SCANLATION_TRANSLATE_CONCURRENCY", "4"))
     )
 
+    # First-run default for the extension's image filter: images whose SHORTER
+    # side is under this (px) are skipped as icons/banners. Persisted per-install
+    # in state.json and editable in /admin (동작 tab); delivered to the extension
+    # via the handshake. 0 = translate everything.
+    min_image_dim: int = field(
+        default_factory=lambda: int(_env("SCANLATION_MIN_IMAGE_DIM", "80"))
+    )
+
     # --- filesystem + device: delegated to the shared SDK context (single env
     #     source of truth, also read by every engine plugin) ---
     @property

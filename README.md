@@ -227,6 +227,7 @@ cd packages/scanlation-server
 | `SCANLATION_DEVICE` | `cpu` | `cpu` / `rocm` / `dml` provider 힌트(항상 CPU fallback) |
 | `SCANLATION_AUTH_TOKEN` | (빈 값) | 설정 시 모든 API·admin이 `X-Auth-Token` 헤더를 요구(빈 값=무인증). 확장 팝업·`/admin`에 같은 값 입력. `OPTIONS`·`/admin` 정적은 면제 |
 | `SCANLATION_TRANSLATE_CONCURRENCY` | `4` | 동시에 번역할 이미지 수(번역은 GPU 락 밖에서 실행). 호스트 ollama의 `OLLAMA_NUM_PARALLEL`과 맞춤 |
+| `SCANLATION_MIN_IMAGE_DIM` | `80` | 확장 이미지 필터 최초 기본값: **짧은 변**이 이 px 미만이면 아이콘·배너로 보고 스킵. `/admin` **동작** 탭에서 조절(→ handshake로 확장에 전달). `0`=전부 번역 |
 | `SCANLATION_DETECTOR` / `_RECOGNIZER` / `_TRANSLATOR` | (빈 값) | 최초 기동 기본 엔진(빈 값=미선택; 이후 `/admin`이 덮어씀) |
 | `SCANLATION_LANG_SRC` / `_DST` | `ja` / `ko` | 최초 기동 기본 언어(이후 `/admin`) |
 | `SCANLATION_BASE_DIR` | 실행 위치(CWD) | `data/`(캐시, state.json) 루트; Docker/테스트는 명시 지정 |
