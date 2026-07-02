@@ -17,7 +17,7 @@ from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
 from ..cache import cache, opt_hash
-from ..pipeline import run_pipeline, translate_text
+from ..pipeline import detect_and_recognize, translate_regions, translate_text
 from ..registry import registry
 from ..schemas import RunOcrTslRequest, RunTslRequest
 from ..state import state
@@ -44,19 +44,30 @@ def _resolve():
     )
 
 
-def _work_sync(img, det_name, rec_name, tsl_name, src, dst, opt_box, opt_ocr, opt_tsl):
-    """Resolve engines (loads weights on first use) and run the pipeline.
+def _detect_sync(img, det_name, rec_name, tsl_name, src, opt_box, opt_ocr):
+    """Resolve all three engines (loads weights on first use) and run the GPU/model
+    half: detect + recognize. Returns (recognized pairs, translator instance).
 
-    Runs entirely in the threadpool so model load + inference never block the
-    event loop.
+    Runs in the threadpool UNDER the GPU lock: registry.get is not thread-safe
+    (check-then-set on _instances) and model loads must be serialized. The
+    translator is resolved here too — cheap (just its httpx client) — so the
+    concurrent translate path never touches registry.get and the lazily-created
+    client is ready before any concurrent request uses it.
     """
     detector = registry.get("detector", det_name)
     recognizer = registry.get("recognizer", rec_name)
     translator = registry.get("translator", tsl_name)
-    return run_pipeline(
-        img, detector=detector, recognizer=recognizer, translator=translator,
-        src=src, dst=dst, opt_box=opt_box, opt_ocr=opt_ocr, opt_tsl=opt_tsl,
+    recognized = detect_and_recognize(
+        img, detector=detector, recognizer=recognizer, src=src, opt_box=opt_box, opt_ocr=opt_ocr
     )
+    return recognized, translator
+
+
+def _translate_sync(recognized, translator, src, dst, opt_tsl):
+    """Run the LLM half: batch-translate the recognized pairs -> wire result.
+    Runs in the threadpool OUTSIDE the GPU lock (ollama is a separate process),
+    so one image's translation overlaps the next image's detect+recognize."""
+    return translate_regions(recognized, translator=translator, src=src, dst=dst, opt_tsl=opt_tsl)
 
 
 def _decode_image(contents: str) -> Image.Image:
@@ -124,9 +135,16 @@ async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
 
     async def _compute():
         img = _decode_image(req.contents)
+        # GPU/model half under the lock (single device); translate half outside it
+        # (ollama is a separate process), bounded so concurrent images don't
+        # overrun the backend's parallel slots.
         async with state.gpu_lock:
+            recognized, translator = await run_in_threadpool(
+                _detect_sync, img, det, rec, tsl, src, opt_box, opt_ocr
+            )
+        async with state.translate_sem:
             result = await run_in_threadpool(
-                _work_sync, img, det, rec, tsl, src, dst, opt_box, opt_ocr, opt_tsl
+                _translate_sync, recognized, translator, src, dst, opt_tsl
             )
         cache.put_run(req.md5, src, dst, engines, oh, result)
         return result

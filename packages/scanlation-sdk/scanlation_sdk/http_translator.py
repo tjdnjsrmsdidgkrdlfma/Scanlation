@@ -13,12 +13,18 @@ numpy + pillow only (the server core imports this module transitively).
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
 
 from scanlation_sdk.contracts import EngineBase
-from scanlation_sdk.prompt import DEFAULT_SYSTEM_PROMPT, build_prompt
+from scanlation_sdk.prompt import (
+    DEFAULT_SYSTEM_PROMPT,
+    batch_schema,
+    build_batch_prompt,
+    build_prompt,
+)
 
 
 class HttpTranslatorBase(EngineBase):
@@ -82,9 +88,51 @@ class HttpTranslatorBase(EngineBase):
         prompt = build_prompt(text, src, dst, options.get("context", ""))
         return self._translate(model, system, prompt, options)
 
+    def translate_batch(
+        self, texts: list[str], src: str, dst: str, options: dict[str, Any]
+    ) -> list[str]:
+        """Translate many texts in one model call and return them aligned to the
+        input order. Short (<=2 char) texts are passed through unchanged, same as
+        translate(). ANY failure (parse error, wrong count, HTTP error, num_ctx
+        overflow -> truncated JSON) falls back to a per-text translate() loop, so
+        the result is always complete and aligned — just slower on that page."""
+        options = options or {}
+        stripped = [t.strip() for t in texts]
+        long_idx = [i for i, t in enumerate(stripped) if len(t) > 2]
+        if not long_idx:  # nothing worth a model call (all short/empty)
+            return stripped
+
+        model = options.get("model")
+        if not model:
+            raise ValueError(f"no {self.display_name} model selected — pick one in /admin")
+        longs = [stripped[i] for i in long_idx]
+        system = options.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
+        prompt = build_batch_prompt(longs, src, dst, options.get("context", ""))
+        schema = batch_schema(len(longs))
+        try:
+            raw = self._translate_batch_call(model, system, prompt, schema, options)
+            obj = json.loads(raw)
+            translated = [obj[f"t{i}"] for i in range(len(longs))]  # KeyError -> fallback
+        except Exception:  # noqa: BLE001 - any failure -> safe per-text fallback
+            self._log.warning("%s batch of %d failed; falling back to per-text", self.name, len(longs))
+            translated = [self.translate(t, src, dst, options) for t in longs]
+
+        out = list(stripped)  # start from the passthrough (short texts kept in place)
+        for i, tr in zip(long_idx, translated):
+            out[i] = (tr if isinstance(tr, str) else str(tr)).strip()
+        return out
+
     # --- subclass hooks ---
     def _translate(self, model: str, system: str, prompt: str, options: dict) -> str:
         """Build the backend request, send it, and return the translated text."""
+        raise NotImplementedError
+
+    def _translate_batch_call(
+        self, model: str, system: str, prompt: str, schema: dict, options: dict
+    ) -> str:
+        """Send a batch request whose output is constrained to ``schema`` (native
+        structured output) and return the raw JSON string. Subclass hook, mirrors
+        ``_translate``."""
         raise NotImplementedError
 
     def _models_url(self) -> str:

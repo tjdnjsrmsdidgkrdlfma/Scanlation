@@ -37,9 +37,57 @@ def test_dummy_pipeline_golden():
         assert 0 <= x0 < x1 <= 400 and 0 <= y0 < y1 <= 300
 
 
+class _BatchRecorder:
+    """Translator exposing translate_batch — records which path the pipeline took
+    and returns results aligned to input order (so we can assert ordering)."""
+    name = "batchfake"
+
+    def __init__(self):
+        self.batch_calls = 0
+        self.single_calls = 0
+
+    def translate(self, text, src, dst, options):
+        self.single_calls += 1
+        return f"[one->{dst}] {text}"
+
+    def translate_batch(self, texts, src, dst, options):
+        self.batch_calls += 1
+        return [f"[batch->{dst}] {t}" for t in texts]
+
+
+def test_batch_path_used_when_available_and_order_preserved():
+    # A translator with translate_batch must be driven via ONE batch call (not the
+    # per-text loop), and the result order must still match reading order.
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    tr = _BatchRecorder()
+    result = run_pipeline(
+        img,
+        detector=DummyDetector(), recognizer=DummyRecognizer(), translator=tr,
+        src="ja", dst="ko", opt_box={}, opt_ocr={}, opt_tsl={},
+    )
+    assert len(result) == 2
+    assert tr.batch_calls == 1 and tr.single_calls == 0  # one batch, no per-text
+    assert result[0]["ocr"] == "REGION-0" and result[0]["tsl"] == "[batch->ko] REGION-0"
+    assert result[1]["ocr"] == "REGION-1" and result[1]["tsl"] == "[batch->ko] REGION-1"
+
+
+def test_no_batch_method_falls_back_to_per_text():
+    # DummyTranslator has no translate_batch -> pipeline uses the per-text loop.
+    assert not hasattr(DummyTranslator(), "translate_batch")
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    result = run_pipeline(
+        img,
+        detector=DummyDetector(), recognizer=DummyRecognizer(), translator=DummyTranslator(),
+        src="ja", dst="ko", opt_box={}, opt_ocr={}, opt_tsl={},
+    )
+    assert result[0]["tsl"] == "[ja->ko] REGION-0"  # dummy per-text echo
+
+
 TESTS = [
     test_reading_order_is_right_to_left_top_to_bottom,
     test_dummy_pipeline_golden,
+    test_batch_path_used_when_available_and_order_preserved,
+    test_no_batch_method_falls_back_to_per_text,
 ]
 
 if __name__ == "__main__":

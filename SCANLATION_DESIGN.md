@@ -200,7 +200,7 @@ for r in regions:
 3. 방향 복원(2.3/0.7 규칙): 세로/가로 판단(aspect + 검출기 힌트). **일본어 세로글자는 세로 유지**(manga-ocr이 세로 native). warp가 텍스트 자연방향 대비 누웠으면 `cv2.rotate`/transpose로 "사람이 읽는 방향"으로.
 4. `PIL.Image.fromarray`. 엣지: 영(0)면적 quad 스킵, 초소형 crop은 최소크기 패딩, grayscale→RGB.
 
-**동시성:** 전역 `asyncio.Lock`("gpu_lock")으로 detect+recognize 보호(CTD ONNX + manga-ocr torch가 GPU 경합; ollama는 별 프로세스). 핸들러는 `async def`, CPU/GPU 작업은 락 안에서 `run_in_threadpool`로 실행(이벤트 루프 비차단). `uvicorn --workers 1`(VRAM 모델 1벌). 배치는 v1에서 순차 루프(페이지당 5~30영역).
+**동시성:** 전역 `asyncio.Lock`("gpu_lock")으로 detect+recognize 보호(CTD ONNX + manga-ocr torch가 GPU 경합). **번역(ollama)은 락 밖**에서 실행 → 한 이미지의 번역이 다음 이미지의 검출·인식과 겹침. `translate_sem`(=`SCANLATION_TRANSLATE_CONCURRENCY`, 기본 4)으로 동시 번역 이미지 수 제한. 핸들러는 `async def`, CPU/GPU 작업은 `run_in_threadpool`(이벤트 루프 비차단). `uvicorn --workers 1`(VRAM 모델 1벌). **번역은 이미지 단위 전체 배치** — 한 이미지의 말풍선 전부를 한 LLM 호출로(백엔드 네이티브 구조화 출력: 인덱스 키 JSON 스키마 `t0..t{n-1}`로 개수 강제; 실패 시 말풍선 단위 순차 폴백). 말풍선 상호 문맥으로 번역 일관성↑, 호스트 ollama `OLLAMA_NUM_PARALLEL`이 이미지 간 생성을 병렬화. (이전: v1은 말풍선 순차 루프 + 번역까지 락 안.)
 
 ### 3.6 캐시 + 수동 TM (`cache.py`)
 단일 sqlite(`data/scanlation.sqlite`, WAL + 스레드락):

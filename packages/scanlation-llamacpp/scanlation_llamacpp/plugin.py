@@ -48,8 +48,10 @@ class LlamaCppTranslator(HttpTranslatorBase):
     def _parse_models(self, payload: dict) -> list[str]:
         return [m["id"] for m in payload.get("data", []) if m.get("id")]
 
-    def _translate(self, model: str, system: str, prompt: str, options: dict) -> str:
-        body = {
+    def _body(self, model: str, system: str, prompt: str, options: dict, max_tokens_default: int) -> dict:
+        """The shared chat-completions body. max_tokens default differs by path:
+        512 for one bubble, more for a whole image's batch output."""
+        return {
             "model": model,
             "messages": [
                 {"role": "system", "content": system},
@@ -58,11 +60,25 @@ class LlamaCppTranslator(HttpTranslatorBase):
             "temperature": float(options.get("temperature", 0.0)),
             "top_p": float(options.get("top_p", 1.0)),
             "seed": int(options.get("seed", 42)),
-            "max_tokens": int(options.get("max_tokens", 512)),
+            "max_tokens": int(options.get("max_tokens", max_tokens_default)),
             "stream": False,
         }
-        data = self._chat(body)
+
+    def _extract(self, data: dict, options: dict) -> str:
         out = (data.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
         if options.get("strip_think", True):
             out = _THINK.sub("", out)
         return out.strip()
+
+    def _translate(self, model: str, system: str, prompt: str, options: dict) -> str:
+        return self._extract(self._chat(self._body(model, system, prompt, options, 512)), options)
+
+    def _translate_batch_call(self, model: str, system: str, prompt: str, schema: dict, options: dict) -> str:
+        """Batch: same body plus response_format=json_schema to force the exact
+        JSON shape, and a larger max_tokens default (whole-image output)."""
+        body = self._body(model, system, prompt, options, 1024)
+        body["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "translations", "schema": schema, "strict": True},
+        }
+        return self._extract(self._chat(body), options)

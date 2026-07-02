@@ -38,6 +38,13 @@ class Settings:
     # = no auth (local/dev; the current default). Set it to lock a public deploy.
     auth_token: str = field(default_factory=lambda: _env("SCANLATION_AUTH_TOKEN", ""))
 
+    # Max images translating concurrently (translation runs off the GPU lock).
+    # Set ~= the ollama server's OLLAMA_NUM_PARALLEL so concurrent requests fill
+    # its parallel slots without overrunning them.
+    translate_concurrency: int = field(
+        default_factory=lambda: int(_env("SCANLATION_TRANSLATE_CONCURRENCY", "4"))
+    )
+
     # --- filesystem + device: delegated to the shared SDK context (single env
     #     source of truth, also read by every engine plugin) ---
     @property

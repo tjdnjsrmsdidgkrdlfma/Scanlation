@@ -38,8 +38,12 @@ class AppState:
         self._lock = threading.Lock()
         self.selection = self._load()
         # Single GPU lock: detect + recognize share one device. Translation
-        # (ollama) is a separate process and is not guarded here.
+        # (ollama) is a separate process and runs outside this lock so one image's
+        # translate overlaps the next image's detect+recognize.
         self.gpu_lock = asyncio.Lock()
+        # Bound concurrent translations (they run off the GPU lock) so many
+        # in-flight images don't overrun the ollama backend's parallel slots.
+        self.translate_sem = asyncio.Semaphore(settings.translate_concurrency)
         # md5/opts identity -> in-flight Future, so duplicate concurrent
         # requests for the same image attach to one computation.
         self.inflight: dict[tuple, asyncio.Future] = {}

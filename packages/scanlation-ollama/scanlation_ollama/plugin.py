@@ -45,6 +45,17 @@ class OllamaTranslator(HttpTranslatorBase):
     def _parse_models(self, payload: dict) -> list[str]:
         return [m["name"] for m in payload.get("models", []) if m.get("name")]
 
+    def _sampling(self, options: dict, num_ctx_default: int) -> dict:
+        """The shared ollama `options` sub-dict. num_ctx default differs by path:
+        512 is plenty for one bubble; a batch of a whole image needs more."""
+        return {
+            "temperature": float(options.get("temperature", 0.0)),
+            "seed": int(options.get("seed", 42)),
+            "top_p": float(options.get("top_p", 1.0)),
+            "num_gpu": int(options.get("num_gpu", 31)),
+            "num_ctx": int(options.get("num_ctx", num_ctx_default)),
+        }
+
     def _translate(self, model: str, system: str, prompt: str, options: dict) -> str:
         body = {
             "model": model,
@@ -52,13 +63,21 @@ class OllamaTranslator(HttpTranslatorBase):
             "system": system,
             "stream": False,
             "think": bool(options.get("think", False)),
-            "options": {
-                "temperature": float(options.get("temperature", 0.0)),
-                "seed": int(options.get("seed", 42)),
-                "top_p": float(options.get("top_p", 1.0)),
-                "num_gpu": int(options.get("num_gpu", 31)),
-                "num_ctx": int(options.get("num_ctx", 512)),
-            },
+            "options": self._sampling(options, 512),
         }
         data = self._generate(body)
         return (data.get("response") or "").strip()
+
+    def _translate_batch_call(self, model: str, system: str, prompt: str, schema: dict, options: dict) -> str:
+        """Batch: same body as _translate plus `format`=schema to force JSON, and a
+        larger num_ctx default (a whole image's texts + their translations)."""
+        body = {
+            "model": model,
+            "prompt": prompt,
+            "system": system,
+            "stream": False,
+            "think": bool(options.get("think", False)),
+            "format": schema,
+            "options": self._sampling(options, 2048),
+        }
+        return (self._generate(body).get("response") or "").strip()

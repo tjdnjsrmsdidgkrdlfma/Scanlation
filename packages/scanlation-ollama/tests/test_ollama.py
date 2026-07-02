@@ -5,6 +5,8 @@ network: _generate is replaced with a fake that captures the request body.
 """
 from __future__ import annotations
 
+import json
+
 from scanlation_ollama.plugin import OllamaTranslator
 
 
@@ -77,11 +79,61 @@ def test_missing_model_raises():
     assert raised, "translate must raise when no model is selected"
 
 
+def test_batch_builds_format_request_and_aligns():
+    tr = OllamaTranslator()
+    captured: dict = {}
+
+    def fake_generate(body):
+        captured.clear()
+        captured.update(body)
+        return {"response": json.dumps({"t0": "가", "t1": "나"})}
+
+    tr._generate = fake_generate
+    out = tr.translate_batch(["日本語一", "日本語二"], "ja", "ko", {"model": "m"})
+    assert out == ["가", "나"]                              # aligned to input order
+    assert captured["format"]["required"] == ["t0", "t1"]  # schema forces exactly 2 keys
+    assert captured["options"]["num_ctx"] == 2048          # batch bumps ctx (single stays 512)
+    assert 'src="japanese"' in captured["prompt"] and 'dst="korean"' in captured["prompt"]
+
+
+def test_batch_passes_through_short_texts():
+    tr = OllamaTranslator()
+    calls = {"n": 0}
+
+    def fake_generate(body):
+        calls["n"] += 1
+        return {"response": json.dumps({"t0": "번역"})}  # only the one long text is batched
+
+    tr._generate = fake_generate
+    out = tr.translate_batch(["あ", "これは十分に長い文章", "  "], "ja", "ko", {"model": "m"})
+    assert out == ["あ", "번역", ""]  # short/empty kept in place, long one translated
+    assert calls["n"] == 1            # exactly one model call (for the single long text)
+
+
+def test_batch_falls_back_to_per_text_on_bad_json():
+    tr = OllamaTranslator()
+    calls = {"n": 0}
+
+    def fake_generate(body):
+        calls["n"] += 1
+        if "format" in body:          # the batch attempt -> return unparseable garbage
+            return {"response": "not json"}
+        return {"response": "폴백"}   # per-text fallback calls
+
+    tr._generate = fake_generate
+    out = tr.translate_batch(["長い文章その一", "長い文章その二"], "ja", "ko", {"model": "m"})
+    assert out == ["폴백", "폴백"]     # fallback filled both, aligned
+    assert calls["n"] == 3            # 1 failed batch + 2 per-text
+
+
 TESTS = [
     test_builds_request_from_tuned_config,
     test_options_override,
     test_short_text_skips_model_call,
     test_missing_model_raises,
+    test_batch_builds_format_request_and_aligns,
+    test_batch_passes_through_short_texts,
+    test_batch_falls_back_to_per_text_on_bad_json,
 ]
 
 if __name__ == "__main__":

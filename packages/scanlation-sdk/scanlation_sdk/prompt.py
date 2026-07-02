@@ -27,7 +27,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "Keep your internal reasoning to at most one short sentence. Do not over-analyze. Output the translation immediately."
 )
 
-__all__ = ["DEFAULT_SYSTEM_PROMPT", "build_prompt"]
+__all__ = ["DEFAULT_SYSTEM_PROMPT", "build_prompt", "build_batch_prompt", "batch_schema"]
 
 
 def build_prompt(text: str, src: str, dst: str, context: str = "") -> str:
@@ -35,3 +35,35 @@ def build_prompt(text: str, src: str, dst: str, context: str = "") -> str:
     s = LANG_PLAIN.get(src, src)
     d = LANG_PLAIN.get(dst, dst)
     return f'src="{s}"\ndst="{d}"\ncontext="{context}"\ntext="{text}"'
+
+
+def build_batch_prompt(texts: list[str], src: str, dst: str, context: str = "") -> str:
+    """User turn for translating a whole image's texts in one call. Keeps the same
+    src/dst/context framing as build_prompt, then lists the numbered texts and asks
+    for a JSON object keyed t0..t{n-1}. The output shape is *enforced* by the
+    backend's structured-output grammar (see batch_schema); this text just tells
+    the model what each key means, so translation style still follows the system
+    prompt."""
+    s = LANG_PLAIN.get(src, src)
+    d = LANG_PLAIN.get(dst, dst)
+    body = "\n".join(f'{i}: "{t}"' for i, t in enumerate(texts))
+    return (
+        f'src="{s}"\ndst="{d}"\ncontext="{context}"\n'
+        f"Translate each of the {len(texts)} numbered texts below into dst.\n"
+        f'Return a JSON object whose key "t<i>" holds the translation of text <i> '
+        f"(i from 0 to {len(texts) - 1}).\n"
+        f"texts:\n{body}"
+    )
+
+
+def batch_schema(n: int) -> dict:
+    """JSON schema forcing exactly n string fields t0..t{n-1}. Because every key is
+    required, the sampling grammar it compiles to must emit all n translations —
+    length can't drift (the array/minItems form isn't reliably grammar-enforced)."""
+    props = {f"t{i}": {"type": "string"} for i in range(n)}
+    return {
+        "type": "object",
+        "properties": props,
+        "required": list(props),
+        "additionalProperties": False,
+    }

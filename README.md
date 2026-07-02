@@ -226,6 +226,7 @@ cd packages/scanlation-server
 |---|---|---|
 | `SCANLATION_DEVICE` | `cpu` | `cpu` / `rocm` / `dml` provider 힌트(항상 CPU fallback) |
 | `SCANLATION_AUTH_TOKEN` | (빈 값) | 설정 시 모든 API·admin이 `X-Auth-Token` 헤더를 요구(빈 값=무인증). 확장 팝업·`/admin`에 같은 값 입력. `OPTIONS`·`/admin` 정적은 면제 |
+| `SCANLATION_TRANSLATE_CONCURRENCY` | `4` | 동시에 번역할 이미지 수(번역은 GPU 락 밖에서 실행). 호스트 ollama의 `OLLAMA_NUM_PARALLEL`과 맞춤 |
 | `SCANLATION_DETECTOR` / `_RECOGNIZER` / `_TRANSLATOR` | (빈 값) | 최초 기동 기본 엔진(빈 값=미선택; 이후 `/admin`이 덮어씀) |
 | `SCANLATION_LANG_SRC` / `_DST` | `ja` / `ko` | 최초 기동 기본 언어(이후 `/admin`) |
 | `SCANLATION_BASE_DIR` | 실행 위치(CWD) | `data/`(캐시, state.json) 루트; Docker/테스트는 명시 지정 |
@@ -240,6 +241,8 @@ cd packages/scanlation-server
 | `LLAMACPP_ENDPOINT` | `…:8080` | llama.cpp/OpenAI 백엔드 주소 (모델은 `/admin`) |
 
 > 모델 태그는 이제 env가 아니라 **`/admin` 엔진 옵션의 드롭다운**에서만 정합니다(백엔드에 설치된 모델을 조회). `state.json`에 영속.
+
+> **ollama 동시성**: 번역은 이미지 단위로 **전체 배치**(한 이미지의 말풍선을 한 LLM 호출로, 상호 문맥으로 일관성↑)이고 GPU 락 밖에서 돕니다. 여러 이미지를 **동시에** 번역하려면 호스트 ollama 데몬에 `OLLAMA_NUM_PARALLEL`을 켜야 합니다(서버 `SCANLATION_TRANSLATE_CONCURRENCY`와 맞춤). `sudo systemctl edit ollama` → `[Service]`에 `Environment="OLLAMA_NUM_PARALLEL=4"` / `"OLLAMA_KEEP_ALIVE=-1"`(모델 상주) / `"OLLAMA_MAX_LOADED_MODELS=1"` 추가 후 `systemctl restart ollama`. KV캐시 VRAM ≈ `num_ctx × NUM_PARALLEL`(배치 기본 num_ctx 2048). `NUM_PARALLEL=1`이어도 검출·인식과 번역이 겹쳐 이득이 있고, `>1`이 생성까지 병렬화합니다. 배치가 실패하면(파싱 오류·컨텍스트 초과) 말풍선 단위 순차로 자동 폴백해 정확성은 항상 보장됩니다.
 
 ---
 

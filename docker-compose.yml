@@ -29,10 +29,20 @@ services:
       # secret in a gitignored .env next to this file (SCANLATION_AUTH_TOKEN=...);
       # empty/absent = no auth. Enter the same value in the extension popup + /admin.
       SCANLATION_AUTH_TOKEN: ${SCANLATION_AUTH_TOKEN:-}
+      # Max images translating at once (translation runs off the GPU lock). Match
+      # the host ollama's OLLAMA_NUM_PARALLEL so concurrent requests fill its
+      # parallel slots without overrunning them. See the "ollama 동시성" README note.
+      SCANLATION_TRANSLATE_CONCURRENCY: ${SCANLATION_TRANSLATE_CONCURRENCY:-4}
       # Engine source for /admin installs (defaults baked in the image). Pin a
       # tag for reproducible deploys:
       # SCANLATION_ENGINE_REF: v0.1.0
-      # External LLM backends on the host (ollama on GPU, llama.cpp on Vulkan):
+      # External LLM backends on the host (ollama on GPU, llama.cpp on Vulkan).
+      # For batch translate to run concurrently, set OLLAMA_NUM_PARALLEL (+ keep the
+      # model warm) on the HOST ollama, not here — it's a daemon env, not ours:
+      #   sudo systemctl edit ollama  ->  [Service]
+      #     Environment="OLLAMA_NUM_PARALLEL=4"
+      #     Environment="OLLAMA_KEEP_ALIVE=-1"
+      #     Environment="OLLAMA_MAX_LOADED_MODELS=1"
       OLLAMA_ENDPOINT: http://host.docker.internal:11434/api
       LLAMACPP_ENDPOINT: http://host.docker.internal:8080
     extra_hosts:

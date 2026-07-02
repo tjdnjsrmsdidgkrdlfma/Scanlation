@@ -1,6 +1,8 @@
 """LlamaCppTranslator unit tests — OpenAI-compatible request shape, HTTP mocked."""
 from __future__ import annotations
 
+import json
+
 from scanlation_llamacpp.plugin import LlamaCppTranslator
 
 
@@ -68,11 +70,44 @@ def test_short_text_skips():
     assert called is False
 
 
+def test_batch_builds_response_format_and_aligns():
+    tr = LlamaCppTranslator()
+    captured: dict = {}
+
+    def fake_chat(body):
+        captured.clear()
+        captured.update(body)
+        return {"choices": [{"message": {"content": json.dumps({"t0": "가", "t1": "나"})}}]}
+
+    tr._chat = fake_chat
+    out = tr.translate_batch(["日本語一", "日本語二"], "ja", "ko", {"model": "m"})
+    assert out == ["가", "나"]
+    rf = captured["response_format"]
+    assert rf["type"] == "json_schema"
+    assert rf["json_schema"]["schema"]["required"] == ["t0", "t1"]  # exactly 2 keys forced
+    assert captured["max_tokens"] == 1024                            # batch bumps output budget
+
+
+def test_batch_falls_back_on_wrong_length():
+    tr = LlamaCppTranslator()
+
+    def fake_chat(body):
+        if "response_format" in body:  # batch attempt returns too few translations
+            return {"choices": [{"message": {"content": json.dumps({"t0": "only one"})}}]}
+        return {"choices": [{"message": {"content": "fb"}}]}  # per-text fallback
+
+    tr._chat = fake_chat
+    out = tr.translate_batch(["長い文章その一", "長い文章その二"], "ja", "ko", {"model": "m"})
+    assert out == ["fb", "fb"]  # missing t1 -> fallback fills both, aligned
+
+
 TESTS = [
     test_builds_openai_chat_request,
     test_keep_think_when_disabled,
     test_missing_model_raises,
     test_short_text_skips,
+    test_batch_builds_response_format_and_aligns,
+    test_batch_falls_back_on_wrong_length,
 ]
 
 if __name__ == "__main__":
