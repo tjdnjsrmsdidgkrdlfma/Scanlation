@@ -82,6 +82,7 @@ def get_settings() -> dict:
             "translator": sel.translator,
             "lang_src": sel.lang_src,
             "lang_dst": sel.lang_dst,
+            "device": sel.device,
             "prompt_active": sel.prompt_active,
             "min_image_dim": sel.min_image_dim,
         },

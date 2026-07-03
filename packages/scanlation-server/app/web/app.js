@@ -27,6 +27,8 @@ const I18N = {
     "models.hint": "마지막 선택이 서버에 저장되어 기본값이 됩니다",
     "models.src": "원문",
     "models.dst": "번역",
+    "models.device": "연산 장치",
+    "models.device.desc": "검출·인식을 어느 장치에서 돌릴지 정합니다. 저장하면 모델을 새 장치로 다시 로드합니다. GPU는 VRAM 여유가 있을 때만 고르세요(LLM과 별개).",
     "btn.save": "저장",
     "prompt.h2": "번역 프롬프트",
     "prompt.hint": "LLM 시스템 프롬프트를 고르거나 직접 편집",
@@ -110,6 +112,8 @@ const I18N = {
     "models.hint": "Your last choice is saved on the server as the default",
     "models.src": "Source",
     "models.dst": "Target",
+    "models.device": "Compute device",
+    "models.device.desc": "Which device runs detection + recognition. Saving reloads the models on the new device. Pick GPU only when VRAM is free (separate from the LLM).",
     "btn.save": "Save",
     "prompt.h2": "Translation prompt",
     "prompt.hint": "Pick or edit the LLM system prompt",
@@ -281,6 +285,7 @@ function renderModels() {
     sel.innerHTML = installed.map(engineOption).join("");
     sel.value = DATA.selection[role];
   }
+  $("sel-device").value = DATA.selection.device;
 }
 
 function renderLangs() {
@@ -455,6 +460,7 @@ async function saveModels() {
       translator: $("sel-translator").value,
     });
     await postJSON("/set_languages/", { lang_src: $("sel-lang_src").value, lang_dst: $("sel-lang_dst").value });
+    await postJSON("/set_device/", { device: $("sel-device").value });
     toast(t("toast.modelsSaved"), "ok");
     await load();
   } catch (e) { toast(t("toast.saveFail", { msg: e.message }), "err"); }

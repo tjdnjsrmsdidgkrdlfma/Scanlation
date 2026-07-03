@@ -33,6 +33,11 @@ class SetLanguagesRequest(BaseModel):
     lang_dst: str
 
 
+# --- /set_device/ -----------------------------------------------------------
+class SetDeviceRequest(BaseModel):
+    device: str                          # "cpu" or "cuda" (rocm reports as cuda)
+
+
 # --- /install_plugins/ ------------------------------------------------------
 class InstallPluginsRequest(BaseModel):
     plugins: dict[str, bool]

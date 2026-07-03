@@ -73,6 +73,17 @@ class Registry:
             self._instances[key] = inst
         return self._instances[key]
 
+    def unload_all(self) -> None:
+        """Unload and forget every cached instance so the next get() re-instantiates
+        and reloads it. Used when the compute device changes (models must move to
+        the new device). Call under the GPU lock so no inference is mid-flight."""
+        for inst in self._instances.values():
+            try:
+                inst.unload()
+            except Exception:  # noqa: BLE001 - a broken unload must not block the switch
+                pass
+        self._instances.clear()
+
 
 ensure_on_path()  # volume-installed engine packages are importable before discovery
 registry = Registry()

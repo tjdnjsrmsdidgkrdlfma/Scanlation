@@ -81,9 +81,15 @@ class RTDetrDetector(EngineBase):
 
     @staticmethod
     def _pick_device() -> str:
+        """Honor context.device (the /admin-set, SCANLATION_DEVICE-seeded hint):
+        'cpu' pins CPU; anything else means GPU — use cuda if actually available,
+        else fall back to CPU. Mirrors mangaocr's force_cpu logic so one switch
+        moves detector + recognizer together. (A ROCm torch build reports cuda.)"""
+        if context.device.lower() == "cpu":
+            return "cpu"
         try:
             import torch
-            if torch.cuda.is_available():  # a ROCm torch build also reports cuda
+            if torch.cuda.is_available():
                 return "cuda"
         except Exception:  # noqa: BLE001
             pass
