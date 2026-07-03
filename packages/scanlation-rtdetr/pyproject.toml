@@ -11,6 +11,11 @@ dependencies = [
     "scanlation-sdk",
     "transformers>=4.45",
     "torch",
+    # RT-DETR's AutoImageProcessor requires the torchvision backend; without it
+    # load() dies with ImportError on a clean install (the CPU plugins volume had
+    # only torch). Unpinned like torch so pip resolves a matching pair (CPU wheel
+    # via the catalog's --extra-index-url).
+    "torchvision",
     "huggingface_hub",
     "pillow",
 ]
