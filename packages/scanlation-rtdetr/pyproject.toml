@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scanlation-rtdetr"
+version = "0.1.0"
+description = "RT-DETR-v2 comic/manga text-region detector plugin for the Scanlation server."
+requires-python = ">=3.11"
+dependencies = [
+    "scanlation-sdk",
+    "transformers>=4.45",
+    "torch",
+    "huggingface_hub",
+    "pillow",
+]
+
+# Auto-discovered by the server registry once installed (no core edit needed).
+# Group is PLURAL — matches app/registry.py ROLES ("detector" -> "scanlation.detectors").
+[project.entry-points."scanlation.detectors"]
+rtdetr = "scanlation_rtdetr.plugin:RTDetrDetector"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scanlation_rtdetr*"]

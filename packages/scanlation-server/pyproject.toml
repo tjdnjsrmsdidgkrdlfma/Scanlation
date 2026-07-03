@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 # --- Engine discovery is entry_points-only (no hardcoded map). The core ships NO
-# engine at all: real engines (ctd, mangaocr, ollama, llamacpp) are separate pip
+# engine at all: real engines (rtdetr, mangaocr, ollama, llamacpp) are separate pip
 # packages declaring the `scanlation.<role>` groups, auto-discovered on install.
 # A fresh install has no engines — running without one is a 400. (Tests register
 # their own fakes; see tests/fake_engines.py.) ---

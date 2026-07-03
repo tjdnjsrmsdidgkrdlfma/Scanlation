@@ -90,12 +90,12 @@ def test_catalog_lists_engines():
     from app.plugins_install import catalog
 
     c = catalog()
-    for name in ("ctd", "mangaocr", "ollama", "llamacpp"):
+    for name in ("rtdetr", "mangaocr", "ollama", "llamacpp"):
         assert name in c, name
-    assert "detector" in c["ctd"].roles
+    assert "detector" in c["rtdetr"].roles
     assert "recognizer" in c["mangaocr"].roles
     assert "translator" in c["ollama"].roles
-    assert c["ctd"].package == "scanlation-ctd"
+    assert c["rtdetr"].package == "scanlation-rtdetr"
 
 
 def test_install_package_builds_pip_git_command():
@@ -164,7 +164,7 @@ def test_get_settings_merges_catalog():
         for e in d["engines"][role]:
             names.add(e["name"])
             assert "installed_package" in e
-    for name in ("ctd", "mangaocr", "ollama", "llamacpp"):
+    for name in ("rtdetr", "mangaocr", "ollama", "llamacpp"):
         assert name in names, name
 
 

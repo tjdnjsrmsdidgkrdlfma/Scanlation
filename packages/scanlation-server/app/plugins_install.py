@@ -1,6 +1,6 @@
 """Runtime plugin installation — pip-install a plugin's package on demand.
 
-The core image/venv ships NO engine. Real engines (ctd/mangaocr/ollama/
+The core image/venv ships NO engine. Real engines (rtdetr/mangaocr/ollama/
 llamacpp) are separate pip packages that live in this monorepo but are NOT in the
 core image. The admin "install" button (``POST /install_plugins/``) pip-installs
 the chosen one into a persistent, ``sys.path``-ed dir (``SCANLATION_PLUGINS_DIR``,
@@ -9,8 +9,8 @@ a mounted volume in Docker) — pulling the package + its heavy backend deps
 container too, and the install survives container recreation via the volume.
 
 Where the package comes from:
-  * default — ``pip install "scanlation-ctd @ git+<repo>@<ref>#subdirectory=
-    packages/scanlation-ctd"`` (SCANLATION_ENGINE_REPO / _REF). No engine code is
+  * default — ``pip install "scanlation-rtdetr @ git+<repo>@<ref>#subdirectory=
+    packages/scanlation-rtdetr"`` (SCANLATION_ENGINE_REPO / _REF). No engine code is
     baked into the image; it's fetched from GitHub at install time.
   * dev/offline override — if ``SCANLATION_ENGINES_SRC`` points at the local
     ``packages/`` tree, install from those source dirs instead (no network).
@@ -44,12 +44,15 @@ DEFAULT_REPO = "https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git"
 # (and the packages/<package> subdir). Installed engines are found via
 # entry_points; this only lists what /admin can offer to install.
 _CATALOG: dict[str, dict] = {
-    "ctd": {
-        "package": "scanlation-ctd",
-        "display_name": "comic-text-detector",
+    "rtdetr": {
+        "package": "scanlation-rtdetr",
+        "display_name": "RT-DETR",
         "roles": ["detector"],
-        "description": "comic-text-detector (ONNX) text-region detector.",
-        "pip_args": [],
+        "description": "RT-DETR-v2 comic/manga text detector (transformers).",
+        # steer torch to the CPU wheel by default (like mangaocr) so a Docker
+        # one-click install doesn't pull a giant CUDA wheel; a GPU torch build is
+        # a host-level install.
+        "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
     },
     "mangaocr": {
         "package": "scanlation-mangaocr",
@@ -79,8 +82,8 @@ _CATALOG: dict[str, dict] = {
 
 @dataclass
 class CatalogEntry:
-    name: str                       # engine name = registry key (e.g. "ctd")
-    package: str                    # pip/dist name (e.g. "scanlation-ctd")
+    name: str                       # engine name = registry key (e.g. "rtdetr")
+    package: str                    # pip/dist name (e.g. "scanlation-rtdetr")
     display_name: str = ""          # human-readable name shown before install
     description: str = ""
     roles: list[str] = field(default_factory=list)
