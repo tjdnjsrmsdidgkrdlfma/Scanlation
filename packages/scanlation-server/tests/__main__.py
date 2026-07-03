@@ -11,10 +11,12 @@ import sys
 from tests import (
     test_contracts,
     test_geometry,
+    test_logconfig,
     test_pipeline,
     test_routes,
 )
 from tests.helpers import run_modules
 
 if __name__ == "__main__":
-    sys.exit(run_modules([test_contracts, test_geometry, test_pipeline, test_routes]))
+    # test_logconfig last: it reconfigures global logging.
+    sys.exit(run_modules([test_contracts, test_geometry, test_pipeline, test_routes, test_logconfig]))

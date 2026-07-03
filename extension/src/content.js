@@ -149,20 +149,25 @@
 
   // ------------------------------------------------------------- server ----
   async function runOcr(md5hash, base64, options) {
-    const url = cfg.endpoint.replace(/\/$/, "") + "/run_pipeline/";
+    const base = cfg.endpoint.replace(/\/$/, "");
     const headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["X-Auth-Token"] = cfg.token;
-    const post = (body) =>
-      fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
-    // lazy: md5 only. A cache miss returns non-2xx -> fall through to work.
-    let res = await post({ md5: md5hash, options });
-    if (!res.ok) res = await post({ md5: md5hash, contents: base64, options });
-    if (!res.ok) {
-      let detail = res.status;
-      try { detail = (await res.json()).detail || detail; } catch (e) {}
-      throw new Error(`server ${res.status}: ${detail}`);
+    const post = (path, body) =>
+      fetch(base + path, { method: "POST", headers, body: JSON.stringify(body) });
+    // 1) cache probe (md5 only, no image upload) -> always 200 {result: cached|null}.
+    let res = await post("/run_lookup/", { md5: md5hash, options });
+    let body = res.ok ? await res.json() : null;
+    // 2) miss (result null, or probe unreachable) -> real work with the image bytes.
+    if (!body || body.result == null) {
+      res = await post("/run_pipeline/", { md5: md5hash, contents: base64, options });
+      if (!res.ok) {
+        let detail = res.status;
+        try { detail = (await res.json()).detail || detail; } catch (e) {}
+        throw new Error(`server ${res.status}: ${detail}`);
+      }
+      body = await res.json();
     }
-    return res.json();
+    return body;
   }
 
   // ------------------------------------------------------------ overlay ----

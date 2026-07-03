@@ -38,6 +38,8 @@ services:
       # the host ollama's OLLAMA_NUM_PARALLEL so concurrent requests fill its
       # parallel slots without overrunning them. See the "ollama 동시성" README note.
       SCANLATION_TRANSLATE_CONCURRENCY: ${SCANLATION_TRANSLATE_CONCURRENCY:-4}
+      # Log level for scanlation.* (timing/plugin lines). DEBUG for more detail.
+      SCANLATION_LOG_LEVEL: ${SCANLATION_LOG_LEVEL:-INFO}
       # Engine source for /admin installs (defaults baked in the image). Pin a
       # tag for reproducible deploys:
       # SCANLATION_ENGINE_REF: v0.1.0

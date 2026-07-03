@@ -7,6 +7,8 @@ dummy engines.
 """
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 from PIL import Image
@@ -14,6 +16,8 @@ from PIL import Image
 from .cache import cache
 from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
 from .geometry import deskew_crop
+
+logger = logging.getLogger("scanlation.pipeline")
 
 
 def assign_reading_order(regions: list[Region], vertical_hint: bool = False) -> list[Region]:
@@ -60,13 +64,20 @@ def detect_and_recognize(
     (text, region) pairs in reading order. This is the GPU/model half of the
     pipeline — the route runs it under the GPU lock. assign_reading_order is
     called exactly once here (it assigns region.order)."""
+    t0 = time.perf_counter()
     regions = assign_reading_order(detector.detect(img, opt_box), vertical_hint=(src == "ja"))
+    t_det = time.perf_counter()
     out: list[tuple[str, Region]] = []
     for region in regions:
         crop = deskew_crop(img, region)
         text = recognizer.recognize(crop, region, opt_ocr).strip()
         if text:
             out.append((text, region))
+    logger.info(
+        "detect %s: %d regions %.0fms | recognize %s: %d texts %.0fms",
+        getattr(detector, "name", "?"), len(regions), (t_det - t0) * 1000,
+        getattr(recognizer, "name", "?"), len(out), (time.perf_counter() - t_det) * 1000,
+    )
     return out
 
 
@@ -98,9 +109,15 @@ def translate_regions(
     """Translate recognized (text, region) pairs -> the wire result list. This is
     the LLM half of the pipeline — the route runs it OUTSIDE the GPU lock."""
     if not recognized:
+        logger.info("translate: 0 texts (nothing recognized)")
         return []
     texts = [text for text, _ in recognized]
+    t0 = time.perf_counter()
     tsls = _translate_all(texts, src, dst, translator, opt_tsl)
+    logger.info(
+        "translate %s: %d texts %.0fms",
+        getattr(translator, "name", "?"), len(texts), (time.perf_counter() - t0) * 1000,
+    )
     return [
         {"ocr": text, "tsl": tsl, "box": region.wire_box()}
         for (text, region), tsl in zip(recognized, tsls)

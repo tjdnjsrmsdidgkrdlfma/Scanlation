@@ -45,6 +45,10 @@ class Settings:
         default_factory=lambda: int(_env("SCANLATION_TRANSLATE_CONCURRENCY", "4"))
     )
 
+    # Log level for the app's own loggers (scanlation.*). Third-party libs stay at
+    # WARNING (root) so transformers/httpx don't drown the log. See app.logconfig.
+    log_level: str = field(default_factory=lambda: _env("SCANLATION_LOG_LEVEL", "INFO"))
+
     # First-run default for the extension's image filter: images whose SHORTER
     # side is under this (px) are skipped as icons/banners. Persisted per-install
     # in state.json and editable in /admin (동작 tab); delivered to the extension

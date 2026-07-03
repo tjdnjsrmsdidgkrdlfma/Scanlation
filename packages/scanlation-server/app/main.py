@@ -7,6 +7,8 @@ to work). No CSRF (FastAPI has none; all POSTs are open).
 """
 from __future__ import annotations
 
+import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -17,11 +19,16 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import settings
+from .logconfig import configure_logging
 from .routes import admin, handshake, plugins, run, settings_routes
 
 # Admin page assets ship with the code (not the data volume), so resolve them
 # relative to this package, never to SCANLATION_BASE_DIR.
 WEB_DIR = Path(__file__).resolve().parent / "web"
+
+# Access log — replaces uvicorn's (silenced in logconfig) with a timestamped line
+# that also carries the request duration, so it's clear where time goes.
+_http = logging.getLogger("scanlation.http")
 
 
 async def _require_token(request: Request, call_next):
@@ -38,16 +45,33 @@ async def _require_token(request: Request, call_next):
     return await call_next(request)
 
 
+async def _log_requests(request: Request, call_next):
+    """Access log: one timestamped ``METHOD PATH -> STATUS Nms`` line per request.
+    Skips OPTIONS (CORS preflight) noise. Added outermost so the duration covers
+    the full stack and the final status (incl. 401/500) is what's logged."""
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    t0 = time.perf_counter()
+    resp = await call_next(request)
+    _http.info(
+        "%s %s -> %d %.0fms",
+        request.method, request.url.path, resp.status_code, (time.perf_counter() - t0) * 1000,
+    )
+    return resp
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging(settings.log_level)
     settings.ensure_dirs()
     yield
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="scanlation-server", version="0.1.0", lifespan=lifespan)
-    # Order matters: add auth first, CORS last, so CORS ends up OUTERMOST and its
-    # headers are attached even to the 401s (the browser/extension can read them).
+    # Order matters: add auth first, CORS next (so CORS wraps auth and its headers
+    # attach even to 401s), timing LAST so it's OUTERMOST — its duration covers the
+    # whole stack and it logs the final status.
     app.add_middleware(BaseHTTPMiddleware, dispatch=_require_token)
     app.add_middleware(
         CORSMiddleware,
@@ -56,6 +80,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(BaseHTTPMiddleware, dispatch=_log_requests)
     app.include_router(handshake.router)
     app.include_router(run.router)
     app.include_router(settings_routes.router)

@@ -53,22 +53,29 @@ def test_no_engine_installed_is_400():
         state.selection.detector, state.selection.recognizer, state.selection.translator = saved
 
 
-def test_lazy_miss_then_work_then_cached_hit():
+def test_lookup_miss_then_work_then_hit():
     c = client()
     p = payload(color=(123, 222, 31))  # unique md5
 
-    # lazy with unknown md5 -> non-2xx so the client falls through to work
-    miss = c.post("/run_pipeline/", json={"md5": p["md5"]})
-    assert miss.status_code >= 400
+    # lookup miss -> 200 {result: null} (a cache probe, not a 404 control signal)
+    miss = c.post("/run_lookup/", json={"md5": p["md5"]})
+    assert miss.status_code == 200 and miss.json()["result"] is None
 
     # work populates the cache
     work = c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]})
     assert work.status_code == 200
 
-    # lazy again -> served from cache
-    hit = c.post("/run_pipeline/", json={"md5": p["md5"]})
+    # lookup again -> served from cache, same result (no image re-upload)
+    hit = c.post("/run_lookup/", json={"md5": p["md5"]})
     assert hit.status_code == 200
     assert hit.json()["result"] == work.json()["result"]
+
+
+def test_run_pipeline_requires_contents():
+    """run_pipeline is work-only now; probing the cache without contents is /run_lookup/."""
+    c = client()
+    p = payload(color=(5, 6, 7))
+    assert c.post("/run_pipeline/", json={"md5": p["md5"]}).status_code == 400
 
 
 def test_set_engines_validates():
@@ -242,18 +249,18 @@ def test_clear_cache_drops_runs_and_translations():
     c = client()
     p = payload(color=(7, 9, 11))  # unique md5
     # populate both caches: a page result (ocr_runs) + translation-log rows.
-    # run_ocrtsl records each recognized text -> its translation in the TM; the
+    # run_pipeline records each recognized text -> its translation in the TM; the
     # dummy recognizer emits "REGION-<order>", so "REGION-0" lands in the log.
     assert c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]}).status_code == 200
-    assert c.post("/run_pipeline/", json={"md5": p["md5"]}).status_code == 200  # lazy hit = cached
+    assert c.post("/run_lookup/", json={"md5": p["md5"]}).json()["result"] is not None  # cached
     assert cache.get_translations("REGION-0", "ja", "ko")  # TM non-empty
 
     r = c.post("/clear_cache/", json={})
     assert r.status_code == 200
     assert r.json()["status"] == "success" and r.json()["cleared"] >= 1
 
-    # page cache gone -> lazy now misses (client would fall through to work)
-    assert c.post("/run_pipeline/", json={"md5": p["md5"]}).status_code == 404
+    # page cache gone -> lookup now misses (200 {result: null}; client falls through to work)
+    assert c.post("/run_lookup/", json={"md5": p["md5"]}).json()["result"] is None
     # translation log gone too
     assert cache.get_translations("REGION-0", "ja", "ko") == []
 
@@ -315,7 +322,8 @@ TESTS = [
     test_run_pipeline_work_returns_boxes,
     test_run_pipeline_md5_mismatch_is_400,
     test_no_engine_installed_is_400,
-    test_lazy_miss_then_work_then_cached_hit,
+    test_lookup_miss_then_work_then_hit,
+    test_run_pipeline_requires_contents,
     test_set_engines_validates,
     test_set_languages_validates,
     test_set_device_switches_and_validates,

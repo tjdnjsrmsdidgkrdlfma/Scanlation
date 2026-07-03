@@ -11,6 +11,8 @@ import asyncio
 import base64
 import hashlib
 import io
+import logging
+import time
 
 from fastapi import APIRouter, HTTPException
 from PIL import Image
@@ -23,6 +25,7 @@ from ..schemas import RunPipelineRequest
 from ..state import state
 
 router = APIRouter()
+logger = logging.getLogger("scanlation.run")
 
 
 def _require(role: str, name: str) -> None:
@@ -102,6 +105,24 @@ async def _run_deduped(id_, compute):
         state.inflight.pop(id_, None)
 
 
+@router.post("/run_lookup/")
+def run_lookup(req: RunPipelineRequest) -> dict:
+    """Read-only cache probe: ``{result: <cached list or null>}``, always 200.
+
+    Lets the client skip re-uploading the image when the page is already cached
+    (a bandwidth win), WITHOUT using a 404 as a control signal — a miss is a plain
+    200 with ``result: null``. Same ``{result: ...}`` envelope as /run_pipeline/,
+    so ``null`` (not cached) is distinct from ``[]`` (cached empty page). Body
+    reuses RunPipelineRequest; only md5 + options are read (contents ignored)."""
+    det, rec, tsl, src, dst, engines = _resolve()
+    oh = opt_hash(
+        state.options_for(det, req.options),
+        state.options_for(rec, req.options),
+        state.translator_options(tsl, req.options),
+    )
+    return {"result": cache.get_run(req.md5, src, dst, engines, oh)}  # None on miss
+
+
 @router.post("/run_pipeline/")
 async def run_pipeline(req: RunPipelineRequest) -> dict:
     det, rec, tsl, src, dst, engines = _resolve()
@@ -110,16 +131,15 @@ async def run_pipeline(req: RunPipelineRequest) -> dict:
     opt_tsl = state.translator_options(tsl, req.options)
     oh = opt_hash(opt_box, opt_ocr, opt_tsl)
 
-    # --- lazy: md5 only, no contents ---
+    # Contents are required — the cache probe moved to /run_lookup/ (a 200 lookup),
+    # so run_pipeline is single-purpose: it always does the real work.
     if req.contents is None:
-        if req.force:
-            raise HTTPException(status_code=400, detail="Cannot force ocr without contents")
-        cached = cache.get_run(req.md5, src, dst, engines, oh)
-        if cached is None:
-            raise HTTPException(status_code=404, detail="cache miss")  # non-2xx -> client sends work
-        return {"result": cached}
+        raise HTTPException(
+            status_code=400,
+            detail="contents required — use /run_lookup/ to probe the cache",
+        )
 
-    # --- work: verify md5 over the base64 string ---
+    # --- verify md5 over the base64 string ---
     if req.md5 != hashlib.md5(req.contents.encode("utf-8")).hexdigest():
         raise HTTPException(status_code=400, detail="md5 mismatch")
 
@@ -134,19 +154,33 @@ async def run_pipeline(req: RunPipelineRequest) -> dict:
     _require("translator", tsl)
 
     async def _compute():
+        # Timed per stage so the log shows where the time goes. lockwait = time
+        # spent waiting for the GPU lock (surfaces contention when images overlap).
+        logger.info("run md5=%s engines=%s %s->%s", req.md5[:8], engines, src, dst)
+        t0 = time.perf_counter()
         img = _decode_image(req.contents)
+        t_dec = time.perf_counter()
         # GPU/model half under the lock (single device); translate half outside it
         # (ollama is a separate process), bounded so concurrent images don't
         # overrun the backend's parallel slots.
         async with state.gpu_lock:
+            t_lock = time.perf_counter()
             recognized, translator = await run_in_threadpool(
                 _detect_sync, img, det, rec, tsl, src, opt_box, opt_ocr
             )
+        t_det = time.perf_counter()
         async with state.translate_sem:
             result = await run_in_threadpool(
                 _translate_sync, recognized, translator, src, dst, opt_tsl
             )
+        t_tsl = time.perf_counter()
         cache.put_run(req.md5, src, dst, engines, oh, result)
+        logger.info(
+            "md5=%s ok regions=%d decode=%.0f lockwait=%.0f detect+ocr=%.0f translate=%.0f total=%.0fms",
+            req.md5[:8], len(recognized),
+            (t_dec - t0) * 1000, (t_lock - t_dec) * 1000, (t_det - t_lock) * 1000,
+            (t_tsl - t_det) * 1000, (t_tsl - t0) * 1000,
+        )
         return result
 
     try:
@@ -154,5 +188,6 @@ async def run_pipeline(req: RunPipelineRequest) -> dict:
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
+        logger.exception("run_pipeline failed md5=%s", req.md5[:8])
         raise HTTPException(status_code=500, detail=str(exc))
     return {"result": result}
