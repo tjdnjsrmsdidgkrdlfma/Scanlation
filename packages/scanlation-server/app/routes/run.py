@@ -1,6 +1,6 @@
-"""OCR+translate endpoint: /run_ocrtsl/.
+"""OCR+translate endpoint: /run_pipeline/.
 
-run_ocrtsl implements the verified lazy/work flow:
+run_pipeline implements the verified lazy/work flow:
   * lazy  : client POSTs {md5, options}   -> cache hit returns result, miss = 404
   * work  : client POSTs {md5, contents}  -> md5(base64) verified, pipeline runs
 md5 is computed over the base64 *string* (not raw bytes) — mismatch => 400.
@@ -19,7 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from ..cache import cache, opt_hash
 from ..pipeline import detect_and_recognize, translate_regions
 from ..registry import registry
-from ..schemas import RunOcrTslRequest
+from ..schemas import RunPipelineRequest
 from ..state import state
 
 router = APIRouter()
@@ -102,8 +102,8 @@ async def _run_deduped(id_, compute):
         state.inflight.pop(id_, None)
 
 
-@router.post("/run_ocrtsl/")
-async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
+@router.post("/run_pipeline/")
+async def run_pipeline(req: RunPipelineRequest) -> dict:
     det, rec, tsl, src, dst, engines = _resolve()
     opt_box = state.options_for(det, req.options)
     opt_ocr = state.options_for(rec, req.options)

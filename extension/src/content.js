@@ -3,7 +3,7 @@
  * the returned translation boxes. Wire contract matches the server exactly:
  *   - md5 is computed over the base64 STRING (not raw bytes)
  *   - a box is [x_min, y_min, x_max, y_max]; positioned as % of natural size
- *   - /run_ocrtsl/ is lazy(md5 only) then work(md5 + contents) on a cache miss
+ *   - /run_pipeline/ is lazy(md5 only) then work(md5 + contents) on a cache miss
  */
 (() => {
   "use strict";
@@ -149,7 +149,7 @@
 
   // ------------------------------------------------------------- server ----
   async function runOcr(md5hash, base64, options) {
-    const url = cfg.endpoint.replace(/\/$/, "") + "/run_ocrtsl/";
+    const url = cfg.endpoint.replace(/\/$/, "") + "/run_pipeline/";
     const headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["X-Auth-Token"] = cfg.token;
     const post = (body) =>

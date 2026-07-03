@@ -83,12 +83,12 @@ function wire() {
   $("connect").addEventListener("click", connect);
 
   $("lang_src").addEventListener("change", () =>
-    post("/set_lang/", { lang_src: $("lang_src").value, lang_dst: $("lang_dst").value }));
+    post("/set_languages/", { lang_src: $("lang_src").value, lang_dst: $("lang_dst").value }));
   $("lang_dst").addEventListener("change", () =>
-    post("/set_lang/", { lang_src: $("lang_src").value, lang_dst: $("lang_dst").value }));
+    post("/set_languages/", { lang_src: $("lang_src").value, lang_dst: $("lang_dst").value }));
 
   const setModels = () =>
-    post("/set_models/", {
+    post("/set_engines/", {
       detector: $("detector").value,
       recognizer: $("recognizer").value,
       translator: $("translator").value,

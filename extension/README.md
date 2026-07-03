@@ -8,7 +8,7 @@ a settings **popup** (`browser_action`) and an address-bar **toggle icon**
 (`page_action`). Chrome has removed MV2, so this loads in Firefox.
 
 Wire contract matches the server exactly (verified end-to-end): md5 over the
-**base64 string**, box `[x_min, y_min, x_max, y_max]`, `/run_ocrtsl/` lazy(md5)
+**base64 string**, box `[x_min, y_min, x_max, y_max]`, `/run_pipeline/` lazy(md5)
 → work(contents) on a cache miss. The md5 implementation is byte-equal to
 Python's `hashlib.md5`.
 

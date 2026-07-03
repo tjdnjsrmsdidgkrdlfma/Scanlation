@@ -12,29 +12,29 @@ from typing import Any, Optional
 from pydantic import BaseModel
 
 
-# --- /run_ocrtsl/ ----------------------------------------------------------
-class RunOcrTslRequest(BaseModel):
+# --- /run_pipeline/ ----------------------------------------------------------
+class RunPipelineRequest(BaseModel):
     md5: str
     contents: Optional[str] = None          # base64; absent => lazy cache lookup
     options: Optional[dict[str, Any]] = None  # {engine_name: {opt: val}}
     force: Optional[bool] = False           # extension never sends this; re-run + overwrite
 
 
-# --- /set_models/ ----------------------------------------------------------
-class SetModelsRequest(BaseModel):
+# --- /set_engines/ ----------------------------------------------------------
+class SetEnginesRequest(BaseModel):
     detector: Optional[str] = None
     recognizer: Optional[str] = None
     translator: Optional[str] = None
 
 
-# --- /set_lang/ ------------------------------------------------------------
-class SetLangRequest(BaseModel):
+# --- /set_languages/ ------------------------------------------------------------
+class SetLanguagesRequest(BaseModel):
     lang_src: str
     lang_dst: str
 
 
-# --- /manage_plugins/ ------------------------------------------------------
-class ManagePluginsRequest(BaseModel):
+# --- /install_plugins/ ------------------------------------------------------
+class InstallPluginsRequest(BaseModel):
     plugins: dict[str, bool]
 
 

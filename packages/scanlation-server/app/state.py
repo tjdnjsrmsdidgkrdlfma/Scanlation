@@ -64,7 +64,7 @@ class AppState:
             self._path.write_text(json.dumps(asdict(self.selection), ensure_ascii=False, indent=2), encoding="utf-8")
 
     # --- mutations (validated against the registry by the caller) ---
-    def set_models(self, detector: str | None, recognizer: str | None, translator: str | None) -> None:
+    def set_engines(self, detector: str | None, recognizer: str | None, translator: str | None) -> None:
         if detector:
             self.selection.detector = detector
         if recognizer:
@@ -73,7 +73,7 @@ class AppState:
             self.selection.translator = translator
         self.save()
 
-    def set_langs(self, lang_src: str, lang_dst: str) -> None:
+    def set_languages(self, lang_src: str, lang_dst: str) -> None:
         self.selection.lang_src = lang_src
         self.selection.lang_dst = lang_dst
         self.save()

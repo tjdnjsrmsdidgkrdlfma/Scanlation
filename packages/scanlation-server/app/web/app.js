@@ -453,12 +453,12 @@ function renderBehavior() {
 // --- actions --------------------------------------------------------------
 async function saveModels() {
   try {
-    await postJSON("/set_models/", {
+    await postJSON("/set_engines/", {
       detector: $("sel-detector").value,
       recognizer: $("sel-recognizer").value,
       translator: $("sel-translator").value,
     });
-    await postJSON("/set_lang/", { lang_src: $("sel-lang_src").value, lang_dst: $("sel-lang_dst").value });
+    await postJSON("/set_languages/", { lang_src: $("sel-lang_src").value, lang_dst: $("sel-lang_dst").value });
     toast(t("toast.modelsSaved"), "ok");
     await load();
   } catch (e) { toast(t("toast.saveFail", { msg: e.message }), "err"); }
@@ -500,7 +500,7 @@ async function saveEngineOptions(engine, blockEl) {
 async function installPlugin(name) {
   toast(t("toast.installing", { name }), "");
   try {
-    const r = await postJSON("/manage_plugins/", { plugins: { [name]: true } });
+    const r = await postJSON("/install_plugins/", { plugins: { [name]: true } });
     toast(r.status === "success" ? t("toast.installed", { name }) : t("toast.installResult", { name, status: r.status }), "ok");
     await load();
   } catch (e) { toast(t("toast.installFail", { name, msg: e.message }), "err"); }

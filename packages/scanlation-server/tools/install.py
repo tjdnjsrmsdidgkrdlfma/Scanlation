@@ -4,7 +4,7 @@
     python tools/install.py ctd             # just CTD
     python tools/install.py ctd mangaocr
 
-Equivalent to POST /manage_plugins/ {"plugins": {"<name>": true}} (the popup's
+Equivalent to POST /install_plugins/ {"plugins": {"<name>": true}} (the popup's
 one-click install). load() never downloads implicitly, so run this once first.
 """
 from __future__ import annotations

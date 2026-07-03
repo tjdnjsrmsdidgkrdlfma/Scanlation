@@ -1,9 +1,9 @@
-"""Plugin discovery + lazy instantiation.
+"""Engine discovery + lazy instantiation.
 
 Engines are found purely through ``importlib.metadata`` entry_points. The core
 ships NO engine of its own; every engine is a separate pip package declaring the
 ``scanlation.<role>`` groups (auto-discovered on install). There is no hardcoded
-plugin map — installing a package is how an engine appears. (Tests register their
+engine map — installing a package is how an engine appears. (Tests register their
 own fakes directly; see tests/fake_engines.py.)
 
 Engines are instantiated lazily on first use — that's when VRAM/model weights
@@ -41,7 +41,7 @@ class Registry:
             for ep in eps:
                 try:
                     self._classes[role][ep.name] = ep.load()
-                except Exception:  # noqa: BLE001 - a broken/absent plugin must not kill discovery
+                except Exception:  # noqa: BLE001 - a broken/absent engine must not kill discovery
                     pass
 
     def rediscover(self) -> None:

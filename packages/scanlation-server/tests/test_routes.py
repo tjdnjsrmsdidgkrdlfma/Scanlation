@@ -21,9 +21,9 @@ def test_handshake_keys():
     assert d["lang_src"] == "ja" and d["lang_dst"] == "ko"
 
 
-def test_run_ocrtsl_work_returns_boxes():
+def test_run_pipeline_work_returns_boxes():
     p = payload()
-    r = client().post("/run_ocrtsl/", json={"md5": p["md5"], "contents": p["b64"]})
+    r = client().post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]})
     assert r.status_code == 200
     result = r.json()["result"]
     assert len(result) == 2
@@ -32,9 +32,9 @@ def test_run_ocrtsl_work_returns_boxes():
         assert len(item["box"]) == 4
 
 
-def test_run_ocrtsl_md5_mismatch_is_400():
+def test_run_pipeline_md5_mismatch_is_400():
     p = payload()
-    r = client().post("/run_ocrtsl/", json={"md5": "deadbeef", "contents": p["b64"]})
+    r = client().post("/run_pipeline/", json={"md5": "deadbeef", "contents": p["b64"]})
     assert r.status_code == 400
 
 
@@ -47,7 +47,7 @@ def test_no_engine_installed_is_400():
     try:
         state.selection.detector = ""                 # no detector installed/selected
         p = payload(color=(7, 7, 7))                  # unique md5 -> cache miss -> runs
-        r = c.post("/run_ocrtsl/", json={"md5": p["md5"], "contents": p["b64"]})
+        r = c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]})
         assert r.status_code == 400
     finally:
         state.selection.detector, state.selection.recognizer, state.selection.translator = saved
@@ -58,32 +58,32 @@ def test_lazy_miss_then_work_then_cached_hit():
     p = payload(color=(123, 222, 31))  # unique md5
 
     # lazy with unknown md5 -> non-2xx so the client falls through to work
-    miss = c.post("/run_ocrtsl/", json={"md5": p["md5"]})
+    miss = c.post("/run_pipeline/", json={"md5": p["md5"]})
     assert miss.status_code >= 400
 
     # work populates the cache
-    work = c.post("/run_ocrtsl/", json={"md5": p["md5"], "contents": p["b64"]})
+    work = c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]})
     assert work.status_code == 200
 
     # lazy again -> served from cache
-    hit = c.post("/run_ocrtsl/", json={"md5": p["md5"]})
+    hit = c.post("/run_pipeline/", json={"md5": p["md5"]})
     assert hit.status_code == 200
     assert hit.json()["result"] == work.json()["result"]
 
 
-def test_set_models_validates():
+def test_set_engines_validates():
     c = client()
     assert c.post(
-        "/set_models/",
+        "/set_engines/",
         json={"detector": "dummy", "recognizer": "dummy", "translator": "dummy"},
     ).status_code == 200
-    assert c.post("/set_models/", json={"detector": "nope"}).status_code == 400
+    assert c.post("/set_engines/", json={"detector": "nope"}).status_code == 400
 
 
-def test_set_lang_validates():
+def test_set_languages_validates():
     c = client()
-    assert c.post("/set_lang/", json={"lang_src": "ja", "lang_dst": "ko"}).status_code == 200
-    assert c.post("/set_lang/", json={"lang_src": "xx", "lang_dst": "ko"}).status_code == 400
+    assert c.post("/set_languages/", json={"lang_src": "ja", "lang_dst": "ko"}).status_code == 200
+    assert c.post("/set_languages/", json={"lang_src": "xx", "lang_dst": "ko"}).status_code == 400
 
 
 def test_catalog_lists_engines():
@@ -133,13 +133,13 @@ def test_install_package_builds_pip_git_command():
     assert "#subdirectory=packages/scanlation-sdk" in joined     # co-installed sdk
 
 
-def test_manage_plugins_install():
+def test_install_plugins():
     c = client()
     # dummy has no assets -> install is a no-op success
-    r = c.post("/manage_plugins/", json={"plugins": {"dummy": True}})
+    r = c.post("/install_plugins/", json={"plugins": {"dummy": True}})
     assert r.status_code == 200 and r.json()["status"] == "success"
     # unknown plugin -> 502
-    r2 = c.post("/manage_plugins/", json={"plugins": {"nope": True}})
+    r2 = c.post("/install_plugins/", json={"plugins": {"nope": True}})
     assert r2.status_code == 502
 
 
@@ -223,8 +223,8 @@ def test_clear_cache_drops_runs_and_translations():
     # populate both caches: a page result (ocr_runs) + translation-log rows.
     # run_ocrtsl records each recognized text -> its translation in the TM; the
     # dummy recognizer emits "REGION-<order>", so "REGION-0" lands in the log.
-    assert c.post("/run_ocrtsl/", json={"md5": p["md5"], "contents": p["b64"]}).status_code == 200
-    assert c.post("/run_ocrtsl/", json={"md5": p["md5"]}).status_code == 200  # lazy hit = cached
+    assert c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]}).status_code == 200
+    assert c.post("/run_pipeline/", json={"md5": p["md5"]}).status_code == 200  # lazy hit = cached
     assert cache.get_translations("REGION-0", "ja", "ko")  # TM non-empty
 
     r = c.post("/clear_cache/", json={})
@@ -232,7 +232,7 @@ def test_clear_cache_drops_runs_and_translations():
     assert r.json()["status"] == "success" and r.json()["cleared"] >= 1
 
     # page cache gone -> lazy now misses (client would fall through to work)
-    assert c.post("/run_ocrtsl/", json={"md5": p["md5"]}).status_code == 404
+    assert c.post("/run_pipeline/", json={"md5": p["md5"]}).status_code == 404
     # translation log gone too
     assert cache.get_translations("REGION-0", "ja", "ko") == []
 
@@ -263,7 +263,7 @@ def test_auth_token_gates_when_set():
         assert c.get("/", headers={"X-Auth-Token": "nope"}).status_code == 401  # wrong token
         assert c.get("/", headers={"X-Auth-Token": "s3cret"}).status_code == 200  # right token
         # a mutating endpoint is gated too
-        assert c.post("/set_lang/", json={"lang_src": "ja", "lang_dst": "ko"}).status_code == 401
+        assert c.post("/set_languages/", json={"lang_src": "ja", "lang_dst": "ko"}).status_code == 401
         # the /admin static shell stays open so the token can be entered
         assert c.get("/admin/").status_code == 200
     finally:
@@ -277,7 +277,7 @@ def test_auth_preflight_open_and_401_carries_cors():
     settings.auth_token = "s3cret"
     try:
         # CORS preflight (no token) must pass, else the extension's cross-origin calls die
-        pre = c.options("/run_ocrtsl/", headers={
+        pre = c.options("/run_pipeline/", headers={
             "Origin": "https://example.com", "Access-Control-Request-Method": "POST",
         })
         assert pre.status_code < 400
@@ -291,15 +291,15 @@ def test_auth_preflight_open_and_401_carries_cors():
 
 TESTS = [
     test_handshake_keys,
-    test_run_ocrtsl_work_returns_boxes,
-    test_run_ocrtsl_md5_mismatch_is_400,
+    test_run_pipeline_work_returns_boxes,
+    test_run_pipeline_md5_mismatch_is_400,
     test_no_engine_installed_is_400,
     test_lazy_miss_then_work_then_cached_hit,
-    test_set_models_validates,
-    test_set_lang_validates,
+    test_set_engines_validates,
+    test_set_languages_validates,
     test_catalog_lists_engines,
     test_install_package_builds_pip_git_command,
-    test_manage_plugins_install,
+    test_install_plugins,
     test_get_settings_shape,
     test_get_settings_merges_catalog,
     test_get_translator_models_shape,

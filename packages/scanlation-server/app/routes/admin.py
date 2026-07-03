@@ -10,7 +10,7 @@ the browser extension no longer has to set models on every page:
   * /delete_prompt/  remove a custom preset
 
 Model/lang selection + plugin install reuse the existing wire endpoints
-(/set_models/, /set_lang/, /manage_plugins/).
+(/set_engines/, /set_languages/, /install_plugins/).
 """
 from __future__ import annotations
 

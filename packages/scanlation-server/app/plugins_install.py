@@ -1,8 +1,8 @@
-"""Runtime plugin (engine) installation — pip-install an engine package on demand.
+"""Runtime plugin installation — pip-install a plugin's package on demand.
 
 The core image/venv ships NO engine. Real engines (ctd/mangaocr/ollama/
 llamacpp) are separate pip packages that live in this monorepo but are NOT in the
-core image. The admin "install" button (``POST /manage_plugins/``) pip-installs
+core image. The admin "install" button (``POST /install_plugins/``) pip-installs
 the chosen one into a persistent, ``sys.path``-ed dir (``SCANLATION_PLUGINS_DIR``,
 a mounted volume in Docker) — pulling the package + its heavy backend deps
 (onnxruntime/torch/httpx) only then. "설치한 패키지 = 탑재 엔진" holds inside the
@@ -18,7 +18,7 @@ scanlation-sdk is co-installed the same way (pip can't resolve the local/private
 sdk from an index). manga-ocr steers torch to the CPU wheel index.
 
 Two layers, kept distinct: **package** (this module, pip-install) and **weights**
-(each plugin's ``install()``). ``install_engine()`` does package-then-weights and
+(each plugin's ``install()``). ``install_plugin()`` does package-then-weights and
 re-discovers entry_points live so the engine appears without a restart.
 
 Catalog: the set of *installable* engines is a small static manifest here — it
@@ -40,7 +40,7 @@ from scanlation_sdk.context import context
 
 DEFAULT_REPO = "https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git"
 
-# The installable engines. name = registry/engine name; package = pip/dist name
+# The installable plugins. name = registry/engine name; package = pip/dist name
 # (and the packages/<package> subdir). Installed engines are found via
 # entry_points; this only lists what /admin can offer to install.
 _CATALOG: dict[str, dict] = {
@@ -89,7 +89,7 @@ class CatalogEntry:
 
 # --- paths / repo ---------------------------------------------------------
 def plugins_dir() -> Path:
-    """Where engine packages are pip-installed (a mounted volume in Docker)."""
+    """Where plugin packages are pip-installed (a mounted volume in Docker)."""
     env = os.environ.get("SCANLATION_PLUGINS_DIR")
     return Path(env) if env else context.base_dir / "plugins"
 
@@ -116,9 +116,9 @@ def ensure_on_path() -> None:
         site.addsitedir(p)  # appends to sys.path (+ processes any .pth)
 
 
-# --- catalog (installable engines) ----------------------------------------
+# --- catalog (installable plugins) ----------------------------------------
 def catalog() -> dict[str, CatalogEntry]:
-    """The static manifest of installable engines, keyed by engine name."""
+    """The static manifest of installable plugins, keyed by engine name."""
     return {
         name: CatalogEntry(
             name=name,
@@ -152,7 +152,7 @@ def _install_sources(entry: CatalogEntry) -> list[str]:
 
 
 def install_package(entry: CatalogEntry) -> None:
-    """pip-install the engine package (+ its deps) into ``plugins_dir()``.
+    """pip-install the plugin's package (+ its deps) into ``plugins_dir()``.
     Raises RuntimeError with pip's stderr tail on failure."""
     target = plugins_dir()
     target.mkdir(parents=True, exist_ok=True)
@@ -178,7 +178,7 @@ def refresh_registry() -> None:
 
 def find_class(name: str):
     """The engine class registered under ``name`` in any role, or None. Shared by
-    install_engine and tools/install.py so the role-crossing lookup lives once."""
+    install_plugin and tools/install.py so the role-crossing lookup lives once."""
     from .registry import registry
 
     for mapping in registry.all_classes().values():
@@ -187,8 +187,8 @@ def find_class(name: str):
     return None
 
 
-def install_engine(name: str) -> dict:
-    """Install an engine end-to-end: pip-install its package if missing (→ live
+def install_plugin(name: str) -> dict:
+    """Install a plugin end-to-end: pip-install its package if missing (→ live
     rediscover), then download its weights. ``name`` is the engine/registry name.
     Returns a small status dict; raises ValueError/RuntimeError on failure."""
     result: dict = {}

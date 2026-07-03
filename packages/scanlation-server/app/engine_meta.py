@@ -1,7 +1,7 @@
 """Turning engine *classes* into the JSON the listings/handshake/UI consume —
 without instantiating them for a real ``load()``.
 
-The handshake, plugin, and admin routes all need to read an ``EngineBase``
+The handshake and admin routes all need to read an ``EngineBase``
 subclass's metadata (display name, option schema) and its cheap install status.
 This is the one place that knows how, so a change to the wire shape lands once.
 """
@@ -25,7 +25,7 @@ def serialize_schema(cls) -> dict:
 
 def safe_is_installed(cls) -> bool:
     """``is_installed()`` via a cheap throwaway ``__init__`` (never ``load()``);
-    ``False`` if the check itself raises. Used by the plugin/admin listings."""
+    ``False`` if the check itself raises. Used by the admin listings."""
     try:  # cheap __init__ only (no load) — is_installed checks the filesystem/cache
         return cls().is_installed()
     except Exception:  # noqa: BLE001 - a broken engine shows as "not installed", not a 500
