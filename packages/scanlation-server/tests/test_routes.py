@@ -49,8 +49,6 @@ def test_no_engine_installed_is_400():
         p = payload(color=(7, 7, 7))                  # unique md5 -> cache miss -> runs
         r = c.post("/run_ocrtsl/", json={"md5": p["md5"], "contents": p["b64"]})
         assert r.status_code == 400
-        state.selection.translator = ""               # no translator -> run_tsl 400 too
-        assert c.post("/run_tsl/", json={"text": "x"}).status_code == 400
     finally:
         state.selection.detector, state.selection.recognizer, state.selection.translator = saved
 
@@ -73,26 +71,6 @@ def test_lazy_miss_then_work_then_cached_hit():
     assert hit.json()["result"] == work.json()["result"]
 
 
-def test_run_tsl_and_get_trans_roundtrip():
-    c = client()
-    text = "こんにちは"
-    r = c.post("/run_tsl/", json={"text": text})
-    assert r.status_code == 200
-    assert r.json()["text"] == f"[ja->ko] {text}"
-
-    g = c.get("/get_trans/", params={"text": text})
-    assert g.status_code == 200
-    models = {t["model"] for t in g.json()["translations"]}
-    assert "dummy" in models
-
-
-def test_get_active_options_shape():
-    d = client().get("/get_active_options/").json()["options"]
-    assert set(d) == {"detector", "recognizer", "translator"}
-    assert d["detector"]["num_boxes"]["type"] == "int"
-    assert d["detector"]["num_boxes"]["default"] == 2
-
-
 def test_set_models_validates():
     c = client()
     assert c.post(
@@ -106,18 +84,6 @@ def test_set_lang_validates():
     c = client()
     assert c.post("/set_lang/", json={"lang_src": "ja", "lang_dst": "ko"}).status_code == 200
     assert c.post("/set_lang/", json={"lang_src": "xx", "lang_dst": "ko"}).status_code == 400
-
-
-def test_get_plugin_data_lists_engines():
-    d = client().get("/get_plugin_data/").json()
-    assert "dummy" in d                               # the test harness registered a fake 'dummy'
-    assert d["dummy"]["installed"] is True            # no downloadable assets
-    assert d["dummy"]["installed_package"] is True    # present in the (test) registry
-    # installable engines are listed too (from the registry if pip-installed, else
-    # from the catalog with installed_package=False)
-    for name in ("ctd", "mangaocr", "ollama", "llamacpp"):
-        assert name in d, name
-        assert "installed_package" in d[name]
 
 
 def test_catalog_lists_engines():
@@ -250,14 +216,16 @@ def test_active_prompt_injected_into_translator_options():
 
 
 def test_clear_cache_drops_runs_and_translations():
+    from app.cache import cache
+
     c = client()
     p = payload(color=(7, 9, 11))  # unique md5
-    text = "全消去対象の文章"
-    # populate both caches: a page result (ocr_runs) + a translation log entry
+    # populate both caches: a page result (ocr_runs) + translation-log rows.
+    # run_ocrtsl records each recognized text -> its translation in the TM; the
+    # dummy recognizer emits "REGION-<order>", so "REGION-0" lands in the log.
     assert c.post("/run_ocrtsl/", json={"md5": p["md5"], "contents": p["b64"]}).status_code == 200
     assert c.post("/run_ocrtsl/", json={"md5": p["md5"]}).status_code == 200  # lazy hit = cached
-    c.post("/run_tsl/", json={"text": text})
-    assert c.get("/get_trans/", params={"text": text}).json()["translations"]  # non-empty
+    assert cache.get_translations("REGION-0", "ja", "ko")  # TM non-empty
 
     r = c.post("/clear_cache/", json={})
     assert r.status_code == 200
@@ -266,7 +234,7 @@ def test_clear_cache_drops_runs_and_translations():
     # page cache gone -> lazy now misses (client would fall through to work)
     assert c.post("/run_ocrtsl/", json={"md5": p["md5"]}).status_code == 404
     # translation log gone too
-    assert c.get("/get_trans/", params={"text": text}).json()["translations"] == []
+    assert cache.get_translations("REGION-0", "ja", "ko") == []
 
 
 def test_client_config_min_image_dim():
@@ -327,11 +295,8 @@ TESTS = [
     test_run_ocrtsl_md5_mismatch_is_400,
     test_no_engine_installed_is_400,
     test_lazy_miss_then_work_then_cached_hit,
-    test_run_tsl_and_get_trans_roundtrip,
-    test_get_active_options_shape,
     test_set_models_validates,
     test_set_lang_validates,
-    test_get_plugin_data_lists_engines,
     test_catalog_lists_engines,
     test_install_package_builds_pip_git_command,
     test_manage_plugins_install,

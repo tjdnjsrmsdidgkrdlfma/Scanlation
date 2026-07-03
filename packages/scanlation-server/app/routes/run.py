@@ -1,4 +1,4 @@
-"""OCR+translate endpoints: /run_ocrtsl/, /run_tsl/, /get_trans/.
+"""OCR+translate endpoint: /run_ocrtsl/.
 
 run_ocrtsl implements the verified lazy/work flow:
   * lazy  : client POSTs {md5, options}   -> cache hit returns result, miss = 404
@@ -17,9 +17,9 @@ from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
 from ..cache import cache, opt_hash
-from ..pipeline import detect_and_recognize, translate_regions, translate_text
+from ..pipeline import detect_and_recognize, translate_regions
 from ..registry import registry
-from ..schemas import RunOcrTslRequest, RunTslRequest
+from ..schemas import RunOcrTslRequest
 from ..state import state
 
 router = APIRouter()
@@ -156,23 +156,3 @@ async def run_ocrtsl(req: RunOcrTslRequest) -> dict:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc))
     return {"result": result}
-
-
-@router.post("/run_tsl/")
-async def run_tsl(req: RunTslRequest) -> dict:
-    sel = state.selection
-    _require("translator", sel.translator)
-    translator = registry.get("translator", sel.translator)
-    opt_tsl = state.translator_options(sel.translator, None)
-    text = await run_in_threadpool(
-        translate_text, req.text, sel.lang_src, sel.lang_dst, translator, opt_tsl
-    )
-    return {"text": text}
-
-
-@router.get("/get_trans/")
-async def get_trans(text: str, lang_src: str | None = None, lang_dst: str | None = None) -> dict:
-    sel = state.selection
-    src = lang_src or sel.lang_src
-    dst = lang_dst or sel.lang_dst
-    return {"translations": cache.get_translations(text, src, dst)}

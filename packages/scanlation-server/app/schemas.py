@@ -20,11 +20,6 @@ class RunOcrTslRequest(BaseModel):
     force: Optional[bool] = False           # extension never sends this; re-run + overwrite
 
 
-# --- /run_tsl/ -------------------------------------------------------------
-class RunTslRequest(BaseModel):
-    text: str
-
-
 # --- /set_models/ ----------------------------------------------------------
 class SetModelsRequest(BaseModel):
     detector: Optional[str] = None

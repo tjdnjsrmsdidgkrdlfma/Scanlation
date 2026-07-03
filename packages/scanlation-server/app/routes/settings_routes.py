@@ -1,4 +1,4 @@
-"""Selection endpoints: /set_models/, /set_lang/, /get_active_options/.
+"""Selection endpoints: /set_models/, /set_lang/.
 
 Selection is validated (name must exist / language must be known) but engines
 are NOT eagerly loaded — that happens lazily on first run_ocrtsl.
@@ -8,7 +8,6 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from scanlation_sdk.context import LANGUAGES
-from ..engine_meta import serialize_schema
 from ..registry import ROLE_NAMES, registry
 from ..schemas import SetLangRequest, SetModelsRequest
 from ..state import state
@@ -33,13 +32,3 @@ def set_lang(req: SetLangRequest) -> dict:
             raise HTTPException(status_code=400, detail=f"unknown language: {code}")
     state.set_langs(req.lang_src, req.lang_dst)
     return {}
-
-
-@router.get("/get_active_options/")
-def get_active_options() -> dict:
-    sel = state.selection
-    res: dict = {}
-    for role in ROLE_NAMES:
-        name = getattr(sel, role)
-        res[role] = serialize_schema(registry.get_class(role, name)) if registry.has(role, name) else {}
-    return {"options": res}

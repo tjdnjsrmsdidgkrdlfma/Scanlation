@@ -1,55 +1,17 @@
-"""Plugin listing/management.
+"""Plugin management.
 
-``/get_plugin_data/`` lists every engine — both the ones already installed
-(discovered via entry_points) and the ones merely *installable* (their source
-ships in the image but the package isn't pip-installed yet). ``/manage_plugins/``
-installs an engine: pip-install its package into the plugins volume if missing
-(so its heavy backend deps land only now), then download its weights.
+``/manage_plugins/`` installs an engine: pip-install its package into the plugins
+volume if missing (so its heavy backend deps land only now), then download its
+weights.
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from .. import __version__
-from ..engine_meta import class_meta, safe_is_installed
-from ..plugins_install import catalog, install_engine
-from ..registry import registry
+from ..plugins_install import install_engine
 from ..schemas import ManagePluginsRequest
 
 router = APIRouter()
-
-
-@router.get("/get_plugin_data/")
-def get_plugin_data() -> dict:
-    resp: dict = {}
-    # installed (pip-present) engines, discovered via entry_points
-    for role, mapping in registry.all_classes().items():
-        for name, cls in mapping.items():
-            if name in resp:  # dedupe an engine registered under multiple roles
-                resp[name]["roles"].append(role)
-                continue
-            resp[name] = {
-                **class_meta(cls, name),
-                "version": __version__,
-                "installed": safe_is_installed(cls),  # weights present?
-                "installed_package": True,            # pip package present?
-                "roles": [role],
-            }
-    # installable-but-not-installed engines (source shipped, package absent)
-    for name, entry in catalog().items():
-        if name in resp:
-            continue
-        resp[name] = {
-            "display_name": entry.display_name,
-            "homepage": None,
-            "warning": None,
-            "description": entry.description,
-            "version": None,
-            "installed": False,
-            "installed_package": False,
-            "roles": list(entry.roles),
-        }
-    return resp
 
 
 @router.post("/manage_plugins/")
