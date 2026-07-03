@@ -32,6 +32,13 @@ packages/scanlation-server/samples/
 *.annotated.png
 annotated.png
 
+# compare_models.py outputs
+packages/scanlation-server/compare_detectors.png
+packages/scanlation-server/compare_panels/
+packages/scanlation-server/compare_ocr.md
+packages/scanlation-server/crops_ocr/
+packages/scanlation-server/compare_out/
+
 # Local tooling / editor config
 .claude/
 
