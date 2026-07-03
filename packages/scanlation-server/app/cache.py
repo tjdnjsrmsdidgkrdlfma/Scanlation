@@ -1,11 +1,8 @@
-"""SQLite result cache + translation memory (TM).
+"""SQLite page-result cache.
 
-Two concerns:
-  * ocr_runs  — a whole page's result keyed by (md5, langs, engines, opt_hash).
-                Powers the lazy flow: client POSTs md5 only; a hit returns the
-                stored result without re-running models.
-  * translations — every (src_text, langs, model)->dst_text, exposed by
-                   /get_trans/ (a translation log; not consulted by the pipeline).
+  * ocr_runs — a whole page's result keyed by (md5, langs, engines, opt_hash).
+               Powers the lookup flow: the client probes /run_lookup/ with md5
+               only; a hit returns the stored result without re-running the models.
 
 WAL + a process lock keep it safe under the threadpool that runs blocking work.
 """
@@ -30,12 +27,6 @@ CREATE TABLE IF NOT EXISTS ocr_runs (
     created_at REAL DEFAULT (strftime('%s','now')),
     PRIMARY KEY (md5, src, dst, engines, opt_hash)
 );
-CREATE TABLE IF NOT EXISTS translations (
-    src_text TEXT, src_lang TEXT, dst_lang TEXT, model TEXT,
-    dst_text TEXT NOT NULL,
-    created_at REAL DEFAULT (strftime('%s','now')),
-    PRIMARY KEY (src_text, src_lang, dst_lang, model)
-);
 """
 
 
@@ -56,7 +47,7 @@ class Cache:
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
-    # --- page result cache (lazy flow) ---
+    # --- page result cache (lookup flow) ---
     def get_run(self, md5: str, src: str, dst: str, engines: str, oh: str) -> Optional[list[dict]]:
         with self._lock:
             row = self._conn.execute(
@@ -75,31 +66,12 @@ class Cache:
             self._conn.commit()
 
     def clear(self) -> int:
-        """Drop all cached data — page results and the translation log — so
-        everything is recomputed fresh on next use. Returns the rows removed."""
+        """Drop all cached page results so everything is recomputed fresh on next
+        use. Returns the rows removed."""
         with self._lock:
             n = self._conn.execute("DELETE FROM ocr_runs").rowcount
-            n += self._conn.execute("DELETE FROM translations").rowcount
             self._conn.commit()
         return n
-
-    # --- translation memory ---
-    def get_translations(self, src_text: str, src_lang: str, dst_lang: str) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT model, dst_text FROM translations WHERE src_text=? AND src_lang=? AND dst_lang=? "
-                "ORDER BY created_at DESC",
-                (src_text, src_lang, dst_lang),
-            ).fetchall()
-        return [{"model": r[0], "text": r[1]} for r in rows]
-
-    def put_translation(self, src_text: str, src_lang: str, dst_lang: str, model: str, dst_text: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT OR REPLACE INTO translations(src_text, src_lang, dst_lang, model, dst_text) VALUES (?,?,?,?,?)",
-                (src_text, src_lang, dst_lang, model, dst_text),
-            )
-            self._conn.commit()
 
 
 cache = Cache()

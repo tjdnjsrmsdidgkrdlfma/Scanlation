@@ -13,7 +13,6 @@ from typing import Any
 
 from PIL import Image
 
-from .cache import cache
 from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
 from .geometry import deskew_crop
 
@@ -39,16 +38,6 @@ def assign_reading_order(regions: list[Region], vertical_hint: bool = False) -> 
     for i, r in enumerate(ordered):
         r.order = i
     return ordered
-
-
-def translate_text(
-    text: str, src: str, dst: str, translator: Translator, options: dict
-) -> str:
-    """Translate one text and record the machine result in the TM (for /get_trans/)."""
-    tsl = translator.translate(text, src, dst, options)
-    model = getattr(translator, "name", "machine")
-    cache.put_translation(text, src, dst, model, tsl)
-    return tsl
 
 
 def detect_and_recognize(
@@ -85,17 +74,10 @@ def _translate_all(
     texts: list[str], src: str, dst: str, translator: Translator, options: dict
 ) -> list[str]:
     """Translate a whole image's texts. Uses the translator's batch path when it
-    has one (the LLM engines) and a per-text loop otherwise (the test dummy).
-    Records each source->translation in the TM, one row per text keyed by the
-    engine name — same as the single-text translate_text."""
+    has one (the LLM engines) and a per-text loop otherwise (the test dummy)."""
     if hasattr(translator, "translate_batch"):
-        tsls = translator.translate_batch(texts, src, dst, options)
-    else:
-        tsls = [translator.translate(t, src, dst, options) for t in texts]
-    model = getattr(translator, "name", "machine")
-    for text, tsl in zip(texts, tsls):
-        cache.put_translation(text, src, dst, model, tsl)
-    return tsls
+        return translator.translate_batch(texts, src, dst, options)
+    return [translator.translate(t, src, dst, options) for t in texts]
 
 
 def translate_regions(

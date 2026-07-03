@@ -243,17 +243,12 @@ def test_active_prompt_injected_into_translator_options():
     assert state.translator_options("dummy", None)["system_prompt"].startswith("From now on")
 
 
-def test_clear_cache_drops_runs_and_translations():
-    from app.cache import cache
-
+def test_clear_cache_drops_runs():
     c = client()
     p = payload(color=(7, 9, 11))  # unique md5
-    # populate both caches: a page result (ocr_runs) + translation-log rows.
-    # run_pipeline records each recognized text -> its translation in the TM; the
-    # dummy recognizer emits "REGION-<order>", so "REGION-0" lands in the log.
+    # populate the page-result cache (ocr_runs)
     assert c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]}).status_code == 200
     assert c.post("/run_lookup/", json={"md5": p["md5"]}).json()["result"] is not None  # cached
-    assert cache.get_translations("REGION-0", "ja", "ko")  # TM non-empty
 
     r = c.post("/clear_cache/", json={})
     assert r.status_code == 200
@@ -261,8 +256,6 @@ def test_clear_cache_drops_runs_and_translations():
 
     # page cache gone -> lookup now misses (200 {result: null}; client falls through to work)
     assert c.post("/run_lookup/", json={"md5": p["md5"]}).json()["result"] is None
-    # translation log gone too
-    assert cache.get_translations("REGION-0", "ja", "ko") == []
 
 
 def test_client_config_min_image_dim():
@@ -336,7 +329,7 @@ TESTS = [
     test_set_options_persists_and_clears,
     test_prompt_select_save_delete,
     test_active_prompt_injected_into_translator_options,
-    test_clear_cache_drops_runs_and_translations,
+    test_clear_cache_drops_runs,
     test_client_config_min_image_dim,
     test_auth_token_gates_when_set,
     test_auth_preflight_open_and_401_carries_cors,
