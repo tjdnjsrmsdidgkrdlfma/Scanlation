@@ -98,6 +98,7 @@
 **근거:** Django ORM/마이그레이션/커스텀 워커큐 제거. 실제 작업은 단일 GPU 락 뒤의 CPU/GPU 연산이지 고동시성 웹이 아님 → async + semaphore가 스테이지별 워커풀보다 단순/적합.
 
 ### 3.1 파일 구조
+> ⚠ **원 설계 기록.** 현재 트리는 [README.md](README.md)의 저장소 구조 절 참조 — 단일 `scanlation-server/` 패키지가 `packages/`의 다중 pip 패키지로 분리됐고(서두 divergence), 아래의 `detector_ctd`·`test_ctd.py`·`run_image.py`·`bench_translate.py`·`conftest.py`·`docker-compose.cpu.yml`은 현존하지 않는다.
 ```
 scanlation-server/
   pyproject.toml            # FastAPI 앱 + 내장 플러그인 entry_points
@@ -218,6 +219,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 ## 4. 첫 3개 플러그인 (개요)
 
 **4.1 CTDDetector** (`plugins/detector_ctd/`) — `mayocream/comic-text-detector-onnx`(ONNX).
+> ⚠ **제거됨** — `rtdetr`(RT-DETR-v2, 패키지 `scanlation-rtdetr`)로 교체·기본 검출기 지정(서두 divergence 및 §9-3 참조). 아래 상세는 원 설계 기록이며 현 코드에 없다(복구는 git 히스토리).
 - `load()`: `ort.InferenceSession(path, providers=<선택>)`; provider는 env `DEVICE`로 `ROCMExecutionProvider`(Linux ROCm) / `DmlExecutionProvider`(Windows 로컬개발) / 아니면 CPU — **항상 CPU fallback 추가**.
 - `detect()`: letterbox 리사이즈→정규화→추론; `decode.py`가 출력`(blks, mask, mask_refined)`→라인 quad(`polys.reshape(-1,8)`)+세그; thresh/unclip(pyclipper)/NMS; letterbox 역변환으로 원본 px 매핑; 라인별 Region.
 - ⚠️ **출력 텐서 이름/순서/후처리는 실제 onnx + 레퍼런스 `comic_text_detector/inference.py`(TextDetector.__call__)로 반드시 검증** — 최대 미지수(6번).
@@ -227,7 +229,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 
 **4.3 OllamaTranslator** (`plugins/translator_ollama/`) — 기존 plugin+commons+model_test.py 튜닝 이식. env `OLLAMA_ENDPOINT`(기본 `.../api`)/`OLLAMA_MODEL`(프리픽스 `oct_ollama_`), 옵션 `num_ctx:512,num_gpu:31,temperature:0,seed:42,top_p:1.0,think:False`. 프롬프트 템플릿(src/dst/context/text) + 시스템프롬프트(2.3 verbatim); `/generate stream:False think:False`; ≤2자 스킵; httpx async 넉넉한 타임아웃; iso1→언어명 매핑(ja→"japanese", ko→"korean").
 
-**4.4 Dummy** (`plugins/dummy/`) — DummyDetector(하드코딩 1~2 Region, 회전 quad 1개 포함해 deskew 검증용), DummyRecognizer("REGION-N"), DummyTranslator(`f"[{src}->{dst}] {text}"`). P1 스켈레톤/CPU CI/가중치 없는 Claude 반복용.
+**4.4 Dummy** — DummyDetector(하드코딩 1~2 Region, 회전 quad 1개 포함해 deskew 검증용), DummyRecognizer("REGION-N"), DummyTranslator(`f"[{src}->{dst}] {text}"`). P1 스켈레톤/CPU CI/가중치 없는 Claude 반복용. *(제품 미출하 — 이제 `packages/scanlation-server/tests/fake_engines.py`에 있음)*
 
 ---
 
@@ -257,6 +259,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 ---
 
 ## 7. Claude 직접 테스트 — 사용자 질문 답변: "개발 중 Claude가 직접 테스트하면 좋겠다"
+> ⚠ **원 설계 기록.** 현재 테스트 방식·명령은 [README.md](README.md)의 테스트 절 참조. 실제로는 pytest 대신 자체 러너(`python -m tests`), `run_image.py`·`bench_translate.py`·`test_ctd.py`는 미채택(`visualize.py`만 유지) — 서두 divergence 참조.
 
 **필요 조건:** CPU 전용 빠른 경로(dummy + CTD/manga-ocr CPU provider, `DEVICE=cpu`); 서버 타격 수단 — pytest의 FastAPI `TestClient`/`httpx.AsyncClient` 우선(네트워크 없이 빠르고 단언 가능) + `uvicorn & + curl` 수동; 샘플 만화 픽스처 `tests/fixtures/`(세로글자 1, 기울어진 SFX 1, 작은글씨 1 — 사용자 실샘플은 `pixic/` 및 `make_viewer.py` 흐름에 있음; private면 합성 placeholder).
 
@@ -278,7 +281,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 - **P0 스켈레톤** — scaffold, pyproject, `main.py`(FastAPI + handshake + CORS). TEST: `curl /` valid; popup 연결되어 (빈) 드롭다운 표시.
 - **P1 계약+파이프라인+dummy** — contracts/registry/state/cache/dummy 파이프라인/전 라우트. TEST: `test_routes.py`+`test_pipeline.py` green; 확장이 dummy로 실제 만화에 박스+가짜텍스트(=md5/box순서/lazy를 모델위험 0으로 검증).
 - **P2 기하/deskew** — `deskew_crop` 구현+단위테스트, 파이프라인 연결(dummy 검출기가 회전 quad 방출해 검증).
-- **P3 CTD 검출** — CTDDetector + decode.py(CPU 먼저). TEST: `visualize.py`로 폴리곤 육안 검사 + test_ctd 스모크. **여기서 ONNX 디코딩 검증.** 정확도 검증의 핵심.
+- **P3 CTD 검출** *(rtdetr 교체로 해소 — 서두 divergence 참조)* — CTDDetector + decode.py(CPU 먼저). TEST: `visualize.py`로 폴리곤 육안 검사 + test_ctd 스모크. **여기서 ONNX 디코딩 검증.** 정확도 검증의 핵심.
 - **P4 manga-ocr** — MangaOcrRecognizer(CPU). TEST: P3 crop 먹여 일본어 비어있지않음, 알려진 패널 스팟체크.
 - **P5 ollama** — 이식 + 프롬프트 + 튜닝. TEST: bench_translate.py ja→ko; run_ocrtsl 실제 ocr+tsl end-to-end.
 - **P6 확장 MV3** — manifest v3, 서비스워커, scripting 주입, polyfill, popup 재빌드. TEST: Chrome+Firefox unpacked 로드; 저장된 pixiv `viewer.html` 및 실사이트 오버레이.
@@ -290,7 +293,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 ## 9. 열린 리스크 / 미결정
 1. **gfx1200(RDNA4) ort-ROCm 성숙도:** 사전빌드 휠 부재 가능 → DirectML(Win 개발)/CPU fallback/소스빌드. 완화: CTD는 작아 CPU로도 충분; provider 선택은 CPU fallback + active provider 로그.
 2. **manga-ocr(torch-rocm) VRAM 경합:** ollama ≈14GB/16GB라 CTD+manga-ocr OOM 위험. 선택지(P8 결정): (a) **CTD+manga-ocr를 CPU로, GPU는 ollama 전용**[정확도우선+빡빡VRAM+페이지당 영역 적음 → 가장 안전한 기본]; (b) ollama 전후 load/unload; (c) ollama `num_gpu` 캡.
-3. **CTD ONNX 디코딩 미검증:** 출력 이름/순서, thresh/unclip/NMS, letterbox 좌표역변환을 실제 모델+레퍼런스 `inference.py`로 확인 필수. 최대 미지수 — P3에 실시간 확보, `visualize.py`를 먼저 만들어 육안 검증.
+3. **CTD ONNX 디코딩 미검증** *(rtdetr 교체로 해소):* 출력 이름/순서, thresh/unclip/NMS, letterbox 좌표역변환을 실제 모델+레퍼런스 `inference.py`로 확인 필수. 최대 미지수 — P3에 실시간 확보, `visualize.py`를 먼저 만들어 육안 검증.
 4. **라이선스(중요):** manga-image-translator=GPLv3 → `get_transformed_region` **복사 시 우리 서버도 GPLv3 전염**. deskew는 표준 homography → **알고리즘 설명만 보고 OpenCV 프리미티브로 독립 재구현**(§3.5). manga-ocr=Apache-2.0(런타임 의존 OK). comic-text-detector 가중치 라이선스는 번들 전 확인. 구 Crivella 코드(GPLv3)는 **학습만, 복사 금지**. → **프로젝트 라이선스 미정(TBD)**, 단 트리에 GPLv3 코드 미포함, 런타임 의존만.
 5. **세로/방향 정확성:** "기울기는 펴되 세로는 세로 유지"는 실제 세로 일본어+기울어진 SFX로 경험적 검증 필요 → visualize.py + crop 덤프로 P3~P4 튜닝.
 6. **디바이스 배치는 런타임 정책(계약 아님) — 구현됨:** 검출(rtdetr)+인식(manga-ocr)을 하나의 **전역 연산 장치** 설정(`cpu`/`cuda`)으로 함께 전환하도록 `/admin`(모델·언어 탭)에 노출. `state.json`에 영속(`SCANLATION_DEVICE`는 최초 시드만), 변경 시 `context.device` 갱신 + `registry.unload_all()`로 다음 요청에 새 장치 재로드. LLM(ollama)은 별도 프로세스라 이 설정과 무관. (원안의 "엔진별 독립 설정"은 불필요 — 검출·인식은 항상 같이 옮기고 싶었음: LLM만 GPU, 나머지 CPU.)
