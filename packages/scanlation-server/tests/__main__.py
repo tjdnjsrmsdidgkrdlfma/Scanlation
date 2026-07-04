@@ -13,10 +13,27 @@ from tests import (
     test_geometry,
     test_logconfig,
     test_pipeline,
-    test_routes,
+    test_routes_admin,
+    test_routes_auth,
+    test_routes_plugins,
+    test_routes_run,
+    test_routes_settings,
+    test_state,
 )
 from tests.helpers import run_modules
 
 if __name__ == "__main__":
-    # test_logconfig last: it reconfigures global logging.
-    sys.exit(run_modules([test_contracts, test_geometry, test_pipeline, test_routes, test_logconfig]))
+    # Route modules keep the original test_routes.py order (they share one cached
+    # TestClient); test_logconfig last: it reconfigures global logging.
+    sys.exit(run_modules([
+        test_contracts,
+        test_geometry,
+        test_pipeline,
+        test_state,
+        test_routes_run,
+        test_routes_settings,
+        test_routes_plugins,
+        test_routes_admin,
+        test_routes_auth,
+        test_logconfig,
+    ]))

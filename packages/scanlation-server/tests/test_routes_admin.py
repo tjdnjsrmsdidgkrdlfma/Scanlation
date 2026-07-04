@@ -1,0 +1,125 @@
+"""routes/admin.py tests — get_settings / models / set_options / prompts /
+cache clearing / client config."""
+from __future__ import annotations
+
+from tests.helpers import client, payload, run
+
+
+def test_get_settings_shape():
+    d = client().get("/get_settings/").json()
+    assert set(d) >= {"version", "selection", "languages", "engines", "prompts"}
+    assert set(d["engines"]) == {"detector", "recognizer", "translator"}
+    assert "default" in d["prompts"]["builtin"]            # default always present
+    # engines carry their OPTION_SCHEMA so the admin can render option fields
+    det = {e["name"]: e for e in d["engines"]["detector"]}
+    assert "dummy" in det and "num_boxes" in det["dummy"]["schema"]
+    assert det["dummy"]["schema"]["num_boxes"]["type"] == "int"
+
+
+def test_get_settings_merges_catalog():
+    """Installable-but-not-installed engines are merged in from the catalog so the
+    admin can install them; every entry carries the installed_package flag."""
+    d = client().get("/get_settings/").json()
+    names = set()
+    for role in ("detector", "recognizer", "translator"):
+        for e in d["engines"][role]:
+            names.add(e["name"])
+            assert "installed_package" in e
+    for name in ("rtdetr", "mangaocr", "ollama", "llamacpp"):
+        assert name in names, name
+
+
+def test_get_translator_models_shape():
+    c = client()
+    # active translator is dummy (no backend) -> empty list, never errors
+    d = c.get("/get_translator_models/").json()
+    assert isinstance(d["models"], list) and d["models"] == []
+    # unknown engine -> empty, not a 4xx
+    assert c.get("/get_translator_models/", params={"engine": "nope"}).json()["models"] == []
+
+
+def test_set_options_persists_and_clears():
+    c = client()
+    r = c.post("/set_options/", json={"engine": "dummy", "options": {"num_boxes": 1}})
+    assert r.status_code == 200
+    det = {e["name"]: e for e in c.get("/get_settings/").json()["engines"]["detector"]}
+    assert det["dummy"]["options"]["num_boxes"] == 1
+    # blank value removes that override (reverts to the schema default)
+    c.post("/set_options/", json={"engine": "dummy", "options": {"num_boxes": ""}})
+    det = {e["name"]: e for e in c.get("/get_settings/").json()["engines"]["detector"]}
+    assert "num_boxes" not in det["dummy"]["options"]
+    # unknown engine -> 400
+    assert c.post("/set_options/", json={"engine": "nope", "options": {}}).status_code == 400
+
+
+def test_prompt_select_save_delete():
+    c = client()
+    assert c.post("/select_prompt/", json={"name": "literal"}).json()["active"] == "literal"
+    assert c.post("/select_prompt/", json={"name": "ghost"}).status_code == 400  # unknown
+    # save custom -> active + listed under custom
+    c.post("/save_prompt/", json={"name": "mine", "text": "SYSTEM TEST PROMPT"})
+    p = c.get("/get_settings/").json()["prompts"]
+    assert p["active"] == "mine" and p["custom"]["mine"] == "SYSTEM TEST PROMPT"
+    assert c.post("/delete_prompt/", json={"name": "default"}).status_code == 400  # builtin protected
+    # delete custom -> active falls back to default
+    assert c.post("/delete_prompt/", json={"name": "mine"}).json()["active"] == "default"
+    c.post("/select_prompt/", json={"name": "default"})  # cleanup
+
+
+def test_active_prompt_injected_into_translator_options():
+    from app.state import state
+
+    c = client()
+    c.post("/save_prompt/", json={"name": "inj", "text": "INJECTED-PROMPT"})
+    assert state.translator_options("dummy", None)["system_prompt"] == "INJECTED-PROMPT"
+    c.post("/delete_prompt/", json={"name": "inj"})  # cleanup -> back to default
+    assert state.translator_options("dummy", None)["system_prompt"].startswith("From now on")
+
+
+def test_clear_cache_drops_runs():
+    c = client()
+    p = payload(color=(7, 9, 11))  # unique md5
+    # populate the page-result cache (page_runs)
+    assert c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]}).status_code == 200
+    assert c.post("/run_lookup/", json={"md5": p["md5"]}).json()["result"] is not None  # cached
+
+    r = c.post("/clear_cache/", json={})
+    assert r.status_code == 200
+    assert r.json()["status"] == "success" and r.json()["cleared"] >= 1
+
+    # page cache gone -> lookup now misses (200 {result: null}; client falls through to work)
+    assert c.post("/run_lookup/", json={"md5": p["md5"]}).json()["result"] is None
+
+
+def test_client_config_min_image_dim():
+    c = client()
+    # handshake + get_settings expose the current value
+    assert "min_image_dim" in c.get("/").json()
+    assert "min_image_dim" in c.get("/get_settings/").json()["selection"]
+    try:
+        # set it -> reflected in both the handshake and the admin snapshot
+        r = c.post("/set_client_config/", json={"min_image_dim": 120})
+        assert r.status_code == 200 and r.json()["min_image_dim"] == 120
+        assert c.get("/").json()["min_image_dim"] == 120
+        assert c.get("/get_settings/").json()["selection"]["min_image_dim"] == 120
+        # negative -> 400
+        assert c.post("/set_client_config/", json={"min_image_dim": -5}).status_code == 400
+    finally:
+        c.post("/set_client_config/", json={"min_image_dim": 80})  # cleanup
+
+
+TESTS = [
+    test_get_settings_shape,
+    test_get_settings_merges_catalog,
+    test_get_translator_models_shape,
+    test_set_options_persists_and_clears,
+    test_prompt_select_save_delete,
+    test_active_prompt_injected_into_translator_options,
+    test_clear_cache_drops_runs,
+    test_client_config_min_image_dim,
+]
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(run(TESTS, "test_routes_admin"))
