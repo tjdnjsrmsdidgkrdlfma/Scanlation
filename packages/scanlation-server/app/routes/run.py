@@ -21,7 +21,7 @@ from starlette.concurrency import run_in_threadpool
 from ..cache import cache, opt_hash
 from ..pipeline import detect_and_recognize, translate_regions
 from ..registry import registry
-from ..schemas import RunPipelineRequest
+from ..schemas import RunRequest
 from ..state import state
 
 router = APIRouter()
@@ -47,9 +47,9 @@ def _resolve():
     )
 
 
-def _detect_sync(img, det_name, rec_name, tsl_name, src, opt_box, opt_ocr):
-    """Resolve all three engines (loads weights on first use) and run the GPU/model
-    half: detect + recognize. Returns (recognized pairs, translator instance).
+def _read_sync(img, det_name, rec_name, tsl_name, src, opt_box, opt_ocr):
+    """Read the image = detect + recognize (the GPU/model half). Resolves all three
+    engines (loads weights on first use); returns (recognized pairs, translator).
 
     Runs in the threadpool UNDER the GPU lock: registry.get is not thread-safe
     (check-then-set on _instances) and model loads must be serialized. The
@@ -106,14 +106,14 @@ async def _run_deduped(id_, compute):
 
 
 @router.post("/run_lookup/")
-def run_lookup(req: RunPipelineRequest) -> dict:
+def run_lookup(req: RunRequest) -> dict:
     """Read-only cache probe: ``{result: <cached list or null>}``, always 200.
 
     Lets the client skip re-uploading the image when the page is already cached
     (a bandwidth win), WITHOUT using a 404 as a control signal — a miss is a plain
     200 with ``result: null``. Same ``{result: ...}`` envelope as /run_pipeline/,
     so ``null`` (not cached) is distinct from ``[]`` (cached empty page). Body
-    reuses RunPipelineRequest; only md5 + options are read (contents ignored)."""
+    reuses RunRequest; only md5 + options are read (contents ignored)."""
     det, rec, tsl, src, dst, engines = _resolve()
     oh = opt_hash(
         state.options_for(det, req.options),
@@ -124,7 +124,7 @@ def run_lookup(req: RunPipelineRequest) -> dict:
 
 
 @router.post("/run_pipeline/")
-async def run_pipeline(req: RunPipelineRequest) -> dict:
+async def run_pipeline(req: RunRequest) -> dict:
     det, rec, tsl, src, dst, engines = _resolve()
     opt_box = state.options_for(det, req.options)
     opt_ocr = state.options_for(rec, req.options)
@@ -166,7 +166,7 @@ async def run_pipeline(req: RunPipelineRequest) -> dict:
         async with state.gpu_lock:
             t_lock = time.perf_counter()
             recognized, translator = await run_in_threadpool(
-                _detect_sync, img, det, rec, tsl, src, opt_box, opt_ocr
+                _read_sync, img, det, rec, tsl, src, opt_box, opt_ocr
             )
         t_det = time.perf_counter()
         async with state.translate_sem:

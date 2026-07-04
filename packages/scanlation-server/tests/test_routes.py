@@ -246,7 +246,7 @@ def test_active_prompt_injected_into_translator_options():
 def test_clear_cache_drops_runs():
     c = client()
     p = payload(color=(7, 9, 11))  # unique md5
-    # populate the page-result cache (ocr_runs)
+    # populate the page-result cache (page_runs)
     assert c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]}).status_code == 200
     assert c.post("/run_lookup/", json={"md5": p["md5"]}).json()["result"] is not None  # cached
 

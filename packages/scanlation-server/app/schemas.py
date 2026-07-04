@@ -12,10 +12,10 @@ from typing import Any, Optional
 from pydantic import BaseModel
 
 
-# --- /run_pipeline/ ----------------------------------------------------------
-class RunPipelineRequest(BaseModel):
+# --- /run_pipeline/ + /run_lookup/ (shared request body) --------------------
+class RunRequest(BaseModel):
     md5: str
-    contents: Optional[str] = None          # base64; absent => lazy cache lookup
+    contents: Optional[str] = None          # base64; required by /run_pipeline/, ignored by /run_lookup/
     options: Optional[dict[str, Any]] = None  # {engine_name: {opt: val}}
     force: Optional[bool] = False           # extension never sends this; re-run + overwrite
 

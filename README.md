@@ -158,8 +158,8 @@ cd packages/scanlation-server
   `num_ctx`/`temperature` 등. 빈칸 = 환경변수/스키마 기본값으로 복귀.
 - **플러그인 설치** — 설치된 엔진뿐 아니라 **미설치 엔진 패키지까지** 원클릭 설치(패키지 pip 설치 → 가중치;
   = `POST /install_plugins/`). Docker에선 볼륨에 영속돼 재시작해도 유지.
-- **유지보수** — **캐시 비우기**(`POST /clear_cache/`): 저장된 모든 캐시(페이지 결과 `ocr_runs` +
-  번역 기록 `translations`)를 지워 다음 접속 때 전 과정을 재실행.
+- **유지보수** — **캐시 비우기**(`POST /clear_cache/`): 저장된 페이지 결과 캐시(`page_runs`)를 지워
+  다음 접속 때 전 과정(검출·인식·번역)을 재실행.
 
 > **인증**: `SCANLATION_AUTH_TOKEN`을 설정하면 API·admin이 `X-Auth-Token` 헤더를 요구한다(미설정=무인증, 로컬/LAN 기본값). 외부 노출(공개 도메인) 시엔 이 토큰을 설정하고 확장 팝업·`/admin`에 같은 값을 입력할 것 — 안 그러면 번역 API로 GPU가 무단 사용될 수 있다. `OPTIONS`(CORS preflight)와 `/admin` 정적 쉘은 면제(쉘은 토큰 없으면 API가 401이라 무해).
 
