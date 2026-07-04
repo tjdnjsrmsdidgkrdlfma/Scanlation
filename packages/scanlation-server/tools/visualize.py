@@ -1,6 +1,6 @@
 """Draw detected polygons + reading-order index on an image, dump deskewed crops.
 
-    python tools/visualize.py page.png --detector rtdetr --out annotated.png
+    python tools/visualize.py page.png --detector rtdetr   # -> compare_out/annotated.png + compare_out/viz_crops/
 
 This is THE accuracy-debugging tool: detection is the bottleneck, so seeing the
 rotated polygons land on the text (and the deskewed crops come out upright) is
@@ -42,8 +42,8 @@ def main() -> None:
     ap.add_argument("image")
     ap.add_argument("--detector", default="rtdetr")
     ap.add_argument("--recognizer", default=None, help="optional: OCR each crop and print text")
-    ap.add_argument("--out", default="annotated.png")
-    ap.add_argument("--crops", default="crops")
+    ap.add_argument("--out", default="compare_out/annotated.png")
+    ap.add_argument("--crops", default="compare_out/viz_crops")
     ap.add_argument(
         "--opt", action="append", default=[], metavar="KEY=VALUE",
         help="detector option override, coerced via its OPTION_SCHEMA "
@@ -76,8 +76,10 @@ def main() -> None:
             text = recognizer.recognize(crop, r, {})
             print(f"[{r.order:02d}] vertical={r.vertical} angle={r.angle:.1f} -> {text!r}")
 
-    annotated.save(args.out)
-    print(f"\nwrote {args.out} + {len(regions)} crop(s) to {crop_dir}/", file=sys.stderr)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    annotated.save(out)
+    print(f"\nwrote {out} + {len(regions)} crop(s) to {crop_dir}/", file=sys.stderr)
 
 
 if __name__ == "__main__":

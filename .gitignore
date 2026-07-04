@@ -22,7 +22,6 @@ env/
 # Runtime volumes + model weights (big binaries — never commit)
 packages/scanlation-server/data/
 packages/scanlation-server/models/
-packages/scanlation-server/crops/
 packages/scanlation-server/tools/_mit_weights/
 *.onnx
 *.sqlite
@@ -32,11 +31,8 @@ packages/scanlation-server/tools/_mit_weights/
 # Local test inputs (copyrighted manga scans — keep out of the public repo)
 packages/scanlation-server/samples/
 
-# Regenerable tool outputs — compare_models.py writes everything under compare_out/
+# Regenerable tool outputs — compare_models.py AND visualize.py write under compare_out/
 packages/scanlation-server/compare_out/
-# visualize.py single-image output
-*.annotated.png
-annotated.png
 
 # Local tooling / editor config
 .claude/
