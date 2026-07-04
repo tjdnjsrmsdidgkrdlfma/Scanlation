@@ -639,11 +639,13 @@ function openPluginLog(row) {
   panel.innerHTML =
     `<div class="plog-head">` +
       `<span class="plog-phase"></span>` +
+      `<span class="plog-pct"></span>` +
       `<button type="button" class="plog-toggle" hidden>${t("plugins.details")}</button>` +
     `</div>` +
     `<div class="plog-bar indet"><i></i></div>` +
     `<div class="plog-out" hidden></div>`;
   const phaseEl = panel.querySelector(".plog-phase");
+  const pctEl = panel.querySelector(".plog-pct");
   const bar = panel.querySelector(".plog-bar");
   const fill = panel.querySelector(".plog-bar i");
   const out = panel.querySelector(".plog-out");
@@ -655,7 +657,8 @@ function openPluginLog(row) {
     toggle.classList.toggle("open", !out.hidden);
     if (!out.hidden) out.scrollTop = out.scrollHeight;
   });
-  const setIndet = (on) => { bar.classList.toggle("indet", on); if (on) fill.style.width = ""; };
+  // indeterminate = no overall % (pip phase): animate the bar and hide the number
+  const setIndet = (on) => { bar.classList.toggle("indet", on); if (on) { fill.style.width = ""; pctEl.textContent = ""; } };
   const record = (line, kind) => {  // every line goes to the (hidden) details log
     toggle.hidden = false;
     if (kind === "progress") {
@@ -679,19 +682,20 @@ function openPluginLog(row) {
       } else if (ev.event === "log") {
         if (ev.stream === "progress") {
           const pct = parsePct(ev.line);
-          if (pct != null) { setIndet(false); fill.style.width = pct + "%"; }
+          if (pct != null) { setIndet(false); fill.style.width = pct + "%"; pctEl.textContent = Math.round(pct) + "%"; }
           record(ev.line, "progress");
         } else {
           record(ev.line, "log");
         }
       } else if (ev.event === "done") {
         phaseEl.textContent = t("plugins.phase.done");
-        setIndet(false); fill.style.width = "100%";
+        setIndet(false); fill.style.width = "100%"; pctEl.textContent = "";
       }
       // `error` events are surfaced by streamInstall's throw -> fail() below.
     },
     fail(msg) {
       phaseEl.textContent = "✖ " + (msg || "error");
+      pctEl.textContent = "";
       panel.querySelector(".plog-head").classList.add("err");
       bar.classList.remove("indet"); bar.classList.add("err"); fill.style.width = "100%";
       record("✖ " + (msg || "error"), "err");
