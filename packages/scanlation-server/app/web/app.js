@@ -59,6 +59,8 @@ const I18N = {
     "plugins.installed": "설치됨",
     "plugins.install": "설치",
     "plugins.installing": "설치 중…",
+    "plugins.queued": "대기 중…",
+    "plugins.details": "자세히",
     "plugins.phase.package": "패키지 설치 중…",
     "plugins.phase.weights": "가중치 다운로드 중…",
     "plugins.phase.done": "완료",
@@ -132,6 +134,8 @@ const I18N = {
     "plugins.installed": "Installed",
     "plugins.install": "Install",
     "plugins.installing": "Installing…",
+    "plugins.queued": "Queued…",
+    "plugins.details": "Details",
     "plugins.phase.package": "Installing package…",
     "plugins.phase.weights": "Downloading weights…",
     "plugins.phase.done": "Done",
@@ -428,8 +432,8 @@ function renderPlugins() {
     // they run. `installed` (weights present, which implies the package) is the
     // only "fully done" state, so it's just Install ↔ Installed — same footprint.
     const action = e.installed
-      ? `<span class="chip chip-ok">✓ ${t("plugins.installed")}</span>`
-      : `<button class="btn sm primary" data-install="${e.name}">${t("plugins.install")}</button>`;
+      ? `<span class="pa pa-done"><span class="pa-ico">✓</span>${t("plugins.installed")}</span>`
+      : `<button class="pa pa-install" data-install="${e.name}">${t("plugins.install")}</button>`;
     const warn = e.warning ? `<div class="pwarn">⚠ ${e.warning}</div>` : "";
     return `<div class="plugin" data-name="${e.name}">
         <div class="meta">
@@ -442,6 +446,10 @@ function renderPlugins() {
       </div>`;
   });
   $("plugins").innerHTML = rows.join("");
+  // If the list re-renders mid-queue (e.g. a language toggle), re-apply the
+  // in-flight/queued chips so a busy row doesn't fall back to a plain "설치".
+  if (currentInstall) setAction(currentInstall, busyChip());
+  for (const n of installQueue) setAction(n, queuedChip());
 }
 
 // --- behavior (client settings, delivered to the extension via handshake) -
@@ -497,19 +505,36 @@ async function saveEngineOptions(engine, blockEl) {
     await load();
   } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
 }
-// One install at a time: the button becomes a spinner chip, a live log opens
-// under the row, and we stream the package + weights progress into it. On success
-// we reload (fresh render shows "설치됨" and clears the transient log); on failure
-// we keep the log visible (so the error is readable) and restore the button.
-let installBusy = false;
+// Installs run one at a time but you can queue several: clicking more plugins
+// while one runs marks them "대기 중…" and they install back-to-back (serial by
+// design — concurrent pip into the same --target, and the process-global stdout
+// capture, can't safely overlap). The queue drains, then one load() syncs the list.
+const installQueue = [];   // names waiting to install, in click order
+let currentInstall = null; // the name currently installing (or null when idle)
 
-async function installPlugin(name) {
-  if (installBusy) return;
-  installBusy = true;
+function enqueueInstall(name) {
+  if (name === currentInstall || installQueue.includes(name)) return;  // already going/queued
+  installQueue.push(name);
+  if (currentInstall) setAction(name, queuedChip());  // something's running -> show as waiting
+  pumpQueue();
+}
+async function pumpQueue() {
+  if (currentInstall) return;                 // one at a time
+  const name = installQueue.shift();
+  if (!name) { await load(); return; }        // queue drained -> reconcile the list with the server
+  currentInstall = name;
+  await runInstall(name);
+  currentInstall = null;
+  pumpQueue();                                // next, or the final load() when empty
+}
+
+// Install one plugin: swap its action to the spinner chip, open the progress panel
+// (phase label + bar; raw log hidden behind "자세히"), and stream into it. Success ->
+// show "설치됨" in place (the final load() reconciles); failure -> keep the log open
+// (error visible) and restore the Install button so it can be retried.
+async function runInstall(name) {
+  setAction(name, busyChip());
   const row = document.querySelector(`.plugin[data-name="${name}"]`);
-  const btn = row && row.querySelector(`[data-install="${name}"]`);
-  if (btn) btn.replaceWith(busyChip());
-  $("plugins").classList.add("installing");   // dims other install buttons
   const log = openPluginLog(row);
   let ok = false;
   try {
@@ -519,14 +544,53 @@ async function installPlugin(name) {
     log.fail(e.message);
     toast(t("toast.installFail", { name, msg: e.message }), "err");
   }
-  installBusy = false;
-  $("plugins").classList.remove("installing");
   if (ok) {
     toast(t("toast.installed", { name }), "ok");
-    await load();                              // -> "설치됨"; wipes the transient log
+    setAction(name, doneChip());
+    hidePluginLog(name);
   } else {
-    restoreInstallButton(row, name);           // keep the log for reading; allow retry
+    setAction(name, installButton(name));      // keep the (error) log; allow retry
   }
+}
+
+// --- action chip builders (one .pa footprint for every state) --------------
+function chip(variant, text) {
+  const s = document.createElement("span");
+  s.className = "pa " + variant;
+  s.textContent = text;
+  return s;
+}
+function installButton(name) {
+  const b = document.createElement("button");
+  b.className = "pa pa-install";
+  b.dataset.install = name;
+  b.textContent = t("plugins.install");
+  return b;
+}
+function queuedChip() { return chip("pa-queued", t("plugins.queued")); }
+function doneChip() {
+  const el = chip("pa-done", t("plugins.installed"));
+  el.insertAdjacentHTML("afterbegin", `<span class="pa-ico">✓</span>`);
+  return el;
+}
+function busyChip() {
+  const el = chip("pa-busy", t("plugins.installing"));
+  el.insertAdjacentHTML("afterbegin", `<span class="spin"></span>`);
+  return el;
+}
+// Replace a row's current action element (any .pa) with a new one, leaving the
+// meta + log panel untouched.
+function setAction(name, el) {
+  const row = document.querySelector(`.plugin[data-name="${name}"]`);
+  if (!row) return;
+  const cur = row.querySelector(".pa");
+  if (cur) cur.replaceWith(el);
+  else row.querySelector(".plog").before(el);
+}
+function hidePluginLog(name) {
+  const row = document.querySelector(`.plugin[data-name="${name}"]`);
+  const p = row && row.querySelector(".plog");
+  if (p) { p.hidden = true; p.innerHTML = ""; }
 }
 
 // POST the install and read the NDJSON event stream line by line (fetch + reader,
@@ -565,71 +629,84 @@ async function streamInstall(name, onEvent) {
   if (errMsg) throw new Error(errMsg);
 }
 
-function busyChip() {
-  const el = document.createElement("span");
-  el.className = "chip chip-busy";
-  el.innerHTML = `<span class="spin"></span> ${t("plugins.installing")}`;
-  return el;
-}
-function restoreInstallButton(row, name) {
-  const busy = row && row.querySelector(".chip-busy");
-  if (!busy) return;
-  const b = document.createElement("button");
-  b.className = "btn sm primary";
-  b.dataset.install = name;
-  b.textContent = t("plugins.install");
-  busy.replaceWith(b);
-}
-
-// Build the live-log panel under a plugin row and return a small controller.
-// `log`  events append a line; `progress` events (a \r bar) overwrite one live
-// line; `phase` swaps the header; `done`/`fail` stop the spinner.
+// Build the progress panel under a plugin row and return a controller. The default
+// view is just a phase label + a progress bar (indeterminate during pip, which has
+// no overall %; determinate once a weights-download % arrives). The raw log is kept
+// hidden behind a "자세히" toggle, and auto-revealed on failure.
 function openPluginLog(row) {
   const panel = row.querySelector(".plog");
   panel.hidden = false;
   panel.innerHTML =
-    `<div class="plog-phase"><span class="spin"></span><span class="plog-phase-txt"></span></div>` +
-    `<div class="plog-out"></div>`;
-  const phaseTxt = panel.querySelector(".plog-phase-txt");
+    `<div class="plog-head">` +
+      `<span class="plog-phase"></span>` +
+      `<button type="button" class="plog-toggle" hidden>${t("plugins.details")}</button>` +
+    `</div>` +
+    `<div class="plog-bar indet"><i></i></div>` +
+    `<div class="plog-out" hidden></div>`;
+  const phaseEl = panel.querySelector(".plog-phase");
+  const bar = panel.querySelector(".plog-bar");
+  const fill = panel.querySelector(".plog-bar i");
   const out = panel.querySelector(".plog-out");
-  let live = null;  // the single element showing the current \r progress line
-  const stuck = () => out.scrollHeight - out.scrollTop - out.clientHeight < 24;
-  const stopSpin = () => { const s = panel.querySelector(".plog-phase .spin"); if (s) s.remove(); };
+  const toggle = panel.querySelector(".plog-toggle");
+  let live = null;  // single element mirroring the current \r progress line in the log
+
+  toggle.addEventListener("click", () => {
+    out.hidden = !out.hidden;
+    toggle.classList.toggle("open", !out.hidden);
+    if (!out.hidden) out.scrollTop = out.scrollHeight;
+  });
+  const setIndet = (on) => { bar.classList.toggle("indet", on); if (on) fill.style.width = ""; };
+  const record = (line, kind) => {  // every line goes to the (hidden) details log
+    toggle.hidden = false;
+    if (kind === "progress") {
+      if (!live) { live = document.createElement("div"); live.className = "plog-line plog-progress"; out.appendChild(live); }
+      live.textContent = line;
+    } else {
+      const d = document.createElement("div");
+      d.className = "plog-line" + (kind === "err" ? " plog-err" : "");
+      d.textContent = line;
+      out.appendChild(d);
+      live = null;
+    }
+    out.scrollTop = out.scrollHeight;
+  };
 
   return {
     handle(ev) {
       if (ev.event === "phase") {
-        phaseTxt.textContent = t("plugins.phase." + ev.phase);
+        phaseEl.textContent = t("plugins.phase." + ev.phase);
+        setIndet(true);             // new phase -> unknown progress until a % arrives
       } else if (ev.event === "log") {
-        const bottom = stuck();
         if (ev.stream === "progress") {
-          if (!live) { live = document.createElement("div"); live.className = "plog-line plog-progress"; out.appendChild(live); }
-          live.textContent = ev.line;
+          const pct = parsePct(ev.line);
+          if (pct != null) { setIndet(false); fill.style.width = pct + "%"; }
+          record(ev.line, "progress");
         } else {
-          const d = document.createElement("div");
-          d.className = "plog-line";
-          d.textContent = ev.line;
-          out.appendChild(d);
-          live = null;  // a finalized line ends the current live bar
+          record(ev.line, "log");
         }
-        if (bottom) out.scrollTop = out.scrollHeight;
       } else if (ev.event === "done") {
-        phaseTxt.textContent = t("plugins.phase.done");
-        stopSpin();
+        phaseEl.textContent = t("plugins.phase.done");
+        setIndet(false); fill.style.width = "100%";
       }
       // `error` events are surfaced by streamInstall's throw -> fail() below.
     },
     fail(msg) {
-      panel.querySelector(".plog-phase").classList.add("err");
-      phaseTxt.textContent = "✖ " + (msg || "error");
-      stopSpin();
-      const d = document.createElement("div");
-      d.className = "plog-line plog-err";
-      d.textContent = "✖ " + (msg || "error");
-      out.appendChild(d);
-      out.scrollTop = out.scrollHeight;
+      phaseEl.textContent = "✖ " + (msg || "error");
+      panel.querySelector(".plog-head").classList.add("err");
+      bar.classList.remove("indet"); bar.classList.add("err"); fill.style.width = "100%";
+      record("✖ " + (msg || "error"), "err");
+      out.hidden = false;           // reveal the log so the cause is visible
+      toggle.classList.add("open");
     },
   };
+}
+
+// Percent from a progress line like "model.safetensors 63%|██| 100M/158M", or null.
+function parsePct(s) {
+  const m = /(\d{1,3}(?:\.\d+)?)\s*%/.exec(s);
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  return v >= 0 && v <= 100 ? v : null;
 }
 async function clearCache() {
   if (!confirm(t("confirm.clearCache"))) return;
@@ -677,7 +754,7 @@ $("engine-options").addEventListener("click", (ev) => {
 });
 $("plugins").addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-install]");
-  if (btn) installPlugin(btn.dataset.install);
+  if (btn) enqueueInstall(btn.dataset.install);
 });
 $("clear-cache").addEventListener("click", clearCache);
 $("save-behavior").addEventListener("click", saveBehavior);
