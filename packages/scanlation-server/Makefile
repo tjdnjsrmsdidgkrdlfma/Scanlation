@@ -13,7 +13,7 @@ serve:           ## run the API (uvicorn, single worker)
 	$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 4000 --workers 1
 
 viz:             ## visualize detection: make viz IMG=page.png
-	$(PY) tools/visualize.py "$(IMG)" --detector "$(or $(DET),ctd)"
+	$(PY) tools/visualize.py "$(IMG)" --detector "$(or $(DET),rtdetr)"
 
 install:         ## editable core (sdk + server; no engine — engines are separate pkgs)
 	$(PY) -m pip install -e ../scanlation-sdk -e .
