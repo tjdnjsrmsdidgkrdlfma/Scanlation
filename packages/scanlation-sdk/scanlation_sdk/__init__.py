@@ -10,16 +10,21 @@ from scanlation_sdk.contracts import (
     Region,
     Translator,
 )
+from scanlation_sdk.device import pick_device, release_cuda_cache
 from scanlation_sdk.http_translator import HttpTranslatorBase
+from scanlation_sdk.local_engine import LocalModelEngineBase
 
 __all__ = [
     "EngineBase",
     "HttpTranslatorBase",
+    "LocalModelEngineBase",
     "Region",
     "Detector",
     "Recognizer",
     "Translator",
     "context",
+    "pick_device",
+    "release_cuda_cache",
     "LANGUAGES",
     "LANG_PLAIN",
 ]
