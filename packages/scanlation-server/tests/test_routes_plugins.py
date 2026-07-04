@@ -17,9 +17,10 @@ def test_catalog_lists_engines():
 
 
 def test_install_package_builds_pip_git_command():
-    """Default install shells out to `pip install --target=<vol> <sdk git+> <engine
-    git+>` — no engine code is baked in; it's fetched from the repo. (Verified
-    without actually installing.)"""
+    """Default install shells out to `pip install --upgrade --target=<vol> <sdk
+    git+> <engine git+>` — no engine code is baked in; it's fetched from the repo.
+    --upgrade forces the co-installed sdk to refresh. (Verified without actually
+    installing.)"""
     import os
 
     from app import plugins_install as pi
@@ -43,7 +44,7 @@ def test_install_package_builds_pip_git_command():
             os.environ["SCANLATION_ENGINES_SRC"] = orig_src
 
     cmd = recorded["cmd"]
-    assert cmd[1:5] == ["-m", "pip", "install", "--target"]
+    assert cmd[1:6] == ["-m", "pip", "install", "--upgrade", "--target"]
     assert str(pi.plugins_dir()) in cmd
     joined = " ".join(cmd)
     assert "git+" in joined

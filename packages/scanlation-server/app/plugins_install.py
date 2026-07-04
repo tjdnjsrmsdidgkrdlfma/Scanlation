@@ -170,11 +170,16 @@ def _install_sources(entry: CatalogEntry) -> list[str]:
 
 
 def _pip_cmd(entry: CatalogEntry) -> list[str]:
-    """The ``pip install --target=<vol> …`` argv for a plugin. Shared by the
-    blocking ``install_package`` and the streaming ``_stream_pip`` so the command
-    (and its git+/local-source resolution) lives in one place."""
+    """The ``pip install --upgrade --target=<vol> …`` argv for a plugin. Shared by
+    the blocking ``install_package`` and the streaming ``_stream_pip`` so the
+    command (and its git+/local-source resolution) lives in one place.
+
+    ``--upgrade`` is load-bearing for the co-installed sdk: without it, pip skips
+    a package already present in the target dir, so a plugin bringing a newer sdk
+    (new module/API) would keep running against the stale sdk on the /plugins
+    volume and ImportError. With it, sdk is always reinstalled to match."""
     return [
-        sys.executable, "-m", "pip", "install",
+        sys.executable, "-m", "pip", "install", "--upgrade",
         "--target", str(plugins_dir()),
         *entry.pip_args,
         *_install_sources(entry),

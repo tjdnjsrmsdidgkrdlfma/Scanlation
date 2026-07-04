@@ -24,13 +24,13 @@ from typing import Any
 
 from PIL import Image
 
-from scanlation_sdk.context import context
-from scanlation_sdk.contracts import EngineBase, Region
+from scanlation_sdk.contracts import Region
+from scanlation_sdk.local_engine import LocalModelEngineBase
 
 logger = logging.getLogger("scanlation.paddleocrvl")
 
 
-class PaddleOcrVLRecognizer(EngineBase):
+class PaddleOcrVLRecognizer(LocalModelEngineBase):
     name = "paddleocrvl"
     display_name = "PaddleOCR-VL (manga)"
     homepage = "https://huggingface.co/jzhang533/PaddleOCR-VL-For-Manga"
@@ -44,6 +44,10 @@ class PaddleOcrVLRecognizer(EngineBase):
 
     PROC_REPO = "PaddlePaddle/PaddleOCR-VL"  # the fine-tune's own processor is a 4.x format -> load base's
     PROMPT = "OCR:"
+    INSTALL_HINT = (
+        'Install first: POST /install_plugins/ {"paddleocrvl": true}, or '
+        "`python tools/install.py paddleocrvl`."
+    )
 
     def __init__(self) -> None:
         self._model = None
@@ -67,9 +71,9 @@ class PaddleOcrVLRecognizer(EngineBase):
         except Exception:  # noqa: BLE001
             return False
 
-    def install(self) -> None:
+    def _download(self) -> None:
         """Download the ~1.8GB fine-tune weights + the base processor into the HF
-        cache. Explicit — never called by load()."""
+        cache."""
         from huggingface_hub import snapshot_download
 
         repo = self._repo()
@@ -79,51 +83,22 @@ class PaddleOcrVLRecognizer(EngineBase):
         snapshot_download(self.PROC_REPO)  # processor files only (~13MB); base weights not needed
         logger.info("PaddleOCR-VL installed")
 
-    @staticmethod
-    def _pick_device() -> str:
-        """Honor context.device (the /admin-set, SCANLATION_DEVICE-seeded hint):
-        'cpu' pins CPU; anything else means GPU — cuda if actually available, else
-        CPU fallback. Same switch as rtdetr/mangaocr (a ROCm torch build reports cuda)."""
-        if context.device.lower() == "cpu":
-            return "cpu"
-        try:
-            import torch
-            if torch.cuda.is_available():
-                return "cuda"
-        except Exception:  # noqa: BLE001
-            pass
-        return "cpu"
-
-    def load(self) -> None:
-        if self._model is not None:
-            return
-        if not self.is_installed():
-            raise RuntimeError(
-                'PaddleOCR-VL weights not installed. Install first: POST /install_plugins/ {"paddleocrvl": true}, '
-                "or `python tools/install.py paddleocrvl`."
-            )
+    def _load(self, device: str) -> None:
         import torch  # lazy
         from transformers import AutoModelForImageTextToText, AutoProcessor
 
-        dev = self._pick_device()
         self._proc = AutoProcessor.from_pretrained(self.PROC_REPO, local_files_only=True)
         self._model = AutoModelForImageTextToText.from_pretrained(
             self._repo(),
-            torch_dtype=(torch.float32 if dev == "cpu" else "auto"),  # fp16 on CPU is a trap; GPU picks bf16
-            device_map=dev,
+            torch_dtype=(torch.float32 if device == "cpu" else "auto"),  # fp16 on CPU is a trap; GPU picks bf16
+            device_map=device,
             local_files_only=True,  # contract: load() never downloads
         ).eval()
-        logger.info("PaddleOCR-VL loaded on %s", dev)
+        logger.info("PaddleOCR-VL loaded on %s", device)
 
-    def unload(self) -> None:
+    def _unload(self) -> None:
         self._model = None
         self._proc = None
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:  # noqa: BLE001
-            pass
 
     # --- inference ---
     def recognize(self, crop: Image.Image, region: Region, options: dict[str, Any]) -> str:

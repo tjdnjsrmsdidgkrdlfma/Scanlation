@@ -24,7 +24,8 @@ from typing import Any
 from PIL import Image
 
 from scanlation_sdk.context import context
-from scanlation_sdk.contracts import EngineBase, Region
+from scanlation_sdk.contracts import Region
+from scanlation_sdk.local_engine import LocalModelEngineBase
 from . import postprocess
 
 logger = logging.getLogger("scanlation.rtdetr")
@@ -34,7 +35,7 @@ logger = logging.getLogger("scanlation.rtdetr")
 DEFAULTS = {"conf": 0.6, "nms_iou": 0.6, "contain_thresh": 0.85}
 
 
-class RTDetrDetector(EngineBase):
+class RTDetrDetector(LocalModelEngineBase):
     name = "rtdetr"
     display_name = "RT-DETR (comic text)"
     homepage = "https://huggingface.co/ogkalu/comic-text-and-bubble-detector"
@@ -50,6 +51,10 @@ class RTDetrDetector(EngineBase):
     REPO = "ogkalu/comic-text-and-bubble-detector"
     KEEP_LABELS = {"text_bubble", "text_free"}  # drop the whole-"bubble" container box
     WEIGHT_PATTERNS = ["config.json", "preprocessor_config.json", "model.safetensors"]
+    INSTALL_HINT = (
+        'Install first: POST /install_plugins/ {"rtdetr": true}, or '
+        "`python tools/install.py rtdetr`, or set SCANLATION_RTDETR_MODEL=/path/to/model_dir."
+    )
 
     def __init__(self) -> None:
         self._model = None
@@ -65,12 +70,10 @@ class RTDetrDetector(EngineBase):
         d = self._model_dir()
         return (d / "config.json").is_file() and (d / "model.safetensors").is_file()
 
-    def install(self) -> None:
+    def _download(self) -> None:
         """Download the RT-DETR transformers weights (~172MB) into <models>/rtdetr.
-        Explicit — never called by load(). Fetches only the transformers files
-        (safetensors + config + preprocessor), not the repo's separate ONNX."""
-        if self.is_installed():
-            return
+        Fetches only the transformers files (safetensors + config + preprocessor),
+        not the repo's separate ONNX."""
         from huggingface_hub import snapshot_download
 
         d = self._model_dir()
@@ -79,34 +82,11 @@ class RTDetrDetector(EngineBase):
         snapshot_download(self.REPO, local_dir=str(d), allow_patterns=self.WEIGHT_PATTERNS)
         logger.info("RT-DETR weights installed -> %s", d)
 
-    @staticmethod
-    def _pick_device() -> str:
-        """Honor context.device (the /admin-set, SCANLATION_DEVICE-seeded hint):
-        'cpu' pins CPU; anything else means GPU — use cuda if actually available,
-        else fall back to CPU. Mirrors mangaocr's force_cpu logic so one switch
-        moves detector + recognizer together. (A ROCm torch build reports cuda.)"""
-        if context.device.lower() == "cpu":
-            return "cpu"
-        try:
-            import torch
-            if torch.cuda.is_available():
-                return "cuda"
-        except Exception:  # noqa: BLE001
-            pass
-        return "cpu"
-
-    def load(self) -> None:
-        if self._model is not None:
-            return
+    def _load(self, device: str) -> None:
         from transformers import AutoImageProcessor  # lazy
 
         d = self._model_dir()
-        if not self.is_installed():
-            raise RuntimeError(
-                'RT-DETR weights not installed. Install first: POST /install_plugins/ {"rtdetr": true}, '
-                "or `python tools/install.py rtdetr`, or set SCANLATION_RTDETR_MODEL=/path/to/model_dir."
-            )
-        self._device = self._pick_device()
+        self._device = device
         self._proc = AutoImageProcessor.from_pretrained(str(d), local_files_only=True)
         try:  # Auto covers most detection models
             from transformers import AutoModelForObjectDetection
@@ -117,7 +97,7 @@ class RTDetrDetector(EngineBase):
         self._model = model.to(self._device).eval()
         logger.info("RT-DETR loaded from %s on %s", d.name, self._device)
 
-    def unload(self) -> None:
+    def _unload(self) -> None:
         self._model = None
         self._proc = None
 
