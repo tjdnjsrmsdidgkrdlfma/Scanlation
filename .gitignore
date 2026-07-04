@@ -8,6 +8,7 @@ dist/
 
 # Virtual envs
 venv/
+venv-vlm/
 env/
 
 # Local secrets (compose reads .env for ${SCANLATION_AUTH_TOKEN} etc.)
@@ -18,21 +19,22 @@ env/
 .mypy_cache/
 .ruff_cache/
 
-# Project runtime data (volumes) — never commit weights or caches
+# Runtime volumes + model weights (big binaries — never commit)
 packages/scanlation-server/data/
 packages/scanlation-server/models/
 packages/scanlation-server/crops/
-packages/scanlation-server/samples/
+packages/scanlation-server/tools/_mit_weights/
 *.onnx
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
 
-# visualize.py / tool outputs
+# Local test inputs (copyrighted manga scans — keep out of the public repo)
+packages/scanlation-server/samples/
+
+# Regenerable tool outputs (visualize.py / compare_models.py)
 *.annotated.png
 annotated.png
-
-# compare_models.py outputs
 packages/scanlation-server/compare_detectors.png
 packages/scanlation-server/compare_panels/
 packages/scanlation-server/compare_ocr.md
@@ -45,5 +47,3 @@ packages/scanlation-server/compare_out/
 # OS / editor
 .DS_Store
 Thumbs.db
-packages/scanlation-server/tools/_mit_weights/
-venv-vlm/
