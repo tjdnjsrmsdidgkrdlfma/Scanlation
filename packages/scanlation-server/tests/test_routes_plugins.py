@@ -5,7 +5,7 @@ from tests.helpers import client, run
 
 
 def test_catalog_lists_engines():
-    from app.plugins_install import catalog
+    from app.catalog import catalog
 
     c = catalog()
     for name in ("rtdetr", "mangaocr", "ollama", "llamacpp"):
@@ -24,8 +24,9 @@ def test_install_package_builds_pip_git_command():
     import os
 
     from app import plugins_install as pi
+    from app.catalog import catalog
 
-    entry = pi.catalog()["ollama"]
+    entry = catalog()["ollama"]
     recorded = {}
 
     class _Ok:

@@ -21,10 +21,8 @@ Two layers, kept distinct: **package** (this module, pip-install) and **weights*
 (each plugin's ``install()``). ``install_plugin()`` does package-then-weights and
 re-discovers entry_points live so the engine appears without a restart.
 
-Catalog: the set of *installable* engines is a small static manifest here — it
-can't come from entry_points (those only list *installed* engines) nor from the
-source (the image has none). Installed engines are still discovered purely via
-entry_points in the registry; this manifest only drives the install UI.
+The set of *installable* engines (the catalog) is a static manifest in
+``app.catalog``; this module only consumes it to drive the pip install.
 """
 from __future__ import annotations
 
@@ -38,71 +36,14 @@ import subprocess
 import sys
 import threading
 from collections import deque
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator
 
 from scanlation_sdk.context import context
 
+from .catalog import CatalogEntry, catalog
+
 DEFAULT_REPO = "https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git"
-
-# The installable plugins. name = registry/engine name; package = pip/dist name
-# (and the packages/<package> subdir). Installed engines are found via
-# entry_points; this only lists what /admin can offer to install.
-_CATALOG: dict[str, dict] = {
-    "rtdetr": {
-        "package": "scanlation-rtdetr",
-        "display_name": "RT-DETR",
-        "roles": ["detector"],
-        "description": "RT-DETR-v2 comic/manga text detector (transformers).",
-        # steer torch to the CPU wheel by default (like mangaocr) so a Docker
-        # one-click install doesn't pull a giant CUDA wheel; a GPU torch build is
-        # a host-level install.
-        "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
-    },
-    "mangaocr": {
-        "package": "scanlation-mangaocr",
-        "display_name": "Manga OCR",
-        "roles": ["recognizer"],
-        "description": "manga-ocr Japanese recognizer (needs torch — CPU wheel).",
-        # steer torch to the CPU index (its +cpu local version outranks the plain
-        # PyPI CUDA wheel, so pip prefers it).
-        "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
-    },
-    "paddleocrvl": {
-        "package": "scanlation-paddleocr-vl",
-        "display_name": "PaddleOCR-VL (manga)",
-        "roles": ["recognizer"],
-        "description": "PaddleOCR-VL manga fine-tune VLM recognizer — best accuracy, GPU-intended (~1s/crop; CPU ~60s).",
-        # CPU wheel by default like the other torch plugins; a GPU/ROCm torch build
-        # is a host-level install (the model needs a GPU to be practical).
-        "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
-    },
-    "ollama": {
-        "package": "scanlation-ollama",
-        "display_name": "Ollama",
-        "roles": ["translator"],
-        "description": "LLM translation via a local ollama server.",
-        "pip_args": [],
-    },
-    "llamacpp": {
-        "package": "scanlation-llamacpp",
-        "display_name": "llama.cpp",
-        "roles": ["translator"],
-        "description": "LLM translation via an OpenAI-compatible /v1 server.",
-        "pip_args": [],
-    },
-}
-
-
-@dataclass
-class CatalogEntry:
-    name: str                       # engine name = registry key (e.g. "rtdetr")
-    package: str                    # pip/dist name (e.g. "scanlation-rtdetr")
-    display_name: str = ""          # human-readable name shown before install
-    description: str = ""
-    roles: list[str] = field(default_factory=list)
-    pip_args: list[str] = field(default_factory=list)
 
 
 # --- paths / repo ---------------------------------------------------------
@@ -132,22 +73,6 @@ def ensure_on_path() -> None:
     p = str(d)
     if p not in sys.path:
         site.addsitedir(p)  # appends to sys.path (+ processes any .pth)
-
-
-# --- catalog (installable plugins) ----------------------------------------
-def catalog() -> dict[str, CatalogEntry]:
-    """The static manifest of installable plugins, keyed by engine name."""
-    return {
-        name: CatalogEntry(
-            name=name,
-            package=spec["package"],
-            display_name=spec.get("display_name") or name,
-            description=spec["description"],
-            roles=list(spec["roles"]),
-            pip_args=list(spec["pip_args"]),
-        )
-        for name, spec in _CATALOG.items()
-    }
 
 
 # --- install --------------------------------------------------------------

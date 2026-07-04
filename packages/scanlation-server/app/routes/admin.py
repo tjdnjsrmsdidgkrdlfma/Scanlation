@@ -19,8 +19,9 @@ from fastapi import APIRouter, HTTPException
 from .. import __version_array__
 from scanlation_sdk.context import LANGUAGES
 from ..cache import cache
+from ..catalog import catalog
 from ..engine_meta import class_meta, safe_is_installed, serialize_schema
-from ..plugins_install import catalog, installing_names
+from ..plugins_install import installing_names
 from ..prompts import BUILTIN_PROMPTS
 from ..registry import ROLE_NAMES, registry
 from ..schemas import (
