@@ -147,9 +147,6 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .btn.danger:hover { border-color: var(--danger); }
 .btn.sm { padding: 6px 12px; font-size: 12px; }
 
-.pill { padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.pill-ok { background: rgba(74,222,128,.14); color: var(--ok); }
-
 /* engine option blocks */
 .opt-block { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 12px; background: var(--card2); }
 .opt-block h3 { margin: 0 0 4px; font-size: 13px; }
@@ -174,13 +171,46 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .opt-empty { color: var(--muted); font-size: 12px; }
 
 /* plugin rows */
-.plugin { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.plugin { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
 .plugin:first-child { border-top: none; }
 .plugin .meta { flex: 1; }
 .plugin .pname { font-weight: 600; }
 .plugin .proles { color: var(--muted); font-size: 11px; }
 .plugin .pdesc { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .plugin .pwarn { color: var(--warn); font-size: 11px; margin-top: 4px; }
+/* while an install streams, the other rows' Install buttons are inert */
+#plugins.installing .btn[data-install] { opacity: .4; pointer-events: none; }
+
+/* action chips — share .btn.sm's footprint (6px 12px / 8px radius / 12px) so
+   Install (button) ↔ Installing ↔ Installed all line up as the same pill. */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--line);
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.chip-ok { color: var(--ok); border-color: rgba(74, 222, 128, .4); background: rgba(74, 222, 128, .12); }
+.chip-busy { color: var(--accent); border-color: rgba(110, 168, 254, .4); background: rgba(110, 168, 254, .1); }
+.spin {
+  flex: none; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid currentColor; border-top-color: transparent;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* live install log — wraps to its own full-width line under the row */
+.plog { flex-basis: 100%; margin-top: 8px; }
+.plog[hidden] { display: none; }
+.plog-phase { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.plog-phase.err { color: var(--danger); }
+.plog-out {
+  background: #0b0d11; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; max-height: 180px; overflow: auto;
+  font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; line-height: 1.5;
+  color: var(--muted); white-space: pre-wrap; word-break: break-word;
+}
+.plog-progress { color: var(--accent); }
+.plog-err { color: var(--danger); }
 
 .toast {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);

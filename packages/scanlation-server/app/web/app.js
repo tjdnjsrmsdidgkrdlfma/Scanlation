@@ -58,8 +58,10 @@ const I18N = {
     "plugins.hint": "패키지 + 가중치 원클릭 설치",
     "plugins.installed": "설치됨",
     "plugins.install": "설치",
-    "plugins.installWeights": "가중치 설치",
-    "plugins.notInstalledPkg": "패키지 미설치",
+    "plugins.installing": "설치 중…",
+    "plugins.phase.package": "패키지 설치 중…",
+    "plugins.phase.weights": "가중치 다운로드 중…",
+    "plugins.phase.done": "완료",
     "tab.maintenance": "유지보수",
     "maint.h2": "유지보수",
     "maint.hint": "캐시 관리",
@@ -91,9 +93,7 @@ const I18N = {
     "toast.cacheCleared": "캐시 비움 — {n}건",
     "toast.deleted": "\"{name}\" 삭제됨",
     "toast.optionsSaved": "{engine} 옵션 저장됨",
-    "toast.installing": "{name} 설치 중… (패키지 + 가중치, 오래 걸릴 수 있음)",
     "toast.installed": "{name} 설치 완료",
-    "toast.installResult": "{name} 결과: {status}",
     "toast.installFail": "{name} 설치 실패: {msg}",
     "gate.tokenPh": "접근 토큰",
     "gate.title": "관리자 인증",
@@ -131,8 +131,10 @@ const I18N = {
     "plugins.hint": "One-click install of package + weights",
     "plugins.installed": "Installed",
     "plugins.install": "Install",
-    "plugins.installWeights": "Install weights",
-    "plugins.notInstalledPkg": "package not installed",
+    "plugins.installing": "Installing…",
+    "plugins.phase.package": "Installing package…",
+    "plugins.phase.weights": "Downloading weights…",
+    "plugins.phase.done": "Done",
     "tab.maintenance": "Maintenance",
     "maint.h2": "Maintenance",
     "maint.hint": "Cache management",
@@ -164,9 +166,7 @@ const I18N = {
     "toast.cacheCleared": "Cache cleared — {n} entrie(s)",
     "toast.deleted": "\"{name}\" deleted",
     "toast.optionsSaved": "{engine} options saved",
-    "toast.installing": "Installing {name}… (package + weights, may take a while)",
     "toast.installed": "{name} installed",
-    "toast.installResult": "{name} result: {status}",
     "toast.installFail": "{name} install failed: {msg}",
     "gate.tokenPh": "Access token",
     "gate.title": "Admin access",
@@ -423,24 +423,22 @@ function renderPlugins() {
     }
   }
   const rows = Object.values(byName).map((e) => {
-    // Two install layers: package (pip) then weights. Show the next needed step.
-    let action;
-    if (!pkgInstalled(e)) {
-      action = `<button class="btn sm primary" data-install="${e.name}">${t("plugins.install")}</button>`;
-    } else if (!e.installed) {
-      action = `<button class="btn sm primary" data-install="${e.name}">${t("plugins.installWeights")}</button>`;
-    } else {
-      action = `<span class="pill pill-ok">${t("plugins.installed")}</span>`;
-    }
-    const pkgTag = !pkgInstalled(e) ? ` <span class="proles">${t("plugins.notInstalledPkg")}</span>` : "";
+    // One-shot install: the button pip-installs the package (if missing) AND
+    // downloads the weights in a single action; the live log shows both phases as
+    // they run. `installed` (weights present, which implies the package) is the
+    // only "fully done" state, so it's just Install ↔ Installed — same footprint.
+    const action = e.installed
+      ? `<span class="chip chip-ok">✓ ${t("plugins.installed")}</span>`
+      : `<button class="btn sm primary" data-install="${e.name}">${t("plugins.install")}</button>`;
     const warn = e.warning ? `<div class="pwarn">⚠ ${e.warning}</div>` : "";
-    return `<div class="plugin">
+    return `<div class="plugin" data-name="${e.name}">
         <div class="meta">
-          <div class="pname">${e.display_name} <span class="proles">${e.roles.join(", ")}</span>${pkgTag}</div>
+          <div class="pname">${e.display_name} <span class="proles">${e.roles.join(", ")}</span></div>
           <div class="pdesc">${e.description || ""}</div>
           ${warn}
         </div>
         ${action}
+        <div class="plog" hidden></div>
       </div>`;
   });
   $("plugins").innerHTML = rows.join("");
@@ -499,13 +497,139 @@ async function saveEngineOptions(engine, blockEl) {
     await load();
   } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
 }
+// One install at a time: the button becomes a spinner chip, a live log opens
+// under the row, and we stream the package + weights progress into it. On success
+// we reload (fresh render shows "설치됨" and clears the transient log); on failure
+// we keep the log visible (so the error is readable) and restore the button.
+let installBusy = false;
+
 async function installPlugin(name) {
-  toast(t("toast.installing", { name }), "");
+  if (installBusy) return;
+  installBusy = true;
+  const row = document.querySelector(`.plugin[data-name="${name}"]`);
+  const btn = row && row.querySelector(`[data-install="${name}"]`);
+  if (btn) btn.replaceWith(busyChip());
+  $("plugins").classList.add("installing");   // dims other install buttons
+  const log = openPluginLog(row);
+  let ok = false;
   try {
-    const r = await postJSON("/install_plugins/", { plugins: { [name]: true } });
-    toast(r.status === "success" ? t("toast.installed", { name }) : t("toast.installResult", { name, status: r.status }), "ok");
-    await load();
-  } catch (e) { toast(t("toast.installFail", { name, msg: e.message }), "err"); }
+    await streamInstall(name, (ev) => log.handle(ev));
+    ok = true;
+  } catch (e) {
+    log.fail(e.message);
+    toast(t("toast.installFail", { name, msg: e.message }), "err");
+  }
+  installBusy = false;
+  $("plugins").classList.remove("installing");
+  if (ok) {
+    toast(t("toast.installed", { name }), "ok");
+    await load();                              // -> "설치됨"; wipes the transient log
+  } else {
+    restoreInstallButton(row, name);           // keep the log for reading; allow retry
+  }
+}
+
+// POST the install and read the NDJSON event stream line by line (fetch + reader,
+// so the X-Auth-Token header still applies — EventSource can't send headers). Each
+// line is one JSON event; an `error` event makes this throw after the stream ends.
+async function streamInstall(name, onEvent) {
+  const tok = getToken();
+  const res = await fetch("/install_plugin_stream/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(tok ? { "X-Auth-Token": tok } : {}) },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok || !res.body) {
+    let detail = `HTTP ${res.status}`;
+    try { const b = await res.json(); if (b && b.detail) detail = b.detail; } catch (_) { /* non-json */ }
+    throw new Error(detail);
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "", errMsg = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let ev;
+      try { ev = JSON.parse(line); } catch (_) { continue; }  // skip a partial/garbled line
+      if (ev.event === "error") errMsg = ev.message;
+      onEvent(ev);
+    }
+  }
+  if (errMsg) throw new Error(errMsg);
+}
+
+function busyChip() {
+  const el = document.createElement("span");
+  el.className = "chip chip-busy";
+  el.innerHTML = `<span class="spin"></span> ${t("plugins.installing")}`;
+  return el;
+}
+function restoreInstallButton(row, name) {
+  const busy = row && row.querySelector(".chip-busy");
+  if (!busy) return;
+  const b = document.createElement("button");
+  b.className = "btn sm primary";
+  b.dataset.install = name;
+  b.textContent = t("plugins.install");
+  busy.replaceWith(b);
+}
+
+// Build the live-log panel under a plugin row and return a small controller.
+// `log`  events append a line; `progress` events (a \r bar) overwrite one live
+// line; `phase` swaps the header; `done`/`fail` stop the spinner.
+function openPluginLog(row) {
+  const panel = row.querySelector(".plog");
+  panel.hidden = false;
+  panel.innerHTML =
+    `<div class="plog-phase"><span class="spin"></span><span class="plog-phase-txt"></span></div>` +
+    `<div class="plog-out"></div>`;
+  const phaseTxt = panel.querySelector(".plog-phase-txt");
+  const out = panel.querySelector(".plog-out");
+  let live = null;  // the single element showing the current \r progress line
+  const stuck = () => out.scrollHeight - out.scrollTop - out.clientHeight < 24;
+  const stopSpin = () => { const s = panel.querySelector(".plog-phase .spin"); if (s) s.remove(); };
+
+  return {
+    handle(ev) {
+      if (ev.event === "phase") {
+        phaseTxt.textContent = t("plugins.phase." + ev.phase);
+      } else if (ev.event === "log") {
+        const bottom = stuck();
+        if (ev.stream === "progress") {
+          if (!live) { live = document.createElement("div"); live.className = "plog-line plog-progress"; out.appendChild(live); }
+          live.textContent = ev.line;
+        } else {
+          const d = document.createElement("div");
+          d.className = "plog-line";
+          d.textContent = ev.line;
+          out.appendChild(d);
+          live = null;  // a finalized line ends the current live bar
+        }
+        if (bottom) out.scrollTop = out.scrollHeight;
+      } else if (ev.event === "done") {
+        phaseTxt.textContent = t("plugins.phase.done");
+        stopSpin();
+      }
+      // `error` events are surfaced by streamInstall's throw -> fail() below.
+    },
+    fail(msg) {
+      panel.querySelector(".plog-phase").classList.add("err");
+      phaseTxt.textContent = "✖ " + (msg || "error");
+      stopSpin();
+      const d = document.createElement("div");
+      d.className = "plog-line plog-err";
+      d.textContent = "✖ " + (msg || "error");
+      out.appendChild(d);
+      out.scrollTop = out.scrollHeight;
+    },
+  };
 }
 async function clearCache() {
   if (!confirm(t("confirm.clearCache"))) return;

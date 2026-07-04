@@ -43,6 +43,11 @@ class InstallPluginsRequest(BaseModel):
     plugins: dict[str, bool]
 
 
+# --- /install_plugin_stream/ (one plugin, live NDJSON progress) -------------
+class InstallPluginStreamRequest(BaseModel):
+    name: str
+
+
 # --- admin: /set_options/ --------------------------------------------------
 class SetOptionsRequest(BaseModel):
     engine: str

@@ -28,13 +28,19 @@ entry_points in the registry; this manifest only drives the install UI.
 """
 from __future__ import annotations
 
+import contextlib
 import importlib
+import io
 import os
+import queue
 import site
 import subprocess
 import sys
+import threading
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, Iterator
 
 from scanlation_sdk.context import context
 
@@ -154,18 +160,23 @@ def _install_sources(entry: CatalogEntry) -> list[str]:
     ]
 
 
-def install_package(entry: CatalogEntry) -> None:
-    """pip-install the plugin's package (+ its deps) into ``plugins_dir()``.
-    Raises RuntimeError with pip's stderr tail on failure."""
-    target = plugins_dir()
-    target.mkdir(parents=True, exist_ok=True)
-    cmd = [
+def _pip_cmd(entry: CatalogEntry) -> list[str]:
+    """The ``pip install --target=<vol> …`` argv for a plugin. Shared by the
+    blocking ``install_package`` and the streaming ``_stream_pip`` so the command
+    (and its git+/local-source resolution) lives in one place."""
+    return [
         sys.executable, "-m", "pip", "install",
-        "--target", str(target),
+        "--target", str(plugins_dir()),
         *entry.pip_args,
         *_install_sources(entry),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+
+
+def install_package(entry: CatalogEntry) -> None:
+    """pip-install the plugin's package (+ its deps) into ``plugins_dir()``.
+    Raises RuntimeError with pip's stderr tail on failure."""
+    plugins_dir().mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(_pip_cmd(entry), capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "").strip()[-800:]
         raise RuntimeError(f"pip install {entry.package} failed: {tail}")
@@ -214,3 +225,126 @@ def install_plugin(name: str) -> dict:
         inst.install()  # download weights (no-op for engines without assets)
     result["weights"] = "installed" if inst.is_installed() else "n/a"
     return result
+
+
+# --- streaming install (live progress for the /admin log view) -------------
+# `install_plugin` above is the plain, blocking one-shot (used by tools/install.py
+# and POST /install_plugins/). The machinery below is the same install with live
+# output: it runs the blocking work in a thread that pushes (kind, text) items
+# onto a queue, and yields them as NDJSON-ready event dicts so /admin can show the
+# pip log and the weights-download bars as they happen.
+
+class _LineTee(io.TextIOBase):
+    """A write-through sink for ``redirect_stdout/stderr`` during a plugin's
+    weights download: forwards each finished segment to ``put``. Segments ended by
+    ``\\r`` are ``progress`` (a live bar the UI overwrites in place); by ``\\n`` are
+    ``log`` (appended). ``isatty()`` returns True so tqdm / huggingface_hub keep
+    their progress bars enabled when writing to us instead of silencing them."""
+
+    def __init__(self, put: Callable[[tuple], None]) -> None:
+        self._put = put
+        self._buf = ""
+
+    def isatty(self) -> bool:  # noqa: D401 - keep tqdm bars on
+        return True
+
+    def write(self, s: str) -> int:
+        self._buf += s
+        while True:
+            nl, cr = self._buf.find("\n"), self._buf.find("\r")
+            hits = [i for i in (nl, cr) if i >= 0]
+            if not hits:
+                break
+            i = min(hits)
+            seg, delim, self._buf = self._buf[:i].strip(), self._buf[i], self._buf[i + 1:]
+            if seg:
+                self._put(("progress" if delim == "\r" else "log", seg))
+        return len(s)
+
+    def flush(self) -> None:  # emit any trailing partial line
+        seg, self._buf = self._buf.strip(), ""
+        if seg:
+            self._put(("log", seg))
+
+
+def _stream_pip(entry: CatalogEntry, put: Callable[[tuple], None]) -> None:
+    """Run the plugin's pip install, forwarding each stdout/stderr line to ``put``
+    as it arrives. Raises RuntimeError with the tail on non-zero exit (non-TTY pip
+    prints plain newline-terminated lines, so no bar parsing is needed)."""
+    plugins_dir().mkdir(parents=True, exist_ok=True)
+    proc = subprocess.Popen(
+        _pip_cmd(entry),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1,
+    )
+    tail: deque[str] = deque(maxlen=40)
+    assert proc.stdout is not None
+    for raw in proc.stdout:
+        line = raw.rstrip("\r\n")
+        if line:
+            tail.append(line)
+            put(("log", line))
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError(f"pip install {entry.package} failed: " + " | ".join(list(tail)[-6:]))
+
+
+def install_plugin_events(name: str) -> Iterator[dict]:
+    """Streaming variant of :func:`install_plugin`: yields progress events for the
+    /admin live-log view. Event shapes (each a JSON object, one per line):
+
+      {"event": "phase", "phase": "package" | "weights"}
+      {"event": "log",   "stream": "log" | "progress", "line": "…"}
+      {"event": "done",  "result": {"package": …, "weights": …}}
+      {"event": "error", "message": "…"}
+
+    Same two layers as ``install_plugin`` (pip package, then weights), done in one
+    call. The blocking work runs in a daemon thread feeding a queue so lines flush
+    live; this generator just drains the queue until the sentinel."""
+    q: "queue.Queue[tuple | None]" = queue.Queue()
+
+    def worker() -> None:
+        try:
+            cls = find_class(name)
+            if cls is None:  # package missing -> pip install from the catalog
+                entry = catalog().get(name)
+                if entry is None:
+                    raise ValueError(f"unknown plugin: {name}")
+                q.put(("phase", "package"))
+                _stream_pip(entry, q.put)
+                refresh_registry()
+                cls = find_class(name)
+                if cls is None:
+                    raise RuntimeError(f"{name} installed but not discovered (check entry_points)")
+                pkg = "installed"
+            else:
+                pkg = "present"
+            inst = cls()
+            if not inst.is_installed():
+                q.put(("phase", "weights"))
+                sink = _LineTee(q.put)
+                with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                    inst.install()  # download weights (no-op for API-only engines)
+                sink.flush()
+            weights = "installed" if inst.is_installed() else "n/a"
+            q.put(("done", {"package": pkg, "weights": weights}))
+        except Exception as exc:  # noqa: BLE001
+            q.put(("error", str(exc)))
+        finally:
+            q.put(None)  # sentinel
+
+    threading.Thread(target=worker, daemon=True, name=f"install-{name}").start()
+
+    while True:
+        item = q.get()
+        if item is None:
+            break
+        kind, payload = item
+        if kind in ("log", "progress"):
+            yield {"event": "log", "stream": kind, "line": payload}
+        elif kind == "phase":
+            yield {"event": "phase", "phase": payload}
+        elif kind == "done":
+            yield {"event": "done", "result": payload}
+        elif kind == "error":
+            yield {"event": "error", "message": payload}
