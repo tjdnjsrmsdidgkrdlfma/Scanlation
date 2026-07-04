@@ -1,28 +1,24 @@
-"""OCR+translate endpoint: /run_pipeline/.
+"""OCR+translate endpoints: /run_pipeline/ and /run_lookup/.
 
-run_pipeline implements the verified lazy/work flow:
-  * lazy  : client POSTs {md5, options}   -> cache hit returns result, miss = 404
-  * work  : client POSTs {md5, contents}  -> md5(base64) verified, pipeline runs
+  * /run_lookup/  : client POSTs {md5, options} -> cache hit returns result,
+                    miss = 200 {result: null} (a probe, not a 404 control signal)
+  * /run_pipeline/: client POSTs {md5, contents} -> md5(base64) verified, runs
 md5 is computed over the base64 *string* (not raw bytes) — mismatch => 400.
+
+The orchestration (plan, cache identity, GPU-lock sequencing, in-flight dedup)
+lives in ``app.orchestrator``; this module is just request validation and the
+error -> status-code mapping.
 """
 from __future__ import annotations
 
-import asyncio
-import base64
 import hashlib
-import io
 import logging
-import time
 
 from fastapi import APIRouter, HTTPException
-from PIL import Image
-from starlette.concurrency import run_in_threadpool
 
-from ..cache import cache, opt_hash
-from ..pipeline import detect_and_recognize, translate_regions
+from ..orchestrator import BadImageError, cached_result, make_plan, run_page
 from ..registry import registry
 from ..schemas import RunRequest
-from ..state import state
 
 router = APIRouter()
 logger = logging.getLogger("scanlation.run")
@@ -37,74 +33,6 @@ def _require(role: str, name: str) -> None:
         )
 
 
-def _resolve():
-    """Current (names, langs, engines-id) from selection."""
-    sel = state.selection
-    return (
-        sel.detector, sel.recognizer, sel.translator,
-        sel.lang_src, sel.lang_dst,
-        f"{sel.detector}+{sel.recognizer}+{sel.translator}",
-    )
-
-
-def _read_sync(img, det_name, rec_name, tsl_name, src, opt_box, opt_ocr):
-    """Read the image = detect + recognize (the GPU/model half). Resolves all three
-    engines (loads weights on first use); returns (recognized pairs, translator).
-
-    Runs in the threadpool UNDER the GPU lock: registry.get is not thread-safe
-    (check-then-set on _instances) and model loads must be serialized. The
-    translator is resolved here too — cheap (just its httpx client) — so the
-    concurrent translate path never touches registry.get and the lazily-created
-    client is ready before any concurrent request uses it.
-    """
-    detector = registry.get("detector", det_name)
-    recognizer = registry.get("recognizer", rec_name)
-    translator = registry.get("translator", tsl_name)
-    recognized = detect_and_recognize(
-        img, detector=detector, recognizer=recognizer, src=src, opt_box=opt_box, opt_ocr=opt_ocr
-    )
-    return recognized, translator
-
-
-def _translate_sync(recognized, translator, src, dst, opt_tsl):
-    """Run the LLM half: batch-translate the recognized pairs -> wire result.
-    Runs in the threadpool OUTSIDE the GPU lock (ollama is a separate process),
-    so one image's translation overlaps the next image's detect+recognize."""
-    return translate_regions(recognized, translator=translator, src=src, dst=dst, opt_tsl=opt_tsl)
-
-
-def _decode_image(contents: str) -> Image.Image:
-    """base64 string -> RGB PIL image; 400 on anything malformed."""
-    try:
-        binary = base64.b64decode(contents)
-        return Image.open(io.BytesIO(binary)).convert("RGB")
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"bad image: {exc}")
-
-
-async def _run_deduped(id_, compute):
-    """Run the async ``compute`` once per in-flight ``id_``: concurrent requests
-    for the same key await the first computation instead of repeating the model
-    work. The result (or the failure) is shared with every waiter."""
-    existing = state.inflight.get(id_)
-    if existing is not None:
-        return await existing
-
-    loop = asyncio.get_running_loop()
-    fut: asyncio.Future = loop.create_future()
-    state.inflight[id_] = fut
-    try:
-        result = await compute()
-        fut.set_result(result)
-        return result
-    except Exception as exc:  # noqa: BLE001 - hand the same failure to any waiters, then re-raise
-        if not fut.done():
-            fut.set_exception(exc)
-        raise
-    finally:
-        state.inflight.pop(id_, None)
-
-
 @router.post("/run_lookup/")
 def run_lookup(req: RunRequest) -> dict:
     """Read-only cache probe: ``{result: <cached list or null>}``, always 200.
@@ -114,22 +42,13 @@ def run_lookup(req: RunRequest) -> dict:
     200 with ``result: null``. Same ``{result: ...}`` envelope as /run_pipeline/,
     so ``null`` (not cached) is distinct from ``[]`` (cached empty page). Body
     reuses RunRequest; only md5 + options are read (contents ignored)."""
-    det, rec, tsl, src, dst, engines = _resolve()
-    oh = opt_hash(
-        state.options_for(det, req.options),
-        state.options_for(rec, req.options),
-        state.translator_options(tsl, req.options),
-    )
-    return {"result": cache.get_run(req.md5, src, dst, engines, oh)}  # None on miss
+    plan = make_plan(req.options)
+    return {"result": cached_result(plan, req.md5)}  # None on miss
 
 
 @router.post("/run_pipeline/")
 async def run_pipeline(req: RunRequest) -> dict:
-    det, rec, tsl, src, dst, engines = _resolve()
-    opt_box = state.options_for(det, req.options)
-    opt_ocr = state.options_for(rec, req.options)
-    opt_tsl = state.translator_options(tsl, req.options)
-    oh = opt_hash(opt_box, opt_ocr, opt_tsl)
+    plan = make_plan(req.options)
 
     # Contents are required — the cache probe moved to /run_lookup/ (a 200 lookup),
     # so run_pipeline is single-purpose: it always does the real work.
@@ -144,49 +63,19 @@ async def run_pipeline(req: RunRequest) -> dict:
         raise HTTPException(status_code=400, detail="md5 mismatch")
 
     if not req.force:
-        cached = cache.get_run(req.md5, src, dst, engines, oh)
+        cached = cached_result(plan, req.md5)
         if cached is not None:
             return {"result": cached}
 
     # Need a real engine per role to run (cache miss) -> 400 if any is missing.
-    _require("detector", det)
-    _require("recognizer", rec)
-    _require("translator", tsl)
-
-    async def _compute():
-        # Timed per stage so the log shows where the time goes. lockwait = time
-        # spent waiting for the GPU lock (surfaces contention when images overlap).
-        logger.info("run md5=%s engines=%s %s->%s", req.md5[:8], engines, src, dst)
-        t0 = time.perf_counter()
-        img = _decode_image(req.contents)
-        t_dec = time.perf_counter()
-        # GPU/model half under the lock (single device); translate half outside it
-        # (ollama is a separate process), bounded so concurrent images don't
-        # overrun the backend's parallel slots.
-        async with state.gpu_lock:
-            t_lock = time.perf_counter()
-            recognized, translator = await run_in_threadpool(
-                _read_sync, img, det, rec, tsl, src, opt_box, opt_ocr
-            )
-        t_det = time.perf_counter()
-        async with state.translate_sem:
-            result = await run_in_threadpool(
-                _translate_sync, recognized, translator, src, dst, opt_tsl
-            )
-        t_tsl = time.perf_counter()
-        cache.put_run(req.md5, src, dst, engines, oh, result)
-        logger.info(
-            "md5=%s ok regions=%d decode=%.0f lockwait=%.0f detect+ocr=%.0f translate=%.0f total=%.0fms",
-            req.md5[:8], len(recognized),
-            (t_dec - t0) * 1000, (t_lock - t_dec) * 1000, (t_det - t_lock) * 1000,
-            (t_tsl - t_det) * 1000, (t_tsl - t0) * 1000,
-        )
-        return result
+    _require("detector", plan.detector)
+    _require("recognizer", plan.recognizer)
+    _require("translator", plan.translator)
 
     try:
-        result = await _run_deduped((req.md5, src, dst, engines, oh), _compute)
-    except HTTPException:
-        raise
+        result = await run_page(plan, req.md5, req.contents)
+    except BadImageError as exc:
+        raise HTTPException(status_code=400, detail=f"bad image: {exc}")
     except Exception as exc:  # noqa: BLE001
         logger.exception("run_pipeline failed md5=%s", req.md5[:8])
         raise HTTPException(status_code=500, detail=str(exc))
