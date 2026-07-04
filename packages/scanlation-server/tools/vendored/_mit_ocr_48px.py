@@ -7,7 +7,7 @@ import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from _mit_xpos import XPOS
+from ._mit_xpos import XPOS
 
 
 class ConvNeXtBlock(nn.Module):

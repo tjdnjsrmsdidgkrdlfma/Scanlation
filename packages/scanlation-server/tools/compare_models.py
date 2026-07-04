@@ -386,14 +386,15 @@ class HfCausalVlmAdapter(Adapter):
 
 
 class MitOcrAdapter(Adapter):
-    """manga-image-translator's 48px / 48px_ctc line OCR (vendored: tools/_mit_ocr*.py
-    + tools/_mit_weights/). Those models read ONE 48px text line, so the runner splits
-    each bubble crop into columns/rows first, OCRs each, and joins in reading order."""
+    """manga-image-translator's 48px / 48px_ctc line OCR (vendored:
+    tools/vendored/_mit_ocr*.py + tools/vendored/_mit_weights/). Those models read
+    ONE 48px text line, so the runner splits each bubble crop into columns/rows
+    first (ink-projection), OCRs each, and joins in reading order."""
     kind = "ocr"
 
     def __init__(self, id_: str, variant: str, label: str):
         self.id, self.variant, self.label = id_, variant, label
-        self.install_hint = ("vendored — weights auto-included in tools/_mit_weights/ "
+        self.install_hint = ("vendored — weights auto-included in tools/vendored/_mit_weights/ "
                              "(from zyddnys/manga-image-translator release beta-0.3)")
 
     def _ckpt(self) -> str:
@@ -403,20 +404,13 @@ class MitOcrAdapter(Adapter):
         ok, why = _imports_ok("torch", "cv2")
         if not ok:
             return False, why
-        wpath = os.path.join(os.path.dirname(__file__), "_mit_weights", self._ckpt())
-        return (True, "") if os.path.exists(wpath) else (False, f"missing weights {self._ckpt()} in tools/_mit_weights/")
+        wpath = os.path.join(os.path.dirname(__file__), "vendored", "_mit_weights", self._ckpt())
+        return (True, "") if os.path.exists(wpath) else (False, f"missing weights {self._ckpt()} in tools/vendored/_mit_weights/")
 
     def load(self) -> None:
-        from _mit_ocr import MitOCR
+        from vendored._mit_ocr import MitOCR
         self._m = MitOCR(self.variant)
-        dev = _resolve_device(self.device)
-        self._m.load(dev)
-        try:  # trained line detector (comic-text-detector) instead of ink-projection splitting
-            from _ctd_lines import CtdLines
-            self._m.set_splitter(CtdLines().load(dev))
-        except Exception as e:  # missing onnxruntime/weights -> keep the projection fallback
-            print(f"  [mit_{self.variant}] CTD line splitter unavailable, using ink-projection: {e}",
-                  file=sys.stderr)
+        self._m.load(_resolve_device(self.device))
 
     def recognize(self, crop: Image.Image) -> str:
         import numpy as np

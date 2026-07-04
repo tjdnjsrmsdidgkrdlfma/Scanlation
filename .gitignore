@@ -22,7 +22,7 @@ env/
 # Runtime volumes + model weights (big binaries — never commit)
 packages/scanlation-server/data/
 packages/scanlation-server/models/
-packages/scanlation-server/tools/_mit_weights/
+packages/scanlation-server/tools/vendored/_mit_weights/
 *.onnx
 *.sqlite
 *.sqlite-wal

@@ -68,17 +68,11 @@ class MitOCR:
 
     def __init__(self, variant: str):
         self.variant = variant
-        self._splitter = None  # optional CtdLines; falls back to ink-projection when None/empty
-
-    def set_splitter(self, splitter) -> None:
-        """Use a trained line detector (tools/_ctd_lines.CtdLines) instead of the
-        ink-projection _split_lines. Its strips are already horizontal lines."""
-        self._splitter = splitter
 
     def load(self, device: str) -> None:
         self.device = device
         if self.variant == "ctc":
-            from _mit_ocr_ctc import OCR
+            from ._mit_ocr_ctc import OCR
             self.dictionary = _read_dict("alphabet-all-v5.txt")
             self.model = OCR(self.dictionary, 768)
             sd = torch.load(os.path.join(_WEIGHTS, "ocr-ctc.ckpt"), map_location="cpu")
@@ -87,7 +81,7 @@ class MitOCR:
                 sd.pop(k, None)
             self.model.load_state_dict(sd, strict=False)
         else:
-            from _mit_ocr_48px import OCR
+            from ._mit_ocr_48px import OCR
             self.dictionary = _read_dict("alphabet-all-v7.txt")
             self.model = OCR(self.dictionary, 768)
             sd = torch.load(os.path.join(_WEIGHTS, "ocr_ar_48px.ckpt"), map_location="cpu")
@@ -129,12 +123,8 @@ class MitOCR:
             return out
 
     def recognize(self, crop_rgb) -> str:
-        strips = self._splitter.lines(crop_rgb) if self._splitter is not None else None
-        if strips:  # CTD strips are already horizontal lines -> no rotation
-            regs = [self._line_region(s, False) for s in strips]
-        else:  # no detector (or it found nothing) -> ink-projection fallback
-            strips, vertical = _split_lines(crop_rgb)
-            regs = [self._line_region(s, vertical) for s in strips]
+        strips, vertical = _split_lines(crop_rgb)  # ink-projection line split
+        regs = [self._line_region(s, vertical) for s in strips]
         maxw = (4 * (max(w for _, w in regs) + 7) // 4) + 128
         region = np.zeros((len(regs), 48, maxw, 3), np.uint8)
         for i, (im, w) in enumerate(regs):
