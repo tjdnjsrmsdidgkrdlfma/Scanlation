@@ -680,13 +680,18 @@ function openPluginLog(row) {
         phaseEl.textContent = t("plugins.phase." + ev.phase);
         setIndet(true);             // new phase -> unknown progress until a % arrives
       } else if (ev.event === "log") {
-        if (ev.stream === "progress") {
-          const pct = parsePct(ev.line);
+        const line = stripAnsi(ev.line);
+        if (!line) return;
+        // huggingface_hub prints its download bars as \n lines (not \r), so parse
+        // the % from any line — not just `progress` ones. Skip tqdm's "Fetching N
+        // files" file-count bar so the visible % tracks bytes, not file count.
+        if (!/^Fetching /.test(line)) {
+          const pct = parsePct(line);
           if (pct != null) { setIndet(false); fill.style.width = pct + "%"; pctEl.textContent = Math.round(pct) + "%"; }
-          record(ev.line, "progress");
-        } else {
-          record(ev.line, "log");
         }
+        // Collapse tqdm bar refreshes ("…: 45%|██…|") onto one live log line;
+        // append everything else. Keeps the hidden log short during a big download.
+        record(line, (/%\s*\|/.test(line) || ev.stream === "progress") ? "progress" : "log");
       } else if (ev.event === "done") {
         phaseEl.textContent = t("plugins.phase.done");
         setIndet(false); fill.style.width = "100%"; pctEl.textContent = "";
@@ -712,6 +717,8 @@ function parsePct(s) {
   const v = parseFloat(m[1]);
   return v >= 0 && v <= 100 ? v : null;
 }
+// Drop ANSI escape sequences (tqdm uses \x1b[A cursor moves + colours) and trim.
+function stripAnsi(s) { return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim(); }
 async function clearCache() {
   if (!confirm(t("confirm.clearCache"))) return;
   try {
