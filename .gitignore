@@ -45,3 +45,5 @@ packages/scanlation-server/compare_out/
 # OS / editor
 .DS_Store
 Thumbs.db
+packages/scanlation-server/tools/_mit_weights/
+venv-vlm/
