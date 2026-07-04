@@ -273,6 +273,32 @@ function render() {
   renderEngineOptions();
   renderPlugins();
   renderBehavior();
+  syncInstallPoll();
+}
+
+// While the server reports an install running that THIS tab isn't driving (e.g. a
+// page reloaded mid-install, or another tab kicked it off), poll so the row flips
+// from "설치 중…" to "설치됨" on its own. The driving tab updates via its stream.
+let installPoll = null;
+function syncInstallPoll() {
+  const serverBusy = ((DATA && DATA.installing) || []).length > 0;
+  const drivingHere = currentInstall != null || installQueue.length > 0;
+  if (serverBusy && !drivingHere) {
+    if (!installPoll) installPoll = setInterval(pollInstalls, 2500);
+  } else if (installPoll) {
+    clearInterval(installPoll);
+    installPoll = null;
+  }
+}
+async function pollInstalls() {
+  if (currentInstall != null || installQueue.length) return;  // a stream took over
+  let snap;
+  try { snap = await api("/get_settings/"); } catch (_) { return; }
+  const wasBusy = (DATA.installing || []).length;
+  DATA = snap;
+  const nowBusy = (DATA.installing || []).length;
+  if (wasBusy && !nowBusy) render();   // an install finished -> full refresh (new engines in dropdowns)
+  else { renderPlugins(); syncInstallPoll(); }  // still going -> just refresh the rows
 }
 
 function engineOption(e) {
@@ -426,6 +452,9 @@ function renderPlugins() {
       byName[e.name].roles.push(role);
     }
   }
+  // Installs the server says are running now (a background thread outlives the
+  // streaming request) show as "설치 중…" even on a fresh page load / other tab.
+  const serverInstalling = new Set(DATA.installing || []);
   const rows = Object.values(byName).map((e) => {
     // One-shot install: the button pip-installs the package (if missing) AND
     // downloads the weights in a single action; the live log shows both phases as
@@ -433,6 +462,8 @@ function renderPlugins() {
     // only "fully done" state, so it's just Install ↔ Installed — same footprint.
     const action = e.installed
       ? `<span class="pa pa-done"><span class="pa-ico">✓</span>${t("plugins.installed")}</span>`
+      : serverInstalling.has(e.name)
+      ? `<span class="pa pa-busy"><span class="spin"></span>${t("plugins.installing")}</span>`
       : `<button class="pa pa-install" data-install="${e.name}">${t("plugins.install")}</button>`;
     const warn = e.warning ? `<div class="pwarn">⚠ ${e.warning}</div>` : "";
     return `<div class="plugin" data-name="${e.name}">

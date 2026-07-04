@@ -289,6 +289,30 @@ def _stream_pip(entry: CatalogEntry, put: Callable[[tuple], None]) -> None:
         raise RuntimeError(f"pip install {entry.package} failed: " + " | ".join(list(tail)[-6:]))
 
 
+# --- in-progress tracking --------------------------------------------------
+# Installs run in a background thread that outlives the streaming request, so a
+# reloaded /admin must be able to tell what's still installing (to show "설치 중"
+# instead of "설치") and a second click must not start a duplicate concurrent
+# install of the same plugin (two pip installs into one --target corrupt it).
+_installing: set[str] = set()
+_installing_lock = threading.Lock()
+
+
+def installing_names() -> list[str]:
+    """Names whose install is running right now (surfaced by GET /get_settings/)."""
+    with _installing_lock:
+        return sorted(_installing)
+
+
+def _begin_install(name: str) -> bool:
+    """Claim ``name`` as installing; False if it was already in progress."""
+    with _installing_lock:
+        if name in _installing:
+            return False
+        _installing.add(name)
+        return True
+
+
 def install_plugin_events(name: str) -> Iterator[dict]:
     """Streaming variant of :func:`install_plugin`: yields progress events for the
     /admin live-log view. Event shapes (each a JSON object, one per line):
@@ -300,7 +324,11 @@ def install_plugin_events(name: str) -> Iterator[dict]:
 
     Same two layers as ``install_plugin`` (pip package, then weights), done in one
     call. The blocking work runs in a daemon thread feeding a queue so lines flush
-    live; this generator just drains the queue until the sentinel."""
+    live; this generator just drains the queue until the sentinel. Refuses (an
+    ``error`` event) if the same plugin is already installing."""
+    if not _begin_install(name):
+        yield {"event": "error", "message": f"{name} is already installing"}
+        return
     q: "queue.Queue[tuple | None]" = queue.Queue()
 
     def worker() -> None:
@@ -331,6 +359,8 @@ def install_plugin_events(name: str) -> Iterator[dict]:
         except Exception as exc:  # noqa: BLE001
             q.put(("error", str(exc)))
         finally:
+            with _installing_lock:
+                _installing.discard(name)
             q.put(None)  # sentinel
 
     threading.Thread(target=worker, daemon=True, name=f"install-{name}").start()
