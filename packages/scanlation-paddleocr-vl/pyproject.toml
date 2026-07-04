@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scanlation-paddleocr-vl"
+version = "0.1.0"
+description = "PaddleOCR-VL manga fine-tune VLM recognizer plugin for the Scanlation server."
+requires-python = ">=3.11"
+dependencies = [
+    "scanlation-sdk",
+    # PaddleOCR-VL loads via the NATIVE transformers path (AutoModelForImageTextToText,
+    # no trust_remote_code); that support landed in transformers 5.x — the repo's own
+    # remote code is upstream-broken. So pin >=5.0, not the >=4.45 the other plugins use.
+    "transformers>=5.0",
+    "torch",
+    "huggingface_hub",
+    "pillow",
+]
+
+# Auto-discovered by the server registry once installed (no core edit needed).
+# Group is PLURAL — matches app/registry.py ROLES ("recognizer" -> "scanlation.recognizers").
+[project.entry-points."scanlation.recognizers"]
+paddleocrvl = "scanlation_paddleocr_vl.plugin:PaddleOcrVLRecognizer"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scanlation_paddleocr_vl*"]

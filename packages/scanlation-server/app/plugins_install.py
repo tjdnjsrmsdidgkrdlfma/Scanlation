@@ -69,6 +69,15 @@ _CATALOG: dict[str, dict] = {
         # PyPI CUDA wheel, so pip prefers it).
         "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
     },
+    "paddleocrvl": {
+        "package": "scanlation-paddleocr-vl",
+        "display_name": "PaddleOCR-VL (manga)",
+        "roles": ["recognizer"],
+        "description": "PaddleOCR-VL manga fine-tune VLM recognizer — best accuracy, GPU-intended (~1s/crop; CPU ~60s).",
+        # CPU wheel by default like the other torch plugins; a GPU/ROCm torch build
+        # is a host-level install (the model needs a GPU to be practical).
+        "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
+    },
     "ollama": {
         "package": "scanlation-ollama",
         "display_name": "Ollama",
