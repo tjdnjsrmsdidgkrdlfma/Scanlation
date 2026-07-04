@@ -32,14 +32,11 @@ packages/scanlation-server/tools/_mit_weights/
 # Local test inputs (copyrighted manga scans — keep out of the public repo)
 packages/scanlation-server/samples/
 
-# Regenerable tool outputs (visualize.py / compare_models.py)
+# Regenerable tool outputs — compare_models.py writes everything under compare_out/
+packages/scanlation-server/compare_out/
+# visualize.py single-image output
 *.annotated.png
 annotated.png
-packages/scanlation-server/compare_detectors.png
-packages/scanlation-server/compare_panels/
-packages/scanlation-server/compare_ocr.md
-packages/scanlation-server/crops_ocr/
-packages/scanlation-server/compare_out/
 
 # Local tooling / editor config
 .claude/

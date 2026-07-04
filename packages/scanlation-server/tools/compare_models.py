@@ -11,7 +11,7 @@ enable models one at a time (pip install ..., pull an ollama tag) and re-run.
              OCR model reads the SAME crops; the text is printed aligned per crop.
 
     ../../venv/Scripts/python tools/compare_models.py list
-    ../../venv/Scripts/python tools/compare_models.py detect page.png [--out compare_detectors.png] [--only ogkalu_rtdetr,kiuyha_yolo]
+    ../../venv/Scripts/python tools/compare_models.py detect page.png [--only ogkalu_rtdetr,kiuyha_yolo]   # -> compare_out/
     ../../venv/Scripts/python tools/compare_models.py ocr page.png [--ref-detector ogkalu_rtdetr] [--device both] [--only mangaocr,qwen3vl]
 
 Once a winner is clear, promote just that model to a real scanlation-<name>
@@ -613,6 +613,7 @@ def cmd_detect(args) -> None:
         except Exception as exc:  # noqa: BLE001 - one broken model must not kill the run
             print(f"    {a.id}: ERROR {type(exc).__name__}: {exc}", file=sys.stderr)
     out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
     montage(panels, out)
     print(f"\nwrote {out}  +  {len(panels)} full-res panel(s) -> {panel_dir}/", file=sys.stderr)
 
@@ -765,6 +766,7 @@ def cmd_ocr(args) -> None:
             except Exception as exc:  # noqa: BLE001 - one broken engine/device must not kill the run
                 print(f"    {a.id}[{lab}]: ERROR {type(exc).__name__}: {exc}", file=sys.stderr)
 
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     _write_ocr_report(args.out, crops, order, texts, timings)
     print(f"\nwrote {args.out}  +  {len(crops)} crops -> {crop_dir}/", file=sys.stderr)
 
@@ -1329,12 +1331,12 @@ def main() -> None:
 
     d = sub.add_parser("detect", help="run every available detector -> side-by-side montage")
     d.add_argument("image")
-    d.add_argument("--out", default="compare_detectors.png")
+    d.add_argument("--out", default="compare_out/compare_detectors.png")
     d.add_argument("--only", default=None, help="comma ids, e.g. ogkalu_rtdetr,ogkalu_yolov8m")
     d.add_argument("--exclude", default=None, help="comma ids to drop, e.g. kitsumed_seg")
     d.add_argument("--opt", action="append", default=[], metavar="KEY=VALUE",
                    help="tune an adapter attr, e.g. --opt conf=0.5 --opt nms_iou=0.5 (repeatable)")
-    d.add_argument("--panels", default="compare_panels", help="dir for full-res per-detector images")
+    d.add_argument("--panels", default="compare_out/compare_panels", help="dir for full-res per-detector images")
     d.add_argument("--color-by-class", dest="by_class", action="store_true",
                    help="color boxes per class (default: all red, like the sample)")
     d.set_defaults(fn=cmd_detect)
@@ -1348,8 +1350,8 @@ def main() -> None:
     o.add_argument("--only", default=None, help="comma ids, e.g. mangaocr,qwen3vl")
     o.add_argument("--exclude", default=None, help="comma ids to drop")
     o.add_argument("--max-crops", type=int, default=20)
-    o.add_argument("--out", default="compare_ocr.md")
-    o.add_argument("--crops", default="crops_ocr")
+    o.add_argument("--out", default="compare_out/compare_ocr.md")
+    o.add_argument("--crops", default="compare_out/crops_ocr")
     o.set_defaults(fn=cmd_ocr)
 
     ob = sub.add_parser("ocrbatch", help="run OCR over a folder tree -> <out>/<category>/<image>/ocr.md")
