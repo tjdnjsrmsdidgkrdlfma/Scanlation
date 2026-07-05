@@ -20,7 +20,7 @@ logger = logging.getLogger("scanlation.manga-ocr")
 
 class MangaOcrRecognizer(LocalModelEngineBase):
     name = "manga-ocr"
-    display_name = "manga-ocr"
+    display_name = "Manga OCR"
     homepage = "https://github.com/kha-white/manga-ocr"
     description = "ViT-encoder/BERT-decoder Japanese OCR. Fast, solid accuracy. Runs on CPU. 400MB."
     OPTION_SCHEMA: dict = {}

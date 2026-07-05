@@ -28,7 +28,7 @@ _CATALOG: dict[str, dict] = {
     },
     "manga-ocr": {
         "package": "scanlation-manga-ocr",
-        "display_name": "manga-ocr",
+        "display_name": "Manga OCR",
         "roles": ["recognizer"],
         "description": "ViT-encoder/BERT-decoder Japanese OCR. Fast, solid accuracy. Runs on CPU. 400MB.",
         # steer torch to the CPU index (its +cpu local version outranks the plain
