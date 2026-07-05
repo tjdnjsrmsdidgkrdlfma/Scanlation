@@ -28,7 +28,7 @@ def test_get_settings_merges_catalog():
         for e in d["engines"][role]:
             names.add(e["name"])
             assert "installed_package" in e
-    for name in ("rtdetr", "mangaocr", "ollama", "llamacpp"):
+    for name in ("comic-text-and-bubble-detector", "manga-ocr", "Ollama", "llama.cpp"):
         assert name in names, name
 
 
@@ -78,7 +78,7 @@ def test_active_prompt_injected_into_translator_options():
     c.post("/save_prompt/", json={"name": "inj", "text": "INJECTED-PROMPT"})
     assert state.translator_options("dummy", None)["system_prompt"] == "INJECTED-PROMPT"
     c.post("/delete_prompt/", json={"name": "inj"})  # cleanup -> back to default
-    assert state.translator_options("dummy", None)["system_prompt"].startswith("From now on")
+    assert state.translator_options("dummy", None)["system_prompt"].startswith("You are a translator")
 
 
 def test_clear_cache_drops_runs():

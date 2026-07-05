@@ -34,7 +34,7 @@ def test_builds_request_from_tuned_config():
     assert body["model"] == "gemma-test"  # model comes from options (admin), no env fallback
     assert body["stream"] is False
     assert body["think"] is False
-    assert body["system"].startswith("From now on")
+    assert body["system"].startswith("You are a translator")
     # plain language names + prompt template
     assert 'src="japanese"' in body["prompt"]
     assert 'dst="korean"' in body["prompt"]
