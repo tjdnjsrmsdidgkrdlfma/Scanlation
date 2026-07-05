@@ -57,12 +57,14 @@ def test_set_options_persists_and_clears():
 
 def test_prompt_select_save_delete():
     c = client()
-    assert c.post("/select_prompt/", json={"name": "literal"}).json()["active"] == "literal"
+    assert c.post("/select_prompt/", json={"name": "default"}).json()["active"] == "default"
     assert c.post("/select_prompt/", json={"name": "ghost"}).status_code == 400  # unknown
     # save custom -> active + listed under custom
     c.post("/save_prompt/", json={"name": "mine", "text": "SYSTEM TEST PROMPT"})
     p = c.get("/get_settings/").json()["prompts"]
     assert p["active"] == "mine" and p["custom"]["mine"] == "SYSTEM TEST PROMPT"
+    # select an existing custom by name
+    assert c.post("/select_prompt/", json={"name": "mine"}).json()["active"] == "mine"
     assert c.post("/delete_prompt/", json={"name": "default"}).status_code == 400  # builtin protected
     # delete custom -> active falls back to default
     assert c.post("/delete_prompt/", json={"name": "mine"}).json()["active"] == "default"

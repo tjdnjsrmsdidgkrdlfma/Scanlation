@@ -22,7 +22,7 @@ class MangaOcrRecognizer(LocalModelEngineBase):
     name = "mangaocr"
     display_name = "Manga OCR"
     homepage = "https://github.com/kha-white/manga-ocr"
-    description = "Japanese manga text recognizer (ViT-encoder/BERT-decoder), vertical + horizontal. ~400MB."
+    description = "ViT-encoder/BERT-decoder Japanese OCR. Fast, solid accuracy. Runs on CPU. 400MB."
     OPTION_SCHEMA: dict = {}
     SUPPORTED_SRC = ["ja"]
 

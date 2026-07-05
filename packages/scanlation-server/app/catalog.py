@@ -20,7 +20,7 @@ _CATALOG: dict[str, dict] = {
         "package": "scanlation-rtdetr",
         "display_name": "comic-text-and-bubble-detector",
         "roles": ["detector"],
-        "description": "RT-DETRv2 (ogkalu/comic-text-and-bubble-detector) comic/manga text & bubble detector. ~172MB.",
+        "description": "RT-DETRv2 (ogkalu/comic-text-and-bubble-detector) comic/manga text & bubble detector. Runs on CPU. 172MB.",
         # steer torch to the CPU wheel by default (like mangaocr) so a Docker
         # one-click install doesn't pull a giant CUDA wheel; a GPU torch build is
         # a host-level install.
@@ -30,7 +30,7 @@ _CATALOG: dict[str, dict] = {
         "package": "scanlation-mangaocr",
         "display_name": "Manga OCR",
         "roles": ["recognizer"],
-        "description": "Japanese manga text recognizer (ViT-encoder/BERT-decoder), vertical + horizontal. ~400MB.",
+        "description": "ViT-encoder/BERT-decoder Japanese OCR. Fast, solid accuracy. Runs on CPU. 400MB.",
         # steer torch to the CPU index (its +cpu local version outranks the plain
         # PyPI CUDA wheel, so pip prefers it).
         "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
@@ -39,7 +39,7 @@ _CATALOG: dict[str, dict] = {
         "package": "scanlation-paddleocr-vl",
         "display_name": "PaddleOCR-VL-For-Manga",
         "roles": ["recognizer"],
-        "description": "PaddleOCR-VL manga fine-tune (0.9B VLM). Best bake-off accuracy. ~1.8GB.",
+        "description": "PaddleOCR-VL manga fine-tune (0.9B VLM). Best accuracy. Needs a GPU. 1.8GB.",
         # CPU wheel by default like the other torch plugins; a GPU/ROCm torch build
         # is a host-level install (the model needs a GPU to be practical).
         "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
@@ -48,14 +48,14 @@ _CATALOG: dict[str, dict] = {
         "package": "scanlation-ollama",
         "display_name": "Ollama",
         "roles": ["translator"],
-        "description": "LLM translation via a local ollama server (must be running; model selected in /admin).",
+        "description": "LLM translation via a local ollama server (must be running, model selected in /admin).",
         "pip_args": [],
     },
     "llamacpp": {
         "package": "scanlation-llamacpp",
         "display_name": "llama.cpp",
         "roles": ["translator"],
-        "description": "LLM translation via an OpenAI-compatible /v1 server (llama.cpp, vllm, LM Studio…; must be running, model loaded).",
+        "description": "LLM translation via an OpenAI-compatible /v1 server (llama.cpp, vllm, LM Studio…; must be running, model selected in /admin).",
         "pip_args": [],
     },
 }

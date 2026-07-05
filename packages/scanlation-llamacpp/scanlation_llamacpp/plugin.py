@@ -25,7 +25,7 @@ class LlamaCppTranslator(HttpTranslatorBase):
     name = "llamacpp"
     display_name = "llama.cpp"
     homepage = "https://github.com/ggml-org/llama.cpp"
-    description = "LLM translation via an OpenAI-compatible /v1 server (llama.cpp, vllm, LM Studio…; must be running, model loaded)."
+    description = "LLM translation via an OpenAI-compatible /v1 server (llama.cpp, vllm, LM Studio…; must be running, model selected in /admin)."
     ENDPOINT_ENV = "LLAMACPP_ENDPOINT"
     DEFAULT_ENDPOINT = "http://127.0.0.1:8080"
     OPTION_SCHEMA = {

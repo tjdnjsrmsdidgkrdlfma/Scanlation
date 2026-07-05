@@ -5,7 +5,7 @@ llama.cpp, any OpenAI-compatible server) so the request shape stays consistent.
 The *active* system prompt is chosen in the server's admin page and flows to
 translators via the per-call options dict (``system_prompt``);
 ``DEFAULT_SYSTEM_PROMPT`` here is only the fallback for a bare ``translate()``
-call (unit tests). The server core layers named presets (literal/natural/custom)
+call (unit tests). The server core layers the builtin + user custom presets
 on top of it — that preset logic stays in the core, not here.
 """
 from __future__ import annotations

@@ -21,7 +21,7 @@ class OllamaTranslator(HttpTranslatorBase):
     name = "ollama"
     display_name = "Ollama"
     homepage = "https://ollama.com"
-    description = "LLM translation via a local ollama server (must be running; model selected in /admin)."
+    description = "LLM translation via a local ollama server (must be running, model selected in /admin)."
     ENDPOINT_ENV = "OLLAMA_ENDPOINT"
     DEFAULT_ENDPOINT = "http://127.0.0.1:11434/api"
     OPTION_SCHEMA = {
