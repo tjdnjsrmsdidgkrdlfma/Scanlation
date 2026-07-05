@@ -46,7 +46,11 @@ class HttpTranslatorBase(EngineBase):
             return
         import httpx
 
-        self._client = httpx.Client(timeout=120.0)
+        # Short timeout: think-off translations return in ~1s, so if a request
+        # hangs (backend stall) fail over to the per-text fallback fast instead of
+        # sitting for minutes. Keep the model warm (OLLAMA_KEEP_ALIVE=-1) so a cold
+        # 14GB reload can't eat this budget.
+        self._client = httpx.Client(timeout=10.0)
         self._log.info("%s translator ready (endpoint=%s)", self.name, self.endpoint)
 
     def unload(self) -> None:
@@ -80,7 +84,7 @@ class HttpTranslatorBase(EngineBase):
         if len(text) <= 2:  # punctuation/short tokens: not worth a model call
             return text
 
-        options = options or {}
+        options = self.resolve_options(options)
         model = options.get("model")
         if not model:
             raise ValueError(f"no {self.display_name} model selected — pick one in /admin")
@@ -96,7 +100,7 @@ class HttpTranslatorBase(EngineBase):
         translate(). ANY failure (parse error, wrong count, HTTP error, num_ctx
         overflow -> truncated JSON) falls back to a per-text translate() loop, so
         the result is always complete and aligned — just slower on that page."""
-        options = options or {}
+        options = self.resolve_options(options)
         stripped = [t.strip() for t in texts]
         long_idx = [i for i, t in enumerate(stripped) if len(t) > 2]
         if not long_idx:  # nothing worth a model call (all short/empty)

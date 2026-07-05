@@ -95,6 +95,24 @@ class EngineBase:
     def unload(self) -> None:
         """Release resources."""
 
+    def resolve_options(self, options: Optional[dict]) -> dict:
+        """Fill any option the caller left unset (missing or blank ""/None) with
+        this engine's OPTION_SCHEMA default, and coerce every schema option to its
+        declared type. OPTION_SCHEMA is thus the single source of defaults: the
+        admin-shown default always matches what the engine actually runs, and
+        engines stay self-contained (they work when called with {})."""
+        out = dict(options or {})
+        for key, spec in type(self).OPTION_SCHEMA.items():
+            if out.get(key, "") in ("", None) and "default" in spec:
+                out[key] = spec["default"]
+            t = spec.get("type")
+            if t in (int, float, bool, str) and key in out:
+                try:
+                    out[key] = t(out[key])
+                except (TypeError, ValueError):
+                    pass
+        return out
+
 
 @runtime_checkable
 class Detector(Protocol):

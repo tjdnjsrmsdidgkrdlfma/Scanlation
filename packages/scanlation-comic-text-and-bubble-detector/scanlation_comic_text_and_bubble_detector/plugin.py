@@ -30,20 +30,18 @@ from . import postprocess
 
 logger = logging.getLogger("scanlation.comic-text-and-bubble-detector")
 
-# Tuned sweet spot (bake-off). Single source: OPTION_SCHEMA defaults AND detect()
-# fallbacks both read this, so they can't drift.
-DEFAULTS = {"conf": 0.6, "nms_iou": 0.6, "contain_thresh": 0.85}
-
 
 class ComicTextAndBubbleDetector(LocalModelEngineBase):
     name = "comic-text-and-bubble-detector"
     display_name = "comic-text-and-bubble-detector"
     homepage = "https://huggingface.co/ogkalu/comic-text-and-bubble-detector"
     description = "RT-DETRv2 (ogkalu/comic-text-and-bubble-detector) comic/manga text & bubble detector. Runs on CPU. 172MB."
+    # Tuned sweet spot from the tools/compare_models.py bake-off. OPTION_SCHEMA is
+    # the single source of these defaults; detect() reads the resolved options.
     OPTION_SCHEMA = {
-        "conf": {"type": float, "default": DEFAULTS["conf"], "description": "Confidence threshold; raise to drop weak/noise boxes."},
-        "nms_iou": {"type": float, "default": DEFAULTS["nms_iou"], "description": "Drop a box overlapping a kept one past this IoU (1.0 = off)."},
-        "contain_thresh": {"type": float, "default": DEFAULTS["contain_thresh"], "description": "Drop a box this fraction nested inside a kept one (IoS; 1.0 = off)."},
+        "conf": {"type": float, "default": 0.6, "description": "Confidence threshold; raise to drop weak/noise boxes."},
+        "nms_iou": {"type": float, "default": 0.6, "description": "Drop a box overlapping a kept one past this IoU (1.0 = off)."},
+        "contain_thresh": {"type": float, "default": 0.85, "description": "Drop a box this fraction nested inside a kept one (IoS; 1.0 = off)."},
     }
     SUPPORTED_SRC = ["ja", "en", "zh", "ko"]
 
@@ -106,9 +104,10 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
             self.load()
         import torch
 
-        conf = float(options.get("conf", DEFAULTS["conf"]))
-        nms_iou = float(options.get("nms_iou", DEFAULTS["nms_iou"]))
-        contain_thresh = float(options.get("contain_thresh", DEFAULTS["contain_thresh"]))
+        options = self.resolve_options(options)
+        conf = options["conf"]
+        nms_iou = options["nms_iou"]
+        contain_thresh = options["contain_thresh"]
 
         img = image.convert("RGB")
         inputs = self._proc(images=img, return_tensors="pt").to(self._device)

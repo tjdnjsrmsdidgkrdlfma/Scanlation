@@ -41,7 +41,7 @@ def test_builds_request_from_tuned_config():
     assert 'text="こんにちは"' in body["prompt"]
     # user's tuned options
     o = body["options"]
-    assert o == {"temperature": 0.0, "seed": 42, "top_p": 1.0, "num_gpu": 31, "num_ctx": 512}
+    assert o == {"temperature": 0.0, "seed": 42, "top_p": 1.0, "num_gpu": 31, "num_ctx": 2048}
 
 
 def test_options_override():
@@ -92,7 +92,7 @@ def test_batch_builds_format_request_and_aligns():
     out = tr.translate_batch(["日本語一", "日本語二"], "ja", "ko", {"model": "m"})
     assert out == ["가", "나"]                              # aligned to input order
     assert captured["format"]["required"] == ["t0", "t1"]  # schema forces exactly 2 keys
-    assert captured["options"]["num_ctx"] == 2048          # batch bumps ctx (single stays 512)
+    assert captured["options"]["num_ctx"] == 2048          # single + batch share one num_ctx (no reload)
     assert 'src="japanese"' in captured["prompt"] and 'dst="korean"' in captured["prompt"]
 
 

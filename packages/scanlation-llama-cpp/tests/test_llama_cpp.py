@@ -35,7 +35,8 @@ def test_builds_openai_chat_request():
     assert 'src="japanese"' in user_msg["content"]
     assert 'dst="korean"' in user_msg["content"]
     assert 'text="こんにちは"' in user_msg["content"]
-    assert b["temperature"] == 0.0 and b["seed"] == 42 and b["top_p"] == 1.0 and b["max_tokens"] == 512
+    assert b["temperature"] == 0.0 and b["seed"] == 42 and b["top_p"] == 1.0
+    assert "max_tokens" not in b  # no explicit output cap; model stops at EOS
 
 
 def test_keep_think_when_disabled():
@@ -85,7 +86,7 @@ def test_batch_builds_response_format_and_aligns():
     rf = captured["response_format"]
     assert rf["type"] == "json_schema"
     assert rf["json_schema"]["schema"]["required"] == ["t0", "t1"]  # exactly 2 keys forced
-    assert captured["max_tokens"] == 1024                            # batch bumps output budget
+    assert "max_tokens" not in captured                             # no cap; JSON grammar bounds output
 
 
 def test_batch_falls_back_on_wrong_length():

@@ -394,8 +394,8 @@ sudo systemctl daemon-reload && sudo systemctl restart ollama
 **Windows (개발 PC):** 시스템 환경 변수에 같은 이름으로 추가(또는 `setx OLLAMA_NUM_PARALLEL 4`) 후
 ollama 재시작(트레이 아이콘 종료 → 재실행). 최신 ollama는 메모리를 보고 자동으로 잡기도 하지만 명시 권장.
 
-**VRAM:** KV캐시 ≈ `num_ctx × OLLAMA_NUM_PARALLEL`. 배치 기본 `num_ctx=2048`이라 4슬롯이면 단일 경로(512)보다
-KV가 크게 늘 수 있다 — `ollama ps` / `nvidia-smi`로 여유를 확인하고 빠듯하면 `OLLAMA_NUM_PARALLEL=2`로.
+**VRAM:** KV캐시 ≈ `num_ctx × OLLAMA_NUM_PARALLEL`. `num_ctx` 기본값은 단일·배치 공통 `2048`(경로 전환 시 모델
+리로드 방지)이라 4슬롯이면 KV가 크게 늘 수 있다 — `ollama ps` / `nvidia-smi`로 여유를 확인하고 빠듯하면 `OLLAMA_NUM_PARALLEL=2`로.
 `NUM_PARALLEL=1`이어도 검출·인식↔번역이 겹쳐 이득이 있고, `>1`이 **생성까지** 병렬화한다.
 배치가 컨텍스트를 넘치거나 JSON 파싱이 깨지면 **말풍선 단위 순차로 자동 폴백**하므로 결과 정확성은 항상 보장된다.
 
