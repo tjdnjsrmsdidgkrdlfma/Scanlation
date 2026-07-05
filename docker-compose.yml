@@ -38,6 +38,10 @@ services:
       SCANLATION_TRANSLATE_CONCURRENCY: ${SCANLATION_TRANSLATE_CONCURRENCY:-4}
       # Log level for scanlation.* (timing/plugin lines). DEBUG for more detail.
       SCANLATION_LOG_LEVEL: ${SCANLATION_LOG_LEVEL:-INFO}
+      # Timezone for log timestamps. The slim base is UTC by default, so %(asctime)s
+      # printed 9h behind KST. `KST-9` is a POSIX TZ string (Korea has no DST), so it
+      # works without the tzdata package. Override via .env for other regions.
+      TZ: ${TZ:-KST-9}
       # Engine source for /admin installs (defaults baked in the image). Pin a
       # tag for reproducible deploys:
       # SCANLATION_ENGINE_REF: v0.1.0
