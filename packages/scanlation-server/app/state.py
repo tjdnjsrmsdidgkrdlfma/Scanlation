@@ -58,7 +58,6 @@ class AppState:
     def _load(self) -> Selection:
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
-            data.pop("device", None)  # legacy global device (removed) -> ignore
             return Selection(**data)
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             return Selection()

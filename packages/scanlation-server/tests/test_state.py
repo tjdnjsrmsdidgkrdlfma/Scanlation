@@ -47,10 +47,6 @@ def test_state_load_falls_back_on_bad_json():
         assert AppState().selection == Selection()  # decode error -> defaults
         path.write_text(json.dumps({"unknown_key": 1}), encoding="utf-8")
         assert AppState().selection == Selection()  # unknown field -> TypeError -> defaults
-        # legacy global `device` key is dropped (migration), not a TypeError
-        path.write_text(json.dumps({"device": "cuda", "lang_src": "en"}), encoding="utf-8")
-        loaded = AppState().selection
-        assert loaded.lang_src == "en" and not hasattr(loaded, "device")
     finally:
         context.base_dir = saved_base
 
