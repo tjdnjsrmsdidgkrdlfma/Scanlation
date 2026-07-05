@@ -147,6 +147,39 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .btn.danger:hover { border-color: var(--danger); }
 .btn.sm { padding: 6px 12px; font-size: 12px; }
 
+/* number stepper (behavior tab): custom −/+ buttons; native spinners hidden so
+   the field matches the themed controls instead of showing raw browser chrome */
+.stepper {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card2);
+}
+.stepper:focus-within { border-color: var(--accent2); }
+.stepper input[type="number"] {
+  flex: 1; width: auto; min-width: 0;
+  border: none; border-radius: 0; background: transparent;
+  text-align: center;
+  -moz-appearance: textfield;   /* Firefox: drop the native spinner */
+}
+.stepper input[type="number"]:focus { outline: none; }
+.stepper input[type="number"]::-webkit-inner-spin-button,
+.stepper input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.step-btn {
+  flex: none; width: 44px;
+  border: none; background: transparent;
+  color: var(--muted);
+  font: inherit; font-size: 18px; line-height: 1;
+  cursor: pointer; user-select: none;
+  transition: background .15s, color .15s;
+}
+.step-btn:first-child { border-right: 1px solid var(--line); }
+.step-btn:last-child { border-left: 1px solid var(--line); }
+.step-btn:hover { background: var(--line); color: var(--txt); }
+.step-btn:active { background: var(--accent2); color: #fff; }
+
 /* engine option blocks */
 .opt-block { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 12px; background: var(--card2); }
 .opt-block h3 { margin: 0 0 4px; font-size: 13px; }

@@ -821,6 +821,20 @@ $("plugins").addEventListener("click", (ev) => {
 });
 $("clear-cache").addEventListener("click", clearCache);
 $("save-behavior").addEventListener("click", saveBehavior);
+// Custom −/+ number steppers (native spinners are hidden in CSS). Each .stepper
+// wraps a −button, a number input, and a +button; a button's data-step is the
+// signed increment. Clamps to the input's min; no max.
+document.querySelectorAll(".stepper").forEach((wrap) => {
+  const input = wrap.querySelector("input");
+  wrap.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".step-btn");
+    if (!btn) return;
+    const step = parseInt(btn.dataset.step, 10) || 0;
+    const cur = parseInt(input.value, 10) || 0;
+    const min = parseInt(input.min, 10);
+    input.value = String(Number.isFinite(min) ? Math.max(min, cur + step) : cur + step);
+  });
+});
 $("gate-form").addEventListener("submit", (ev) => {
   ev.preventDefault();
   setToken($("gate-token").value.trim());

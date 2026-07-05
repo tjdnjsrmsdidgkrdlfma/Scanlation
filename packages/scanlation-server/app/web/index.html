@@ -85,7 +85,11 @@
       <h2><span data-i18n="behavior.h2">동작</span> <span class="hint" data-i18n="behavior.hint">확장 동작 설정</span></h2>
       <div class="row">
         <label class="grow"><span data-i18n="behavior.minDim.label">최소 이미지 변 (px)</span>
-          <input id="min-image-dim" type="number" min="0" step="1" />
+          <div class="stepper">
+            <button type="button" class="step-btn" data-step="-50" aria-label="decrease">−</button>
+            <input id="min-image-dim" type="number" min="0" step="50" inputmode="numeric" />
+            <button type="button" class="step-btn" data-step="50" aria-label="increase">+</button>
+          </div>
         </label>
         <button class="btn primary" id="save-behavior" data-i18n="btn.save">저장</button>
       </div>
