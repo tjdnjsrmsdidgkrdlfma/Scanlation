@@ -39,8 +39,7 @@ class RTDetrDetector(LocalModelEngineBase):
     name = "rtdetr"
     display_name = "comic-text-and-bubble-detector"
     homepage = "https://huggingface.co/ogkalu/comic-text-and-bubble-detector"
-    description = "RT-DETRv2 (ogkalu/comic-text-and-bubble-detector) manga/comic text detector — keeps text_bubble + text_free regions."
-    warning = "Downloads transformers weights (~172MB) on install; needs torch + transformers."
+    description = "RT-DETRv2 (ogkalu/comic-text-and-bubble-detector) comic/manga text & bubble detector. ~172MB."
     OPTION_SCHEMA = {
         "conf": {"type": float, "default": DEFAULTS["conf"], "description": "Confidence threshold; raise to drop weak/noise boxes."},
         "nms_iou": {"type": float, "default": DEFAULTS["nms_iou"], "description": "Drop a box overlapping a kept one past this IoU (1.0 = off)."},
