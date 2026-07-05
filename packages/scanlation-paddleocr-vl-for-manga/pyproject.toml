@@ -12,7 +12,9 @@ dependencies = [
     # PaddleOCR-VL loads via the NATIVE transformers path (AutoModelForImageTextToText,
     # no trust_remote_code); that support landed in transformers 5.x — the repo's own
     # remote code is upstream-broken. So pin >=5.0, not the >=4.45 the other plugins use.
-    "transformers>=5.0",
+    # <5.13 is a shared-env cap: manga-ocr can't load on 5.13 (see its pyproject) and
+    # shares the /plugins transformers. paddleocr_vl is natively supported on 5.12.x.
+    "transformers>=5.0,<5.13",
     "torch",
     "huggingface_hub",
     "pillow",

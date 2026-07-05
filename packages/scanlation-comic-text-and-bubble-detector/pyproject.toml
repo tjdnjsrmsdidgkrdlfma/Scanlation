@@ -9,7 +9,10 @@ description = "RT-DETRv2 comic/manga text-region detector plugin for the Scanlat
 requires-python = ">=3.11"
 dependencies = [
     "scanlation-sdk",
-    "transformers>=4.45",
+    # <5.13 is a shared-env cap: manga-ocr can't load on 5.13 (see its pyproject),
+    # and this plugin shares the /plugins transformers with it, so a reinstall here
+    # must not pull transformers past 5.12.x. RT-DETR works fine on 5.12.x.
+    "transformers>=4.45,<5.13",
     "torch",
     # RT-DETR's AutoImageProcessor requires the torchvision backend; without it
     # load() dies with ImportError on a clean install (the CPU plugins volume had

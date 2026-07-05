@@ -10,12 +10,15 @@ requires-python = ">=3.11"
 dependencies = [
     "scanlation-sdk",
     "manga-ocr",
-    # manga-ocr-base ships a slow-only BertJapaneseTokenizer (no tokenizer.json).
-    # transformers 5.x routes it through the fast/tokenizers backend, whose
-    # slow->fast conversion needs sentencepiece (or tiktoken) present — and
-    # manga-ocr doesn't declare it. Without this the recognizer load raises
-    # "Couldn't instantiate the backend tokenizer ... need sentencepiece".
-    "sentencepiece",
+    # manga-ocr-base's tokenizer is a slow-only BertJapaneseTokenizer (MeCab word +
+    # character subword, no tokenizer.json). transformers 5.13 dropped the slow
+    # fallback and forces the fast/tokenizers backend, which can't build this
+    # tokenizer at all: load() dies with "Couldn't instantiate the backend
+    # tokenizer ... need sentencepiece" — a red herring, sentencepiece and
+    # use_fast=False both fail to help. Cap below 5.13 so the slow tokenizer loads.
+    # 5.12.1 is verified working and also satisfies the detector (>=4.45) and
+    # paddleocr-vl (>=5.0) that share the /plugins env.
+    "transformers<5.13",
 ]
 
 # Auto-discovered by the server registry once installed (no core edit needed).
