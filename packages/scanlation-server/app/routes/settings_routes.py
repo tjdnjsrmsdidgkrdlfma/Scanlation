@@ -1,4 +1,4 @@
-"""Selection endpoints: /set_engines/, /set_languages/, /set_device/.
+"""Selection endpoints: /set_engines/, /set_languages/, /set_engine_device/.
 
 Selection is validated (name must exist / language must be known) but engines
 are NOT eagerly loaded — that happens lazily on first run_pipeline.
@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from scanlation_sdk.context import LANGUAGES
 from ..registry import ROLE_NAMES, registry
-from ..schemas import SetDeviceRequest, SetLanguagesRequest, SetEnginesRequest
+from ..schemas import SetEngineDeviceRequest, SetLanguagesRequest, SetEnginesRequest
 from ..state import state
 
 router = APIRouter()
@@ -38,16 +38,20 @@ def set_languages(req: SetLanguagesRequest) -> dict:
     return {}
 
 
-@router.post("/set_device/")
-async def set_device(req: SetDeviceRequest) -> dict:
-    """Persist the compute device (cpu/cuda) for detector + recognizer. On a real
-    change, drop cached engine instances under the GPU lock so the next request
-    reloads them on the new device; unchanged = no-op (no reload)."""
+@router.post("/set_engine_device/")
+async def set_engine_device(req: SetEngineDeviceRequest) -> dict:
+    """Per-engine compute-device override (empty device removes it -> the engine's
+    DEFAULT_DEVICE). On a real change, drop that engine's cached instance under the
+    GPU lock so its next request reloads on the resolved device."""
     dev = req.device.strip().lower()
-    if dev not in DEVICES:
+    if dev and dev not in DEVICES:
         raise HTTPException(status_code=400, detail=f"device must be one of {DEVICES}")
-    if dev != state.selection.device:
+    if not any(registry.has(role, req.engine) for role in ROLE_NAMES):
+        raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
+    if (dev or None) != state.resolve_device_for(req.engine):
         async with state.gpu_lock:      # no inference mid-flight while we swap
-            state.set_device(dev)       # persist + update shared context.device
-            registry.unload_all()       # next get() reloads on the new device
-    return {"status": "success", "device": state.selection.device}
+            state.set_engine_device(req.engine, dev or None)
+            for role in ROLE_NAMES:
+                if registry.has(role, req.engine):
+                    registry.unload_one(role, req.engine)
+    return {"status": "success", "device": state.resolve_device_for(req.engine) or ""}

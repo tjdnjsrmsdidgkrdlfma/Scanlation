@@ -83,8 +83,8 @@ def _read_sync(img, plan: RunPlan):
     concurrent translate path never touches registry.get and the lazily-created
     client is ready before any concurrent request uses it.
     """
-    detector = registry.get("detector", plan.detector)
-    recognizer = registry.get("recognizer", plan.recognizer)
+    detector = registry.get("detector", plan.detector, device=state.resolve_device_for(plan.detector))
+    recognizer = registry.get("recognizer", plan.recognizer, device=state.resolve_device_for(plan.recognizer))
     translator = registry.get("translator", plan.translator)
     recognized = detect_and_recognize(
         img, detector=detector, recognizer=recognizer,

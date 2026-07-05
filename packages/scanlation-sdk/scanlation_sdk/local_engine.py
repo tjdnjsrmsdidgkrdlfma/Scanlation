@@ -20,6 +20,14 @@ class LocalModelEngineBase(EngineBase):
     # Class default so a subclass that skips super().__init__() is still safe
     # (engine_meta.safe_is_installed instantiates throwaway cls()).
     _loaded: bool = False
+    # Compute device this engine loads onto when the user sets no override —
+    # the code default, like an OPTION_SCHEMA option's `default`. Subclasses
+    # override (paddleocrvl -> "cuda"); cpu-viable engines keep "cpu".
+    DEFAULT_DEVICE: str = "cpu"
+    # Per-engine device override injected by the registry from admin state;
+    # None -> DEFAULT_DEVICE. Class default keeps super().__init__()-skipping
+    # subclasses safe, same as _loaded.
+    _device_override: str | None = None
 
     # --- subclass hooks ---
     def _download(self) -> None:
@@ -45,7 +53,7 @@ class LocalModelEngineBase(EngineBase):
             return
         if not self.is_installed():
             raise RuntimeError(f"{self.name} weights not installed. {self.INSTALL_HINT}")
-        self._load(pick_device())
+        self._load(pick_device(self._device_override or self.DEFAULT_DEVICE))
         self._loaded = True
 
     def unload(self) -> None:

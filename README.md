@@ -141,8 +141,8 @@ cd packages/scanlation-server
 ../../venv/Scripts/python -m uvicorn app.main:app --host 0.0.0.0 --port 4000
 ```
 **엔진·모델·언어·프롬프트·연산 장치는 전부 `/admin`에서 선택**합니다(→ `state.json`에 영속, 다음 기동부터 기본값).
-실행 명령엔 플래그·env가 없습니다. **검출·인식을 CPU/GPU 중 어디서 돌릴지도 `/admin`(모델·언어 탭)에서 고릅니다**
-(기본 CPU; GPU 저장 시 모델을 새 장치로 재로드). `SCANLATION_DEVICE`는 최초 1회 시드일 뿐 그 뒤엔 `/admin`이 소유.
+실행 명령엔 플래그·env가 없습니다. **연산 장치(CPU/GPU)는 `/admin`(엔진 옵션 탭)에서 엔진마다 따로 고릅니다**
+(비우면 각 엔진의 코드 기본값 — paddleocrvl은 GPU, rtdetr·mangaocr은 CPU; 저장 시 그 엔진만 새 장치로 재로드).
 첫 실엔진 요청은 느림(RT-DETR transformers + manga-ocr 모델 로드); 같은 이미지 재요청은 md5 캐시로 즉시.
 
 ### 관리자 페이지 (`/admin`)
@@ -228,7 +228,6 @@ cd packages/scanlation-server
 
 | 변수 | 기본 | 의미 |
 |---|---|---|
-| `SCANLATION_DEVICE` | `cpu` | 검출·인식 연산 장치의 **최초 시드**: `cpu` / `cuda`(ROCm도 cuda로 보고됨). 이후 `/admin`(모델·언어 탭)이 덮어씀(→ `state.json`). GPU 불가 시 항상 CPU fallback |
 | `SCANLATION_AUTH_TOKEN` | (빈 값) | 설정 시 모든 API·admin이 `X-Auth-Token` 헤더를 요구(빈 값=무인증). 확장 팝업·`/admin`에 같은 값 입력. `OPTIONS`·`/admin` 정적은 면제 |
 | `SCANLATION_TRANSLATE_CONCURRENCY` | `4` | 동시에 번역할 이미지 수(번역은 GPU 락 밖에서 실행). 호스트 ollama의 `OLLAMA_NUM_PARALLEL`과 맞춤 |
 | `SCANLATION_LOG_LEVEL` | `INFO` | `scanlation.*` 로거 레벨(서드파티는 root WARNING으로 고정). access 로그는 자체 미들웨어가 타임스탬프+소요시간(`METHOD PATH -> STATUS Nms`)으로 대체. `DEBUG`로 상세화 |
@@ -315,8 +314,8 @@ ollama pull <your-model>           # ollama 모델 (별도 서비스)
 python -m uvicorn app.main:app --host 0.0.0.0 --port 4001
 #  확인:  curl -s http://127.0.0.1:4001/ | head -c 150
 ```
-> 검출·인식을 GPU에서 돌리려면 `/admin` **모델·언어 탭**의 연산 장치를 GPU로 저장하면 됨(기본 CPU).
-> `SCANLATION_DEVICE=cuda`를 앞에 붙이는 건 최초 시드일 뿐 — 이후엔 `/admin`이 소유.
+> 검출·인식을 GPU에서 돌리려면 `/admin` **엔진 옵션 탭**에서 해당 엔진의 연산 장치를 GPU로 저장하면 됨
+> (비우면 엔진 기본값 — paddleocrvl은 GPU, rtdetr·mangaocr은 CPU).
 
 **2) `/admin`에서 설정** (SSH 터널 뒤 브라우저 → 3번의 터널 사용):
 `http://127.0.0.1:4001/admin` → **모델·언어 탭**에서 detector `rtdetr` · recognizer `mangaocr` ·

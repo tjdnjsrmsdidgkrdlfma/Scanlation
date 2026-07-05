@@ -27,8 +27,10 @@ const I18N = {
     "models.hint": "마지막 선택이 서버에 저장되어 기본값이 됩니다",
     "models.src": "원문",
     "models.dst": "번역",
-    "models.device": "연산 장치",
-    "models.device.desc": "검출·인식을 어느 장치에서 돌릴지 정합니다. 저장하면 모델을 새 장치로 다시 로드합니다. GPU는 VRAM 여유가 있을 때만 고르세요(LLM과 별개).",
+    "models.deviceNote": "엔진별 연산 장치(CPU/GPU)는 「엔진 옵션」 탭에서 엔진마다 따로 정합니다. 비워두면 각 엔진의 기본값을 씁니다.",
+    "optdev.label": "연산 장치",
+    "optdev.default": "기본값",
+    "optdev.desc": "이 엔진만 다른 장치에서 로드 (비우면 엔진 기본값)",
     "btn.save": "저장",
     "prompt.h2": "번역 프롬프트",
     "prompt.hint": "LLM 시스템 프롬프트를 고르거나 직접 편집",
@@ -114,8 +116,10 @@ const I18N = {
     "models.hint": "Your last choice is saved on the server as the default",
     "models.src": "Source",
     "models.dst": "Target",
-    "models.device": "Compute device",
-    "models.device.desc": "Which device runs detection + recognition. Saving reloads the models on the new device. Pick GPU only when VRAM is free (separate from the LLM).",
+    "models.deviceNote": "Per-engine compute device (CPU/GPU) is set per engine in the Engine Options tab. Leave blank to use each engine's default.",
+    "optdev.label": "Device",
+    "optdev.default": "Default",
+    "optdev.desc": "Load just this engine on a specific device (blank = engine default)",
     "btn.save": "Save",
     "prompt.h2": "Translation prompt",
     "prompt.hint": "Pick or edit the LLM system prompt",
@@ -315,7 +319,6 @@ function renderModels() {
     sel.innerHTML = installed.map(engineOption).join("");
     sel.value = DATA.selection[role];
   }
-  $("sel-device").value = DATA.selection.device;
 }
 
 function renderLangs() {
@@ -381,19 +384,31 @@ function fieldInput(engine, opt, spec, value) {
   return `<label>${opt} <span class="desc">${optDesc(engine, opt, spec.description)}</span>
     <input type="${inputType}"${step} data-opt="${opt}" data-type="${type}" value="${val}" placeholder="${ph}"/></label>`;
 }
+// Per-engine device <select> — only for engines that load onto a device
+// (uses_device); "" = the engine's DEFAULT_DEVICE. Saved as [data-engine-device]
+// so collectOptions ([data-opt]) never lumps it into the options payload.
+function deviceField(e) {
+  if (!e.uses_device) return "";
+  const cur = e.device || "";
+  const o = (val, label) => `<option value="${val}"${cur === val ? " selected" : ""}>${label}</option>`;
+  const dflt = `${t("optdev.default")} (${(e.default_device || "cpu").toUpperCase()})`;
+  return `<label class="opt-device"><span>${t("optdev.label")}</span> <span class="desc">${t("optdev.desc")}</span>
+    <select data-engine-device>${o("", dflt)}${o("cpu", "CPU")}${o("cuda", "GPU")}</select></label>`;
+}
 function optBlock(role, e) {
   const schema = e.schema || {};
   const keys = Object.keys(schema);
-  let fields = `<p class="opt-empty">${t("options.none")}</p>`;
-  if (keys.length) {
-    fields = `<div class="opt-fields">` +
-      keys.map((k) => fieldInput(e.name, k, schema[k], e.options[k])).join("") +
-      `</div><button class="btn primary sm" data-save-engine="${e.name}">${t("btn.save")}</button>`;
-  }
+  const dev = deviceField(e);
+  const fieldsHtml = keys.length
+    ? `<div class="opt-fields">` +
+        keys.map((k) => fieldInput(e.name, k, schema[k], e.options[k])).join("") + `</div>`
+    : (dev ? "" : `<p class="opt-empty">${t("options.none")}</p>`);
+  const saveBtn = (keys.length || dev)
+    ? `<button class="btn primary sm" data-save-engine="${e.name}">${t("btn.save")}</button>` : "";
   return `<div class="opt-block" data-engine="${e.name}">
       <span class="role">${role}</span>
       <h3>${e.display_name}</h3>
-      ${fields}
+      ${dev}${fieldsHtml}${saveBtn}
     </div>`;
 }
 function renderEngineOptions() {
@@ -497,7 +512,6 @@ async function saveModels() {
       translator: $("sel-translator").value,
     });
     await postJSON("/set_languages/", { lang_src: $("sel-lang_src").value, lang_dst: $("sel-lang_dst").value });
-    await postJSON("/set_device/", { device: $("sel-device").value });
     toast(t("toast.modelsSaved"), "ok");
     await load();
   } catch (e) { toast(t("toast.saveFail", { msg: e.message }), "err"); }
@@ -532,6 +546,8 @@ async function deletePrompt() {
 async function saveEngineOptions(engine, blockEl) {
   try {
     await postJSON("/set_options/", { engine, options: collectOptions(blockEl) });
+    const devSel = blockEl.querySelector("[data-engine-device]");
+    if (devSel) await postJSON("/set_engine_device/", { engine, device: devSel.value });
     toast(t("toast.optionsSaved", { engine }), "ok");
     await load();
   } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }

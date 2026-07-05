@@ -19,31 +19,32 @@ def test_set_languages_validates():
     assert c.post("/set_languages/", json={"lang_src": "xx", "lang_dst": "ko"}).status_code == 400
 
 
-def test_set_device_switches_and_validates():
-    """Device is a persisted global (detector + recognizer); switching it drops
-    cached engine instances so the next request reloads on the new device."""
-    from scanlation_sdk.context import context
+def test_set_engine_device_validates():
+    """Per-engine device override: set it, remove it (empty -> engine default),
+    reject a bad device and an unknown engine. A real change drops that engine's
+    cached instance so it reloads on the resolved device."""
     from app.state import state
 
     c = client()
-    saved = state.selection.device
     try:
-        r = c.post("/set_device/", json={"device": "cuda"})
+        r = c.post("/set_engine_device/", json={"engine": "dummy", "device": "cuda"})
         assert r.status_code == 200 and r.json()["device"] == "cuda"
-        # persisted + surfaced to the admin, and the shared context is updated
-        assert c.get("/get_settings/").json()["selection"]["device"] == "cuda"
-        assert context.device == "cuda"
-        assert c.post("/set_device/", json={"device": "cpu"}).json()["device"] == "cpu"
+        assert state.resolve_device_for("dummy") == "cuda"
+        # blank removes the override -> back to the engine's DEFAULT_DEVICE
+        assert c.post("/set_engine_device/", json={"engine": "dummy", "device": ""}).json()["device"] == ""
+        assert state.resolve_device_for("dummy") is None
         # unknown device -> 400
-        assert c.post("/set_device/", json={"device": "tpu"}).status_code == 400
+        assert c.post("/set_engine_device/", json={"engine": "dummy", "device": "tpu"}).status_code == 400
+        # unknown engine -> 400
+        assert c.post("/set_engine_device/", json={"engine": "nope", "device": "cpu"}).status_code == 400
     finally:
-        state.set_device(saved)
+        state.set_engine_device("dummy", None)
 
 
 TESTS = [
     test_set_engines_validates,
     test_set_languages_validates,
-    test_set_device_switches_and_validates,
+    test_set_engine_device_validates,
 ]
 
 if __name__ == "__main__":

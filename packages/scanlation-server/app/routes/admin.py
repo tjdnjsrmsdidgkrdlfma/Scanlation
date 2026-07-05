@@ -51,6 +51,7 @@ def _engine_entries(role: str) -> list[dict]:
             "installed_package": True,
             "schema": serialize_schema(cls),
             "options": dict(state.selection.options.get(name, {})),
+            "device": state.selection.devices.get(name, ""),
         })
     installed_names = {e["name"] for e in entries}
     for name, entry in catalog().items():
@@ -62,10 +63,13 @@ def _engine_entries(role: str) -> list[dict]:
             "description": entry.description,
             "warning": None,
             "homepage": None,
+            "uses_device": False,
+            "default_device": "cpu",
             "installed": False,
             "installed_package": False,
             "schema": {},
             "options": {},
+            "device": "",
         })
     return entries
 
@@ -83,7 +87,6 @@ def get_settings() -> dict:
             "translator": sel.translator,
             "lang_src": sel.lang_src,
             "lang_dst": sel.lang_dst,
-            "device": sel.device,
             "prompt_active": sel.prompt_active,
             "min_image_dim": sel.min_image_dim,
         },

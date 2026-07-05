@@ -1,9 +1,10 @@
 """Plugin-facing runtime context: the slice of config engine plugins need —
-where model weights live (``models_dir``), which compute device to prefer
-(``device``), and the language tables. Read from the same env vars the server
-core uses (``SCANLATION_MODELS_DIR`` / ``SCANLATION_DEVICE`` /
-``SCANLATION_BASE_DIR``), so this is the single source of truth for both core
-and plugins — no drift. Self-contained: never imports the server package.
+where model weights live (``models_dir``) and the language tables. Read from the
+same env vars the server core uses (``SCANLATION_MODELS_DIR`` /
+``SCANLATION_BASE_DIR``), so this is the single source of truth for both core and
+plugins — no drift. Self-contained: never imports the server package. Per-engine
+compute device is not here — it lives in each engine's DEFAULT_DEVICE + admin
+override (there is no global device).
 """
 from __future__ import annotations
 
@@ -29,14 +30,13 @@ def _env(name: str, default: str) -> str:
 
 @dataclass
 class Context:
-    """Filesystem + device config shared by the core and every engine plugin.
+    """Filesystem config shared by the core and every engine plugin.
 
-    ``device`` selects the preferred onnxruntime/torch provider (engines always
-    keep a CPU fallback). ``base_dir`` defaults to the current working directory
-    (the server is launched from its package dir; Docker/tests set it via env).
+    ``base_dir`` defaults to the current working directory (the server is
+    launched from its package dir; Docker/tests set it via env). Per-engine
+    compute device is not here — see the module docstring.
     """
 
-    device: str = field(default_factory=lambda: _env("SCANLATION_DEVICE", "cpu"))
     base_dir: Path = field(
         default_factory=lambda: Path(_env("SCANLATION_BASE_DIR", str(Path.cwd())))
     )

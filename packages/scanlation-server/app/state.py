@@ -13,8 +13,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from scanlation_sdk.context import context
-
 from .config import settings
 
 
@@ -25,13 +23,12 @@ class Selection:
     translator: str = settings.default_translator
     lang_src: str = settings.default_lang_src
     lang_dst: str = settings.default_lang_dst
-    # Compute device for the in-process engines (detector + recognizer): "cpu" or
-    # "cuda" (rocm reports as cuda too). Seeded once from SCANLATION_DEVICE, then
-    # the /admin 모델 tab owns it — no launch flag needed. LLM engines are separate
-    # processes and ignore this.
-    device: str = settings.device
     # {engine_name: {opt: val}} overrides applied on top of schema defaults.
     options: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # {engine_name: "cpu"|"cuda"} per-engine compute-device override. Absent -> the
+    # engine's DEFAULT_DEVICE (its code default). Only in-process engines (detector
+    # + recognizer) honor it; LLM engines are separate processes and ignore it.
+    devices: dict[str, str] = field(default_factory=dict)
     # Active LLM system-prompt preset name (see app.prompts) + user-saved presets.
     prompt_active: str = "default"
     prompts: dict[str, str] = field(default_factory=dict)
@@ -47,9 +44,6 @@ class AppState:
         self._path: Path = settings.data_dir / "state.json"
         self._lock = threading.Lock()
         self.selection = self._load()
-        # Apply the persisted device to the shared context so engines (which read
-        # context.device at load()) honor the admin choice, not just the env seed.
-        context.device = self.selection.device
         # Single GPU lock: detect + recognize share one device. Translation
         # (ollama) is a separate process and runs outside this lock so one image's
         # translate overlaps the next image's detect+recognize.
@@ -64,6 +58,7 @@ class AppState:
     def _load(self) -> Selection:
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
+            data.pop("device", None)  # legacy global device (removed) -> ignore
             return Selection(**data)
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             return Selection()
@@ -88,13 +83,21 @@ class AppState:
         self.selection.lang_dst = lang_dst
         self.save()
 
-    def set_device(self, device: str) -> None:
-        """Persist the compute device and update the shared context so the next
-        engine load() lands on it. The caller must drop cached engine instances
-        (registry.unload_all) so already-loaded models reload on the new device."""
-        self.selection.device = device
-        context.device = device
+    def set_engine_device(self, engine_name: str, device: str | None) -> None:
+        """Persist a per-engine compute-device override. Empty/None removes it, so
+        the engine falls back to its DEFAULT_DEVICE. The caller must drop that
+        engine's cached instance (registry.unload_one) so it reloads on the new
+        device."""
+        if device:
+            self.selection.devices[engine_name] = device
+        else:
+            self.selection.devices.pop(engine_name, None)
         self.save()
+
+    def resolve_device_for(self, engine_name: str) -> str | None:
+        """The per-engine device override, or None to let the engine use its
+        DEFAULT_DEVICE (there is no global device)."""
+        return self.selection.devices.get(engine_name)
 
     def set_client_config(self, *, min_image_dim: int | None = None) -> None:
         """Persist extension-behavior settings (the /admin 동작 tab)."""

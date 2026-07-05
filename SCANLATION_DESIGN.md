@@ -296,7 +296,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 3. **CTD ONNX 디코딩 미검증** *(rtdetr 교체로 해소):* 출력 이름/순서, thresh/unclip/NMS, letterbox 좌표역변환을 실제 모델+레퍼런스 `inference.py`로 확인 필수. 최대 미지수 — P3에 실시간 확보, `visualize.py`를 먼저 만들어 육안 검증.
 4. **라이선스(중요):** manga-image-translator=GPLv3 → `get_transformed_region` **복사 시 우리 서버도 GPLv3 전염**. deskew는 표준 homography → **알고리즘 설명만 보고 OpenCV 프리미티브로 독립 재구현**(§3.5). manga-ocr=Apache-2.0(런타임 의존 OK). comic-text-detector 가중치 라이선스는 번들 전 확인. 구 Crivella 코드(GPLv3)는 **학습만, 복사 금지**. → **프로젝트 라이선스 미정(TBD)**, 단 트리에 GPLv3 코드 미포함, 런타임 의존만.
 5. **세로/방향 정확성:** "기울기는 펴되 세로는 세로 유지"는 실제 세로 일본어+기울어진 SFX로 경험적 검증 필요 → visualize.py + crop 덤프로 P3~P4 튜닝.
-6. **디바이스 배치는 런타임 정책(계약 아님) — 구현됨:** 검출(rtdetr)+인식(manga-ocr)을 하나의 **전역 연산 장치** 설정(`cpu`/`cuda`)으로 함께 전환하도록 `/admin`(모델·언어 탭)에 노출. `state.json`에 영속(`SCANLATION_DEVICE`는 최초 시드만), 변경 시 `context.device` 갱신 + `registry.unload_all()`로 다음 요청에 새 장치 재로드. LLM(ollama)은 별도 프로세스라 이 설정과 무관. (원안의 "엔진별 독립 설정"은 불필요 — 검출·인식은 항상 같이 옮기고 싶었음: LLM만 GPU, 나머지 CPU.)
+6. **디바이스 배치는 런타임 정책(계약 아님) — 엔진별로 구현됨:** 연산 장치(`cpu`/`cuda`)를 **엔진마다 따로** `/admin`(엔진 옵션 탭)에서 지정. 전역 설정은 없다 — 각 엔진이 코드 기본값(`LocalModelEngineBase.DEFAULT_DEVICE`; paddleocrvl=`cuda`, 나머지=`cpu`, `OPTION_SCHEMA`의 `default`와 같은 방식)을 갖고, admin override는 `state.selection.devices[engine]`에 영속. resolve는 `override or DEFAULT_DEVICE` → `pick_device(hint)`가 cuda 불가 시 cpu fallback. 변경 시 그 엔진만 `registry.unload_one`으로 재로드. LLM(ollama)은 별도 프로세스라 무관. (초기엔 전역 단일 설정이었으나 "device는 엔진별 속성"이라는 원칙으로 엔진별 override로 전환하며 `SCANLATION_DEVICE` env도 제거.)
 7. **uvicorn 단일 워커** 필수(VRAM 모델 1벌) → 프로세스 병렬 없음; asyncio 락+threadpool로 단일사용자 충분(멀티유저 원하면 재검토).
 8. **프로젝트 이름 결정:** `Scanlation` — 폴더/패키지/도커명에 반영됨.
 

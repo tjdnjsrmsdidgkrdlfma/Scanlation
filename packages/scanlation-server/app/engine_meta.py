@@ -44,4 +44,9 @@ def class_meta(cls, name: str) -> dict:
         "description": getattr(cls, "description", ""),
         "warning": getattr(cls, "warning", None),
         "homepage": getattr(cls, "homepage", None),
+        # LocalModelEngineBase subclasses (local torch engines) declare
+        # DEFAULT_DEVICE; HTTP translators / fakes don't. Duck-typed so the core
+        # needn't import the plugin-facing local_engine module (see its docstring).
+        "uses_device": hasattr(cls, "DEFAULT_DEVICE"),
+        "default_device": getattr(cls, "DEFAULT_DEVICE", "cpu"),
     }

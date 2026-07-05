@@ -33,9 +33,10 @@ class SetLanguagesRequest(BaseModel):
     lang_dst: str
 
 
-# --- /set_device/ -----------------------------------------------------------
-class SetDeviceRequest(BaseModel):
-    device: str                          # "cpu" or "cuda" (rocm reports as cuda)
+# --- /set_engine_device/ ----------------------------------------------------
+class SetEngineDeviceRequest(BaseModel):
+    engine: str
+    device: str = ""                     # "cpu"/"cuda"; "" removes the override -> DEFAULT_DEVICE
 
 
 # --- /install_plugins/ ------------------------------------------------------

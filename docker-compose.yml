@@ -24,12 +24,10 @@ services:
       - plugins:/plugins   # runtime-installed engine packages (survive recreation)
       - data:/data         # state.json, sqlite cache, model weights, HF cache
     environment:
-      # First-run SEED for the detection+recognition device (cpu/cuda). After the
-      # first launch /admin (모델·언어 탭) owns it via state.json, so this only sets
-      # the initial value. Stays cpu here so detect/recognize leave VRAM for the LLM;
-      # flip to GPU in /admin once there's headroom (a GPU-capable torch is needed —
-      # this image installs CPU torch by default).
-      SCANLATION_DEVICE: cpu
+      # Compute device (CPU/GPU) is chosen per-engine in /admin (engine options),
+      # each engine having a code default (paddleocrvl=GPU, others=CPU) — not an
+      # env here. A GPU-capable torch is a host-level install; this image ships CPU
+      # torch by default.
       # Public deploy: require the X-Auth-Token header on the API + admin. Put the
       # secret in a gitignored .env next to this file (SCANLATION_AUTH_TOKEN=...);
       # empty/absent = no auth. Enter the same value in the extension popup + /admin.

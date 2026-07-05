@@ -25,7 +25,6 @@ ENV PYTHONUNBUFFERED=1 \
     SCANLATION_PLUGINS_DIR=/plugins \
     PYTHONPATH=/plugins \
     HF_HOME=/data/hf \
-    SCANLATION_DEVICE=cpu \
     SCANLATION_ENGINE_REPO=https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git \
     SCANLATION_ENGINE_REF=main
 

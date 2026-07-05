@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from scanlation_sdk.context import context
 from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
 from scanlation_sdk.device import pick_device
 from scanlation_sdk.local_engine import LocalModelEngineBase
@@ -44,33 +43,22 @@ def test_dummy_detector_emits_rotated_region():
 
 # --- SDK device policy (shared by every local-model engine) ----------------
 def test_pick_device_cpu_is_pinned():
-    """device 'cpu' -> always CPU, regardless of GPU presence (case-insensitive)."""
-    saved = context.device
-    try:
-        context.device = "cpu"
-        assert pick_device() == "cpu"
-        context.device = "CPU"
-        assert pick_device() == "cpu"
-    finally:
-        context.device = saved
+    """hint 'cpu' -> always CPU, regardless of GPU presence (case-insensitive)."""
+    assert pick_device("cpu") == "cpu"
+    assert pick_device("CPU") == "cpu"
 
 
 def test_pick_device_gpu_uses_cuda_when_available():
-    """device != 'cpu' -> cuda if torch reports it, else a safe CPU fallback.
+    """hint != 'cpu' -> cuda if torch reports it, else a safe CPU fallback.
     Computed against the same torch check so it's deterministic on any host."""
-    saved = context.device
+    expected = "cpu"
     try:
-        context.device = "cuda"
-        expected = "cpu"
-        try:
-            import torch
-            if torch.cuda.is_available():
-                expected = "cuda"
-        except Exception:  # noqa: BLE001 - no torch -> stays cpu
-            pass
-        assert pick_device() == expected
-    finally:
-        context.device = saved
+        import torch
+        if torch.cuda.is_available():
+            expected = "cuda"
+    except Exception:  # noqa: BLE001 - no torch -> stays cpu
+        pass
+    assert pick_device("cuda") == expected
 
 
 # --- LocalModelEngineBase lifecycle -----------------------------------------
@@ -126,6 +114,42 @@ def test_local_engine_lifecycle():
     assert e.loads == 2
 
 
+def test_local_engine_device_override():
+    """No override -> load() resolves DEFAULT_DEVICE; _device_override wins when set.
+    pick_device is stubbed to identity so the hint reaching _load is observable
+    (a real GPU-less host would otherwise fold cuda -> cpu)."""
+    import scanlation_sdk.local_engine as le
+
+    class Fake(LocalModelEngineBase):
+        name = "fake"
+        DEFAULT_DEVICE = "cuda"
+
+        def is_installed(self):
+            return True
+
+        def _download(self):
+            pass
+
+        def _load(self, device):
+            self.dev = device
+
+        def _unload(self):
+            self.dev = None
+
+    orig = le.pick_device
+    le.pick_device = lambda hint: hint  # identity: observe the hint, not the GPU probe
+    try:
+        e = Fake()
+        e.load()
+        assert e.dev == "cuda"      # DEFAULT_DEVICE when no override
+        e.unload()
+        e._device_override = "cpu"
+        e.load()
+        assert e.dev == "cpu"       # per-engine override wins
+    finally:
+        le.pick_device = orig
+
+
 TESTS = [
     test_region_from_bbox_shape_and_wire,
     test_region_from_quad_bbox_is_enclosing,
@@ -134,6 +158,7 @@ TESTS = [
     test_pick_device_cpu_is_pinned,
     test_pick_device_gpu_uses_cuda_when_available,
     test_local_engine_lifecycle,
+    test_local_engine_device_override,
 ]
 
 if __name__ == "__main__":

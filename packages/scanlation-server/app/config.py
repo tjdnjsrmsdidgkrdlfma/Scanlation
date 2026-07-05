@@ -1,7 +1,7 @@
 """Static configuration + environment settings.
 
 No pydantic-settings dependency: a small dataclass read from env keeps the core
-import-light. The plugin-facing slice (models_dir, device, language tables) lives
+import-light. The plugin-facing slice (models_dir, language tables) lives
 in ``scanlation_sdk.context`` — the single source shared with engine plugins;
 this module delegates to it so there's no drift. The handshake never loads a
 model, so config must not depend on any engine.
@@ -57,12 +57,8 @@ class Settings:
         default_factory=lambda: int(_env("SCANLATION_MIN_IMAGE_DIM", "80"))
     )
 
-    # --- filesystem + device: delegated to the shared SDK context (single env
-    #     source of truth, also read by every engine plugin) ---
-    @property
-    def device(self) -> str:
-        return context.device
-
+    # --- filesystem: delegated to the shared SDK context (single env source of
+    #     truth, also read by every engine plugin) ---
     @property
     def base_dir(self) -> Path:
         return context.base_dir

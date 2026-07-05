@@ -65,24 +65,28 @@ class Registry:
         return self._classes
 
     # --- lazy instance (loads weights on first use) ---
-    def get(self, role: str, name: str) -> Any:
+    def get(self, role: str, name: str, device: str | None = None) -> Any:
         key = (role, name)
         if key not in self._instances:
             inst = self._classes[role][name]()
+            if device is not None:
+                # Per-engine override; honored by LocalModelEngineBase.load(),
+                # ignored by engines that don't load onto a device (translators).
+                inst._device_override = device
             inst.load()
             self._instances[key] = inst
         return self._instances[key]
 
-    def unload_all(self) -> None:
-        """Unload and forget every cached instance so the next get() re-instantiates
-        and reloads it. Used when the compute device changes (models must move to
-        the new device). Call under the GPU lock so no inference is mid-flight."""
-        for inst in self._instances.values():
+    def unload_one(self, role: str, name: str) -> None:
+        """Unload + forget a single cached instance so its next get() reloads it
+        (e.g. after its per-engine device override changed). No-op if not loaded.
+        Call under the GPU lock so no inference is mid-flight on it."""
+        inst = self._instances.pop((role, name), None)
+        if inst is not None:
             try:
                 inst.unload()
             except Exception:  # noqa: BLE001 - a broken unload must not block the switch
                 pass
-        self._instances.clear()
 
 
 ensure_on_path()  # volume-installed engine packages are importable before discovery

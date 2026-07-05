@@ -43,14 +43,9 @@
           <label><span data-i18n="models.src">원문</span><select id="sel-lang_src"></select></label>
           <label><span data-i18n="models.dst">번역</span><select id="sel-lang_dst"></select></label>
         </div>
-        <label><span data-i18n="models.device">연산 장치</span>
-          <select id="sel-device">
-            <option value="cpu">CPU</option>
-            <option value="cuda">GPU</option>
-          </select></label>
         <button class="btn primary" id="save-models" data-i18n="btn.save">저장</button>
       </div>
-      <p class="note" data-i18n="models.device.desc">검출·인식을 어느 장치에서 돌릴지 정합니다. 저장하면 모델을 새 장치로 다시 로드합니다. GPU는 VRAM 여유가 있을 때만 고르세요(LLM과 별개).</p>
+      <p class="note" data-i18n="models.deviceNote">엔진별 연산 장치(CPU/GPU)는 「엔진 옵션」 탭에서 엔진마다 따로 정합니다. 비워두면 각 엔진의 기본값을 씁니다.</p>
     </section>
 
     <!-- 번역 프롬프트 -->

@@ -36,6 +36,7 @@ class PaddleOcrVLRecognizer(LocalModelEngineBase):
     homepage = "https://huggingface.co/jzhang533/PaddleOCR-VL-For-Manga"
     description = "PaddleOCR-VL manga fine-tune (0.9B VLM). Best bake-off accuracy. ~1.8GB."
     warning = "GPU recommended — CPU ~60s/crop."
+    DEFAULT_DEVICE = "cuda"  # GPU-intended (CPU ~60s/crop); overridable per-engine in /admin
     OPTION_SCHEMA = {
         "max_new_tokens": {"type": int, "default": 1024,
                            "description": "Max output tokens per crop; lower to cap runaway generation."},

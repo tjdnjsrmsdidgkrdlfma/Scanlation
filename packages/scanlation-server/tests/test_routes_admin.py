@@ -14,6 +14,9 @@ def test_get_settings_shape():
     det = {e["name"]: e for e in d["engines"]["detector"]}
     assert "dummy" in det and "num_boxes" in det["dummy"]["schema"]
     assert det["dummy"]["schema"]["num_boxes"]["type"] == "int"
+    # per-engine device fields: the fake is EngineBase-only, so it doesn't use a device
+    assert det["dummy"]["uses_device"] is False
+    assert "device" in det["dummy"] and det["dummy"]["default_device"] == "cpu"
 
 
 def test_get_settings_merges_catalog():

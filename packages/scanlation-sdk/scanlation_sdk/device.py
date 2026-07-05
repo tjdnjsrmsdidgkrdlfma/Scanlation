@@ -6,15 +6,13 @@ torch is imported lazily so the SDK keeps its thin dependency set.
 """
 from __future__ import annotations
 
-from scanlation_sdk.context import context
 
-
-def pick_device() -> str:
-    """Honor context.device (the /admin-set, SCANLATION_DEVICE-seeded hint):
-    'cpu' pins CPU; anything else means GPU — cuda if actually available, else
-    CPU fallback. One switch moves detector + recognizer together. (A ROCm
-    torch build reports cuda.)"""
-    if context.device.lower() == "cpu":
+def pick_device(hint: str) -> str:
+    """Resolve a device hint to an actual torch device: 'cpu' pins CPU; anything
+    else means GPU — cuda if actually available, else CPU fallback. The hint is
+    an engine's per-engine override or its DEFAULT_DEVICE (there is no global
+    device). (A ROCm torch build reports cuda.)"""
+    if hint.lower() == "cpu":
         return "cpu"
     try:
         import torch
