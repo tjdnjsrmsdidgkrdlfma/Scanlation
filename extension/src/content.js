@@ -201,8 +201,15 @@
     img.style.margin = "0";
     img.style.maxWidth = "100vw";    // fit viewport; boxes are % so they scale with it
     img.style.height = "auto";
+    // The UA centered the lone image both ways (margin:auto + inset:0). Match
+    // that so enabling the overlay doesn't shift the image: the earlier fix
+    // restored horizontal centering (textAlign) but not vertical, so short
+    // images jumped up to the flow top.
     document.body.style.margin = "0";
-    document.body.style.textAlign = "center"; // center the inline-block wrapper
+    document.body.style.minHeight = "100vh";
+    document.body.style.display = "flex";
+    document.body.style.justifyContent = "center"; // horizontal
+    document.body.style.alignItems = "center";     // vertical
   }
 
   function wrap(img) {
