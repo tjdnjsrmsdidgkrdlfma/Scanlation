@@ -1,7 +1,7 @@
 """Runtime plugin installation — pip-install a plugin's package on demand.
 
-The core image/venv ships NO engine. Real engines (rtdetr/mangaocr/ollama/
-llamacpp) are separate pip packages that live in this monorepo but are NOT in the
+The core image/venv ships NO engine. Real engines (comic-text-and-bubble-detector/
+manga-ocr/Ollama/llama.cpp) are separate pip packages that live in this monorepo but are NOT in the
 core image. The admin "install" button (``POST /install_plugins/``) pip-installs
 the chosen one into a persistent, ``sys.path``-ed dir (``SCANLATION_PLUGINS_DIR``,
 a mounted volume in Docker) — pulling the package + its heavy backend deps

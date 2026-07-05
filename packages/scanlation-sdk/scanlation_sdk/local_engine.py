@@ -1,5 +1,5 @@
 """LocalModelEngineBase — shared lifecycle for engines whose weights live
-locally and load into torch (rtdetr/mangaocr/paddleocrvl).
+locally and load into torch (comic-text-and-bubble-detector/manga-ocr/PaddleOCR-VL-For-Manga).
 
 Centralizes what those engines genuinely duplicate: the load/install guards,
 the "install() downloads, load() never does" project rule, device selection,
@@ -22,7 +22,7 @@ class LocalModelEngineBase(EngineBase):
     _loaded: bool = False
     # Compute device this engine loads onto when the user sets no override —
     # the code default, like an OPTION_SCHEMA option's `default`. Subclasses
-    # override (paddleocrvl -> "cuda"); cpu-viable engines keep "cpu".
+    # override (PaddleOCR-VL-For-Manga -> "cuda"); cpu-viable engines keep "cpu".
     DEFAULT_DEVICE: str = "cpu"
     # Per-engine device override injected by the registry from admin state;
     # None -> DEFAULT_DEVICE. Class default keeps super().__init__()-skipping

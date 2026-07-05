@@ -1,7 +1,7 @@
 """Runner for the vendored manga-image-translator 48px / 48px_ctc OCR (see
 _mit_ocr_ctc.py, _mit_ocr_48px.py, _mit_xpos.py — models are GPL, from zyddnys).
 
-Those models read ONE 48px-tall text line. Our rtdetr crops are whole bubbles with
+Those models read ONE 48px-tall text line. Our comic-text-and-bubble-detector crops are whole bubbles with
 several vertical columns, so this runner splits a crop into lines first (vertical
 columns for portrait crops via an x ink-projection, rows for landscape), OCRs each,
 and joins them in reading order (right-to-left for vertical)."""

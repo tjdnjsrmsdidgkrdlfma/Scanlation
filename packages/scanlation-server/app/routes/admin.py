@@ -105,7 +105,7 @@ def get_settings() -> dict:
 @router.get("/get_translator_models/")
 def get_translator_models(engine: str | None = None) -> dict:
     """Model tags installed on a translator's backend (ollama /api/tags,
-    llamacpp /v1/models), so the admin 'model' field can offer a picker.
+    llama.cpp /v1/models), so the admin 'model' field can offer a picker.
     Defaults to the active translator; [] if unreachable or not applicable."""
     name = engine or state.selection.translator
     if not registry.has("translator", name):

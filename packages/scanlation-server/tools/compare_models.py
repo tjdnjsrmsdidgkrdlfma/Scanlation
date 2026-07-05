@@ -252,7 +252,7 @@ class TransformersDetAdapter(Adapter):
 # --------------------------------------------------------------------------- #
 class MangaOcrAdapter(Adapter):
     id, kind, label = "mangaocr", "ocr", "manga-ocr"
-    install_hint = "pip install manga-ocr   (or: -e packages/scanlation-mangaocr)"
+    install_hint = "pip install manga-ocr   (or: -e packages/scanlation-manga-ocr)"
 
     def available(self) -> tuple[bool, str]:
         return _imports_ok("manga_ocr")
