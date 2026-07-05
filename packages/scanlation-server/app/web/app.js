@@ -413,7 +413,12 @@ function optBlock(role, e) {
 }
 function renderEngineOptions() {
   const sel = DATA.selection;
-  const blocks = ROLES.map((role) => optBlock(role, findEngine(role, sel[role])));
+  // A saved selection can point at an engine that's no longer installed/known
+  // (uninstalled, or renamed): findEngine returns undefined -> skip that role so
+  // one stale selection doesn't crash the whole render (and blank later tabs).
+  const blocks = ROLES
+    .map((role) => { const e = findEngine(role, sel[role]); return e ? optBlock(role, e) : ""; })
+    .filter(Boolean);
   $("engine-options").innerHTML = blocks.join("");
   setupModelPicker();  // async: swap the translator 'model' text field for a <select>
 }
