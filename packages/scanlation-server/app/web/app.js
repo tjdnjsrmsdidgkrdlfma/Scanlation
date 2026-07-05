@@ -44,6 +44,7 @@ const I18N = {
     "options.h2": "엔진 옵션",
     "options.hint": "선택된 엔진의 옵션 (예: TSL 모델 태그)",
     "options.none": "설정 가능한 옵션이 없습니다.",
+    "options.notInstalled": "이 엔진은 설치되어 있지 않습니다. 「플러그인」 탭에서 설치하세요.",
     // engine option descriptions (ko override of the server's English schema desc)
     "opt.temperature": "샘플링 온도 (0 = 결정적)",
     "opt.seed": "난수 시드",
@@ -81,6 +82,7 @@ const I18N = {
     "field.default": "(기본값)",
     "field.defaultPrefix": "기본",
     "field.pickModel": "— 모델 선택 —",
+    "field.noEngine": "— 설치된 엔진 없음 · 「플러그인」 탭에서 설치 —",
     "field.notInstalled": "(미설치)",
     "preset.builtin": "빌트인",
     "preset.builtinEdited": "빌트인·수정됨",
@@ -133,6 +135,7 @@ const I18N = {
     "options.h2": "Engine options",
     "options.hint": "Options for the selected engines (e.g. TSL model tag)",
     "options.none": "No configurable options.",
+    "options.notInstalled": "This engine isn't installed. Install it in the Plugins tab.",
     "plugins.h2": "Plugin installation",
     "plugins.hint": "One-click install of package + weights",
     "plugins.installed": "Installed",
@@ -158,6 +161,7 @@ const I18N = {
     "field.default": "(default)",
     "field.defaultPrefix": "default",
     "field.pickModel": "— pick a model —",
+    "field.noEngine": "— no engine installed · see Plugins —",
     "field.notInstalled": "(not installed)",
     "preset.builtin": "builtin",
     "preset.builtinEdited": "builtin · edited",
@@ -316,8 +320,17 @@ function renderModels() {
     // Only pip-installed engines are selectable (catalog-only ones aren't in the
     // registry yet; install them in the plugin tab first).
     const installed = DATA.engines[role].filter(pkgInstalled);
-    sel.innerHTML = installed.map(engineOption).join("");
-    sel.value = DATA.selection[role];
+    if (installed.length) {
+      sel.innerHTML = installed.map(engineOption).join("");
+      sel.value = DATA.selection[role];
+      sel.disabled = false;
+    } else {
+      // Nothing installed for this role (fresh server, or /plugins wiped): a bare
+      // empty <select> renders as a stray half-lit popup. Show a disabled hint that
+      // points at the Plugins tab instead of an empty dropdown.
+      sel.innerHTML = `<option value="">${t("field.noEngine")}</option>`;
+      sel.disabled = true;
+    }
   }
 }
 
@@ -396,6 +409,15 @@ function deviceField(e) {
     <select data-engine-device>${o("", dflt)}${o("cpu", "CPU")}${o("cuda", "GPU")}</select></label>`;
 }
 function optBlock(role, e) {
+  // The selection can resolve to a catalog-only entry (its package was uninstalled):
+  // that carries an empty schema, so don't imply "no options" — say it's not installed.
+  if (e.installed_package === false) {
+    return `<div class="opt-block" data-engine="${e.name}">
+      <span class="role">${role}</span>
+      <h3>${e.display_name}</h3>
+      <p class="opt-empty">${t("options.notInstalled")}</p>
+    </div>`;
+  }
   const schema = e.schema || {};
   const keys = Object.keys(schema);
   const dev = deviceField(e);

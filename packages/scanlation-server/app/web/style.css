@@ -11,6 +11,9 @@
   --warn: #fbbf24;
   --danger: #f87171;
   --radius: 10px;
+  /* render native controls dark (select popup list, spinners, scrollbars) so the
+     opened dropdown isn't a white popup on the dark UI */
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -119,6 +122,14 @@ select, input[type="text"], input[type="number"], input[type="password"], textar
 select:focus, input:focus, textarea:focus {
   outline: none;
   border-color: var(--accent2);
+}
+/* disabled select = the "no engine installed" placeholder: keep it themed-muted
+   (not the browser's washed-out grey) and un-clickable */
+select:disabled {
+  color: var(--muted);
+  -webkit-text-fill-color: var(--muted);
+  opacity: 1;
+  cursor: not-allowed;
 }
 textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; margin: 12px 0; }
 
