@@ -9,8 +9,8 @@ a mounted volume in Docker) — pulling the package + its heavy backend deps
 container too, and the install survives container recreation via the volume.
 
 Where the package comes from:
-  * default — ``pip install "scanlation-rtdetr @ git+<repo>@<ref>#subdirectory=
-    packages/scanlation-rtdetr"`` (SCANLATION_ENGINE_REPO / _REF). No engine code is
+  * default — ``pip install "scanlation-comic-text-and-bubble-detector @ git+<repo>@<ref>#subdirectory=
+    packages/scanlation-comic-text-and-bubble-detector"`` (SCANLATION_ENGINE_REPO / _REF). No engine code is
     baked into the image; it's fetched from GitHub at install time.
   * dev/offline override — if ``SCANLATION_ENGINES_SRC`` points at the local
     ``packages/`` tree, install from those source dirs instead (no network).

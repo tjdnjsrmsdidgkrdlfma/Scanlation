@@ -14,7 +14,7 @@ def test_configure_logging_sets_levels():
     configure_logging("DEBUG")
     # our namespace opens to the requested level; children (engine plugin loggers) inherit it
     assert logging.getLogger("scanlation").getEffectiveLevel() == logging.DEBUG
-    assert logging.getLogger("scanlation.rtdetr").getEffectiveLevel() == logging.DEBUG
+    assert logging.getLogger("scanlation.comic-text-and-bubble-detector").getEffectiveLevel() == logging.DEBUG
     # third-party stays gated at the root WARNING (transformers/httpx don't drown the log)
     assert logging.getLogger().getEffectiveLevel() == logging.WARNING
     configure_logging("INFO")  # restore a sane default

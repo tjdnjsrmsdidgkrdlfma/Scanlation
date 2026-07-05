@@ -3,19 +3,19 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "scanlation-ollama"
+name = "scanlation-manga-ocr"
 version = "0.1.0"
-description = "ollama LLM translator plugin for the Scanlation server (talks to a local ollama server over HTTP)."
+description = "manga-ocr (kha-white) Japanese text recognizer plugin for the Scanlation server."
 requires-python = ">=3.11"
 dependencies = [
     "scanlation-sdk",
-    "httpx",
+    "manga-ocr",
 ]
 
 # Auto-discovered by the server registry once installed (no core edit needed).
-[project.entry-points."scanlation.translators"]
-Ollama = "scanlation_ollama.plugin:OllamaTranslator"
+[project.entry-points."scanlation.recognizers"]
+manga-ocr = "scanlation_manga_ocr.plugin:MangaOcrRecognizer"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["scanlation_ollama*"]
+include = ["scanlation_manga_ocr*"]

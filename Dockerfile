@@ -2,7 +2,7 @@
 #
 # The image contains ONLY the core: scanlation-sdk + scanlation-server (the
 # `dummy` engine). No engine plugin code is baked in. The real engines
-# (ctd/mangaocr/ollama/llamacpp) are pip-installed from GitHub at runtime when
+# (comic-text-and-bubble-detector/manga-ocr/Ollama/llama.cpp) are pip-installed from GitHub at runtime when
 # you click "install" in /admin — into the /plugins volume, so they survive
 # container recreation and their heavy deps (onnxruntime/torch) arrive only then.
 # LLM backends (ollama / llama.cpp) run outside; the translator plugins point at

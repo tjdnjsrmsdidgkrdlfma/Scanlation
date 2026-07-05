@@ -8,12 +8,12 @@ def test_catalog_lists_engines():
     from app.catalog import catalog
 
     c = catalog()
-    for name in ("rtdetr", "mangaocr", "ollama", "llamacpp"):
+    for name in ("comic-text-and-bubble-detector", "manga-ocr", "Ollama", "llama.cpp"):
         assert name in c, name
-    assert "detector" in c["rtdetr"].roles
-    assert "recognizer" in c["mangaocr"].roles
-    assert "translator" in c["ollama"].roles
-    assert c["rtdetr"].package == "scanlation-rtdetr"
+    assert "detector" in c["comic-text-and-bubble-detector"].roles
+    assert "recognizer" in c["manga-ocr"].roles
+    assert "translator" in c["Ollama"].roles
+    assert c["comic-text-and-bubble-detector"].package == "scanlation-comic-text-and-bubble-detector"
 
 
 def test_install_package_builds_pip_git_command():
@@ -26,7 +26,7 @@ def test_install_package_builds_pip_git_command():
     from app import plugins_install as pi
     from app.catalog import catalog
 
-    entry = catalog()["ollama"]
+    entry = catalog()["Ollama"]
     recorded = {}
 
     class _Ok:

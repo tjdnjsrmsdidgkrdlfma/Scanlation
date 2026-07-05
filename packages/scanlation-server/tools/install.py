@@ -1,8 +1,8 @@
 """Install engine resources (download weights) — the explicit, non-magic step.
 
-    python tools/install.py                 # rtdetr + mangaocr (the downloadable ones)
-    python tools/install.py rtdetr          # just RT-DETR
-    python tools/install.py rtdetr mangaocr
+    python tools/install.py                 # comic-text-and-bubble-detector + manga-ocr (the downloadable ones)
+    python tools/install.py comic-text-and-bubble-detector          # just the detector
+    python tools/install.py comic-text-and-bubble-detector manga-ocr
 
 Equivalent to POST /install_plugins/ {"plugins": {"<name>": true}} (the popup's
 one-click install). load() never downloads implicitly, so run this once first.
@@ -19,10 +19,10 @@ from app.plugins_install import find_class
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("engines", nargs="*", help="engine names (default: rtdetr mangaocr)")
+    ap.add_argument("engines", nargs="*", help="engine names (default: comic-text-and-bubble-detector manga-ocr)")
     args = ap.parse_args()
 
-    for name in args.engines or ["rtdetr", "mangaocr"]:
+    for name in args.engines or ["comic-text-and-bubble-detector", "manga-ocr"]:
         cls = find_class(name)
         if cls is None:
             print(f"{name}: unknown engine", file=sys.stderr)

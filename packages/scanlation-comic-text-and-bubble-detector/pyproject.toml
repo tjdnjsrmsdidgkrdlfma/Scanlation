@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scanlation-comic-text-and-bubble-detector"
+version = "0.1.0"
+description = "RT-DETRv2 comic/manga text-region detector plugin for the Scanlation server."
+requires-python = ">=3.11"
+dependencies = [
+    "scanlation-sdk",
+    "transformers>=4.45",
+    "torch",
+    # RT-DETR's AutoImageProcessor requires the torchvision backend; without it
+    # load() dies with ImportError on a clean install (the CPU plugins volume had
+    # only torch). Unpinned like torch so pip resolves a matching pair (CPU wheel
+    # via the catalog's --extra-index-url).
+    "torchvision",
+    "huggingface_hub",
+    "pillow",
+]
+
+# Auto-discovered by the server registry once installed (no core edit needed).
+# Group is PLURAL — matches app/registry.py ROLES ("detector" -> "scanlation.detectors").
+[project.entry-points."scanlation.detectors"]
+comic-text-and-bubble-detector = "scanlation_comic_text_and_bubble_detector.plugin:ComicTextAndBubbleDetector"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scanlation_comic_text_and_bubble_detector*"]

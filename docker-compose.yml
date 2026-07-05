@@ -25,7 +25,7 @@ services:
       - data:/data         # state.json, sqlite cache, model weights, HF cache
     environment:
       # Compute device (CPU/GPU) is chosen per-engine in /admin (engine options),
-      # each engine having a code default (paddleocrvl=GPU, others=CPU) — not an
+      # each engine having a code default (PaddleOCR-VL-For-Manga=GPU, others=CPU) — not an
       # env here. A GPU-capable torch is a host-level install; this image ships CPU
       # torch by default.
       # Public deploy: require the X-Auth-Token header on the API + admin. Put the

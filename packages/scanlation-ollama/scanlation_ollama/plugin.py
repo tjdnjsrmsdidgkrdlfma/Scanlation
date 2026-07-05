@@ -18,7 +18,7 @@ from scanlation_sdk.http_translator import HttpTranslatorBase
 
 
 class OllamaTranslator(HttpTranslatorBase):
-    name = "ollama"
+    name = "Ollama"
     display_name = "Ollama"
     homepage = "https://ollama.com"
     description = "LLM translation via a local ollama server (must be running, model selected in /admin)."

@@ -1,6 +1,6 @@
 """Draw detected polygons + reading-order index on an image, dump deskewed crops.
 
-    python tools/visualize.py page.png --detector rtdetr   # -> compare_out/annotated.png + compare_out/viz_crops/
+    python tools/visualize.py page.png --detector comic-text-and-bubble-detector   # -> compare_out/annotated.png + compare_out/viz_crops/
 
 This is THE accuracy-debugging tool: detection is the bottleneck, so seeing the
 rotated polygons land on the text (and the deskewed crops come out upright) is
@@ -40,7 +40,7 @@ def _parse_opts(detector, pairs: list[str]) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("image")
-    ap.add_argument("--detector", default="rtdetr")
+    ap.add_argument("--detector", default="comic-text-and-bubble-detector")
     ap.add_argument("--recognizer", default=None, help="optional: OCR each crop and print text")
     ap.add_argument("--out", default="compare_out/annotated.png")
     ap.add_argument("--crops", default="compare_out/viz_crops")

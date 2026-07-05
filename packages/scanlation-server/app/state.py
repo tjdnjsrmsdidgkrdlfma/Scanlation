@@ -37,6 +37,17 @@ class Selection:
     min_image_dim: int = settings.min_image_dim
 
 
+# Old engine key -> new official key. state.json (and any options/devices dict
+# keyed by engine) written before the plugin rename is migrated on load.
+ENGINE_RENAMES: dict[str, str] = {
+    "rtdetr": "comic-text-and-bubble-detector",
+    "mangaocr": "manga-ocr",
+    "paddleocrvl": "PaddleOCR-VL-For-Manga",
+    "ollama": "Ollama",
+    "llamacpp": "llama.cpp",
+}
+
+
 class AppState:
     """Process-wide selection + locks. One instance per process."""
 
@@ -59,9 +70,23 @@ class AppState:
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
             data.pop("device", None)  # legacy global device (removed) -> ignore
+            self._migrate_engine_keys(data)
             return Selection(**data)
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             return Selection()
+
+    @staticmethod
+    def _migrate_engine_keys(data: dict) -> None:
+        """Rewrite pre-rename engine keys to their official names, in place: the
+        three role selections (str values) and the options/devices dicts (which
+        are engine-keyed). Runs before Selection(**data)."""
+        for role in ("detector", "recognizer", "translator"):
+            if data.get(role) in ENGINE_RENAMES:
+                data[role] = ENGINE_RENAMES[data[role]]
+        for field_name in ("options", "devices"):
+            d = data.get(field_name)
+            if isinstance(d, dict):
+                data[field_name] = {ENGINE_RENAMES.get(k, k): v for k, v in d.items()}
 
     def save(self) -> None:
         with self._lock:

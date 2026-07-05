@@ -6,14 +6,14 @@ PY ?= ../../venv/Scripts/python
 
 test:            ## fast unit suite, no models/GPU (hand-rolled runner)
 	$(PY) -m tests
-	# engine smokes (ctd/mangaocr/...) live in their own packages: run
+	# engine smokes (comic-text-and-bubble-detector/manga-ocr/...) live in their own packages: run
 	# `../../venv/Scripts/python -m tests` from packages/scanlation-<engine>/
 
 serve:           ## run the API (uvicorn, single worker)
 	$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 4000 --workers 1
 
 viz:             ## visualize detection: make viz IMG=page.png
-	$(PY) tools/visualize.py "$(IMG)" --detector "$(or $(DET),rtdetr)"
+	$(PY) tools/visualize.py "$(IMG)" --detector "$(or $(DET),comic-text-and-bubble-detector)"
 
 install:         ## editable core (sdk + server; no engine — engines are separate pkgs)
 	$(PY) -m pip install -e ../scanlation-sdk -e .
