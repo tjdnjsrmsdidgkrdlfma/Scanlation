@@ -11,7 +11,7 @@
     <header class="topbar">
       <div class="brand">
         <h1>Scanlation <span class="muted">Admin</span></h1>
-        <p class="sub" id="version" data-i18n="brand.sub">서버 설정 · 모델 · 프롬프트</p>
+        <p class="sub" id="version" data-i18n="brand.sub">서버 설정 · 플러그인 · 프롬프트</p>
       </div>
       <div class="langtoggle" id="lang-toggle" role="group" aria-label="Language">
         <button class="langopt" data-lang="en">EN</button>
@@ -20,19 +20,19 @@
     </header>
 
     <nav class="tabbar" id="tabbar" hidden>
-      <button class="tab active" data-view="models" data-i18n="tab.models">모델 · 언어</button>
+      <button class="tab active" data-view="models" data-i18n="tab.models">플러그인 · 언어</button>
       <button class="tab" data-view="prompt" data-i18n="tab.prompt">번역 프롬프트</button>
-      <button class="tab" data-view="options" data-i18n="tab.options">엔진 옵션</button>
-      <button class="tab" data-view="plugins" data-i18n="tab.plugins">플러그인</button>
+      <button class="tab" data-view="options" data-i18n="tab.options">플러그인 옵션</button>
+      <button class="tab" data-view="plugins" data-i18n="tab.plugins">플러그인 설치</button>
       <button class="tab" data-view="behavior" data-i18n="tab.behavior">동작</button>
       <button class="tab" data-view="maintenance" data-i18n="tab.maintenance">유지보수</button>
     </nav>
   </div>
 
   <main id="app" hidden>
-    <!-- 모델 선택 -->
+    <!-- 플러그인 선택 -->
     <section class="card view active" data-view="models">
-      <h2><span data-i18n="models.h2">모델 선택</span> <span class="hint" data-i18n="models.hint">마지막 선택이 서버에 저장되어 기본값이 됩니다</span></h2>
+      <h2><span data-i18n="models.h2">플러그인 선택</span> <span class="hint" data-i18n="models.hint">마지막 선택이 서버에 저장되어 기본값이 됩니다</span></h2>
       <div class="grid3">
         <label><span>Detector</span><select id="sel-detector"></select></label>
         <label><span>Recognizer</span><select id="sel-recognizer"></select></label>
@@ -45,7 +45,7 @@
         </div>
         <button class="btn primary" id="save-models" data-i18n="btn.save">저장</button>
       </div>
-      <p class="note" data-i18n="models.deviceNote">엔진별 연산 장치(CPU/GPU)는 「엔진 옵션」 탭에서 엔진마다 따로 정합니다. 비워두면 각 엔진의 기본값을 씁니다.</p>
+      <p class="note" data-i18n="models.deviceNote">플러그인별 연산 장치(CPU/GPU)는 「플러그인 옵션」 탭에서 플러그인마다 따로 정합니다. 비워두면 각 플러그인의 기본값을 씁니다.</p>
     </section>
 
     <!-- 번역 프롬프트 -->
@@ -68,9 +68,9 @@
       <p class="note" data-i18n="prompt.note">빌트인을 편집해 같은 이름으로 저장하면 그 이름의 커스텀 프리셋이 덮어씁니다. 새 이름으로 저장하면 복제됩니다. 커스텀을 삭제하면 빌트인으로 되돌아갑니다.</p>
     </section>
 
-    <!-- 엔진 옵션 -->
+    <!-- 플러그인 옵션 -->
     <section class="card view" data-view="options">
-      <h2><span data-i18n="options.h2">엔진 옵션</span> <span class="hint" data-i18n="options.hint">선택된 엔진의 옵션 (예: TSL 모델 태그)</span></h2>
+      <h2><span data-i18n="options.h2">플러그인 옵션</span> <span class="hint" data-i18n="options.hint">선택된 플러그인의 옵션 (예: TSL 모델 태그)</span></h2>
       <div id="engine-options"></div>
     </section>
 
