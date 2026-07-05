@@ -277,20 +277,43 @@
     sizeFonts(entry);
   }
 
+  // A whole-request failure has no box coords, so pin a status chip to the image
+  // corner instead of a text box. Reuse wrap()/tracked so clearAll() cleans it up.
+  function showError(img, msg) {
+    const [nw, nh] = naturalSize(img);
+    if (!nw || !nh) return;
+    const wrapper = wrap(img);
+    const badge = document.createElement("div");
+    badge.className = "scanlation-badge scanlation-error";
+    badge.textContent = "번역 실패";
+    badge.title = msg; // cause (e.g. "server 502: ...") on hover
+    wrapper.appendChild(badge);
+    // boxes stays empty: the badge is a child of wrapper (removed with it) and
+    // has no boxraw, so it must not go through sizeFonts()/onResize().
+    tracked.push({ img, wrapper, boxes: [] });
+  }
+
   async function processImage(img) {
     if (!enabled || processed.has(img) || processing.has(img)) return;
     const [nw, nh] = naturalSize(img);
     if (Math.min(nw, nh) < cfg.minImageDim) return; // skip icons/thin banners (shorter-side px; from /admin)
     processing.add(img);
+    img.classList.add("scanlation-loading"); // faint blur so an in-flight request is visible
     try {
       const base64 = await imageToBase64(img);
       const result = await runOcr(md5(base64), base64, {});
+      if (!enabled) return; // disabled mid-flight -> drop the late result (finally clears the blur)
       applyResult(img, result.result || []);
       processed.add(img);
     } catch (e) {
       console.warn("[scanlation]", e.message || e);
+      if (enabled) {
+        showError(img, e.message || String(e));
+        processed.add(img); // don't let a rescan re-process (would double-wrap); retry via Clear->Translate
+      }
     } finally {
       processing.delete(img);
+      img.classList.remove("scanlation-loading");
     }
   }
 
@@ -325,6 +348,11 @@
       processed.delete(img);
     }
     tracked.length = 0;
+    // In-flight images aren't in `tracked` yet, so strip any lingering blur here
+    // too — otherwise a Clear during processing leaves them dimmed until the
+    // request settles (their finally clears it, but not until then).
+    document.querySelectorAll(".scanlation-loading")
+      .forEach((el) => el.classList.remove("scanlation-loading"));
   }
 
   // Tell the background page our on/off state so it can sync the page_action

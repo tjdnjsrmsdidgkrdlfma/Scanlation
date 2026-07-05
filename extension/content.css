@@ -34,7 +34,26 @@
   outline: 2px solid #d33;
 }
 
-.scanlation-box.scanlation-error {
-  background: rgba(255, 220, 220, 0.95);
-  color: #900;
+/* An image being sent to the server: a faint blur so a request reads as in-flight. */
+.scanlation-loading {
+  filter: blur(2px) brightness(0.9);
+  transition: filter 0.15s ease;
+}
+
+/* Request-level status chip pinned to the image corner (not a text box). */
+.scanlation-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2147483646;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font: 12px/1.2 "Noto Sans KR", "Malgun Gothic", sans-serif;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+
+.scanlation-badge.scanlation-error {
+  background: rgba(200, 0, 0, 0.85);
 }
