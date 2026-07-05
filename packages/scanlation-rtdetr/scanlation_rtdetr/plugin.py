@@ -1,4 +1,4 @@
-"""RTDetrDetector — RT-DETR-v2 comic/manga text detector (transformers).
+"""RTDetrDetector — RT-DETRv2 comic/manga text detector (transformers).
 
 Replaces the segmentation-mask ``ctd`` detector. The model
 (ogkalu/comic-text-and-bubble-detector) classifies each region as
@@ -37,9 +37,9 @@ DEFAULTS = {"conf": 0.6, "nms_iou": 0.6, "contain_thresh": 0.85}
 
 class RTDetrDetector(LocalModelEngineBase):
     name = "rtdetr"
-    display_name = "RT-DETR (comic text)"
+    display_name = "comic-text-and-bubble-detector"
     homepage = "https://huggingface.co/ogkalu/comic-text-and-bubble-detector"
-    description = "RT-DETR-v2 manga/comic text detector — keeps text_bubble + text_free regions."
+    description = "RT-DETRv2 (ogkalu/comic-text-and-bubble-detector) manga/comic text detector — keeps text_bubble + text_free regions."
     warning = "Downloads transformers weights (~172MB) on install; needs torch + transformers."
     OPTION_SCHEMA = {
         "conf": {"type": float, "default": DEFAULTS["conf"], "description": "Confidence threshold; raise to drop weak/noise boxes."},

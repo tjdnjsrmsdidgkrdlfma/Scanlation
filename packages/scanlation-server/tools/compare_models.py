@@ -200,7 +200,7 @@ class UltralyticsDetAdapter(Adapter):
 
 
 class TransformersDetAdapter(Adapter):
-    """A transformers object-detection model (e.g. RT-DETR-v2) via the Auto* API,
+    """A transformers object-detection model (e.g. RT-DETRv2) via the Auto* API,
     so the exact model class is picked from the repo config — no hardcoded class."""
     kind = "detect"
 
@@ -426,7 +426,7 @@ def all_adapters() -> list[Adapter]:
     return [
         # --- detectors ---
         TransformersDetAdapter("ogkalu_rtdetr", "ogkalu/comic-text-and-bubble-detector",
-                               "ogkalu RT-DETR-v2 (text_bubble+text_free)",
+                               "ogkalu RT-DETRv2 (text_bubble+text_free)",
                                keep_labels={"text_bubble", "text_free"},
                                conf=0.6, nms_iou=0.6, contain_thresh=0.85),  # conf=0.6 = tuned sweet spot
         UltralyticsDetAdapter("kiuyha_yolo", "Kiuyha/Manga-Bubble-YOLO",

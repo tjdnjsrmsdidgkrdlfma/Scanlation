@@ -1,1 +1,1 @@
-"""scanlation-rtdetr — RT-DETR-v2 (ogkalu/comic-text-and-bubble-detector) detector plugin."""
+"""scanlation-rtdetr — RT-DETRv2 (ogkalu/comic-text-and-bubble-detector) detector plugin."""

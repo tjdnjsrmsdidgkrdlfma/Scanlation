@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scanlation-rtdetr"
 version = "0.1.0"
-description = "RT-DETR-v2 comic/manga text-region detector plugin for the Scanlation server."
+description = "RT-DETRv2 comic/manga text-region detector plugin for the Scanlation server."
 requires-python = ">=3.11"
 dependencies = [
     "scanlation-sdk",

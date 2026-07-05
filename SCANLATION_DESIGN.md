@@ -10,7 +10,7 @@
 > - **설정 = `/admin` 단일 소스** — 엔진·모델·언어·프롬프트를 서버 관리 페이지(`/admin`, `state.json` 영속)에서 지정. `OLLAMA_MODEL`/`LLAMACPP_MODEL` 등 **모델 env 폴백 제거**(미설정 시 에러). 모델은 백엔드 설치 목록 드롭다운으로 선택.
 > - **테스트 = 자체 핸드롤 러너** — pytest 미사용. `python -m tests`(빠른 스위트) / `python -m tests.test_rtdetr`(개별 스모크).
 > - **CLI 최소화** — `tools/run_image.py` 삭제(실 검증은 `/admin`+브라우저). `tools/visualize.py`(검출 육안 확인)만 유지.
-> - **검출기 교체: comic-text-detector(ONNX) → RT-DETR** — 원 설계의 첫 검출기 `ctd`(comic-text-detector, onnxruntime seg-mask, 회전 quad)를 **제거**하고 `rtdetr`(RT-DETR-v2 객체 검출기, HF `ogkalu/comic-text-and-bubble-detector`, 패키지 `scanlation-rtdetr`, transformers+torch, torch가 CUDA/ROCm이면 **GPU**·아니면 CPU)로 교체·**기본 검출기 지정**. 영역을 `bubble`/`text_bubble`/`text_free`로 분류해 text 두 클래스만 남기고(말풍선 컨테이너 버림) NMS-free 출력을 IoU+IoS로 중복제거. 옵션 float 3개 `conf`(0.6)/`nms_iou`(0.6)/`contain_thresh`(0.85). 가중치는 `install()`이 `huggingface_hub.snapshot_download`로 `models/rtdetr/`에 받고, env override는 `SCANLATION_RTDETR_MODEL`(**디렉터리** 경로). **트레이드오프:** RT-DETR은 **축정렬** 박스만 내므로 기울어진/세로 텍스트를 위한 deskew 이점(회전 quad)은 지금 발휘되지 않는다(계약은 회전 quad를 여전히 지원 — 회전 검출기로 교체하면 되살아남). 아래 §2·§3·§4의 comic-text-detector/ONNX 관련 서술은 이 교체 이전의 원 설계 기록이다.
+> - **검출기 교체: comic-text-detector(ONNX) → RT-DETR** — 원 설계의 첫 검출기 `ctd`(comic-text-detector, onnxruntime seg-mask, 회전 quad)를 **제거**하고 `rtdetr`(RT-DETRv2 객체 검출기, HF `ogkalu/comic-text-and-bubble-detector`, 패키지 `scanlation-rtdetr`, transformers+torch, torch가 CUDA/ROCm이면 **GPU**·아니면 CPU)로 교체·**기본 검출기 지정**. 영역을 `bubble`/`text_bubble`/`text_free`로 분류해 text 두 클래스만 남기고(말풍선 컨테이너 버림) NMS-free 출력을 IoU+IoS로 중복제거. 옵션 float 3개 `conf`(0.6)/`nms_iou`(0.6)/`contain_thresh`(0.85). 가중치는 `install()`이 `huggingface_hub.snapshot_download`로 `models/rtdetr/`에 받고, env override는 `SCANLATION_RTDETR_MODEL`(**디렉터리** 경로). **트레이드오프:** RT-DETR은 **축정렬** 박스만 내므로 기울어진/세로 텍스트를 위한 deskew 이점(회전 quad)은 지금 발휘되지 않는다(계약은 회전 quad를 여전히 지원 — 회전 검출기로 교체하면 되살아남). 아래 §2·§3·§4의 comic-text-detector/ONNX 관련 서술은 이 교체 이전의 원 설계 기록이다.
 > - **다중 패키지 분리** — `server/` 단일 패키지를 `packages/`의 여러 pip 패키지로 분리: 공유 계약 `scanlation-sdk`(contracts·context·prompt·testing) + 코어 `scanlation-server`(dummy 엔진만 번들) + 엔진별 패키지(`scanlation-{rtdetr,mangaocr,ollama,llamacpp}`). 코어는 엔진을 전혀 모르고 **`entry_points`로만 발견**(`registry._BUILTIN` 하드코딩 맵 제거) — "설치한 패키지 = 탑재 엔진". 아래 §의 `server/plugins/*`·`app.contracts`·`plugins.llm_prompt` 경로 참조는 이 구조로 이동됨(계약 = `scanlation_sdk`).
 
 ---
@@ -219,7 +219,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 ## 4. 첫 3개 플러그인 (개요)
 
 **4.1 CTDDetector** (`plugins/detector_ctd/`) — `mayocream/comic-text-detector-onnx`(ONNX).
-> ⚠ **제거됨** — `rtdetr`(RT-DETR-v2, 패키지 `scanlation-rtdetr`)로 교체·기본 검출기 지정(서두 divergence 및 §9-3 참조). 아래 상세는 원 설계 기록이며 현 코드에 없다(복구는 git 히스토리).
+> ⚠ **제거됨** — `rtdetr`(RT-DETRv2, 패키지 `scanlation-rtdetr`)로 교체·기본 검출기 지정(서두 divergence 및 §9-3 참조). 아래 상세는 원 설계 기록이며 현 코드에 없다(복구는 git 히스토리).
 - `load()`: `ort.InferenceSession(path, providers=<선택>)`; provider는 env `DEVICE`로 `ROCMExecutionProvider`(Linux ROCm) / `DmlExecutionProvider`(Windows 로컬개발) / 아니면 CPU — **항상 CPU fallback 추가**.
 - `detect()`: letterbox 리사이즈→정규화→추론; `decode.py`가 출력`(blks, mask, mask_refined)`→라인 quad(`polys.reshape(-1,8)`)+세그; thresh/unclip(pyclipper)/NMS; letterbox 역변환으로 원본 px 매핑; 라인별 Region.
 - ⚠️ **출력 텐서 이름/순서/후처리는 실제 onnx + 레퍼런스 `comic_text_detector/inference.py`(TextDetector.__call__)로 반드시 검증** — 최대 미지수(6번).

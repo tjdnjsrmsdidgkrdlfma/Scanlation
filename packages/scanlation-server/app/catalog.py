@@ -18,9 +18,9 @@ from dataclasses import dataclass, field
 _CATALOG: dict[str, dict] = {
     "rtdetr": {
         "package": "scanlation-rtdetr",
-        "display_name": "RT-DETR",
+        "display_name": "comic-text-and-bubble-detector",
         "roles": ["detector"],
-        "description": "RT-DETR-v2 comic/manga text detector (transformers).",
+        "description": "RT-DETRv2 comic/manga text detector (ogkalu/comic-text-and-bubble-detector, transformers).",
         # steer torch to the CPU wheel by default (like mangaocr) so a Docker
         # one-click install doesn't pull a giant CUDA wheel; a GPU torch build is
         # a host-level install.
@@ -37,7 +37,7 @@ _CATALOG: dict[str, dict] = {
     },
     "paddleocrvl": {
         "package": "scanlation-paddleocr-vl",
-        "display_name": "PaddleOCR-VL (manga)",
+        "display_name": "PaddleOCR-VL-For-Manga",
         "roles": ["recognizer"],
         "description": "PaddleOCR-VL manga fine-tune VLM recognizer — best accuracy, GPU-intended (~1s/crop; CPU ~60s).",
         # CPU wheel by default like the other torch plugins; a GPU/ROCm torch build

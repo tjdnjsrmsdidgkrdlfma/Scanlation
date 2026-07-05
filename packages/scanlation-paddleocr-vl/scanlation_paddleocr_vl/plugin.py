@@ -32,7 +32,7 @@ logger = logging.getLogger("scanlation.paddleocrvl")
 
 class PaddleOcrVLRecognizer(LocalModelEngineBase):
     name = "paddleocrvl"
-    display_name = "PaddleOCR-VL (manga)"
+    display_name = "PaddleOCR-VL-For-Manga"
     homepage = "https://huggingface.co/jzhang533/PaddleOCR-VL-For-Manga"
     description = "PaddleOCR-VL manga fine-tune (0.9B VLM). Best bake-off accuracy — reads numbers/English/symbols + Japanese."
     warning = "Downloads ~1.8GB weights on install; needs torch + transformers>=5. GPU strongly recommended (CPU ~60s/crop)."
