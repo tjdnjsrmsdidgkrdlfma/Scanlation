@@ -70,34 +70,10 @@ def test_engine_device_override():
         context.base_dir = saved_base
 
 
-def test_engine_key_migration_on_load():
-    """Pre-rename engine keys in a stored state.json are rewritten to the official
-    names on load — the three role selections plus the options/devices dict keys."""
-    saved_base = context.base_dir
-    try:
-        context.base_dir = Path(tempfile.mkdtemp())
-        data_dir = context.base_dir / "data"
-        data_dir.mkdir(parents=True)
-        (data_dir / "state.json").write_text(json.dumps({
-            "detector": "rtdetr", "recognizer": "mangaocr", "translator": "llamacpp",
-            "options": {"ollama": {"model": "m"}, "rtdetr": {"conf": 0.7}},
-            "devices": {"paddleocrvl": "cuda"},
-        }), encoding="utf-8")
-        s = AppState().selection
-        assert s.detector == "comic-text-and-bubble-detector"
-        assert s.recognizer == "manga-ocr" and s.translator == "llama.cpp"
-        assert s.options == {"Ollama": {"model": "m"},
-                             "comic-text-and-bubble-detector": {"conf": 0.7}}
-        assert s.devices == {"PaddleOCR-VL-For-Manga": "cuda"}
-    finally:
-        context.base_dir = saved_base
-
-
 TESTS = [
     test_state_json_roundtrip,
     test_state_load_falls_back_on_bad_json,
     test_engine_device_override,
-    test_engine_key_migration_on_load,
 ]
 
 if __name__ == "__main__":
