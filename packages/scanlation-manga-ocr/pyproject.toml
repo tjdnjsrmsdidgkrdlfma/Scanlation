@@ -10,6 +10,12 @@ requires-python = ">=3.11"
 dependencies = [
     "scanlation-sdk",
     "manga-ocr",
+    # manga-ocr-base ships a slow-only BertJapaneseTokenizer (no tokenizer.json).
+    # transformers 5.x routes it through the fast/tokenizers backend, whose
+    # slow->fast conversion needs sentencepiece (or tiktoken) present — and
+    # manga-ocr doesn't declare it. Without this the recognizer load raises
+    # "Couldn't instantiate the backend tokenizer ... need sentencepiece".
+    "sentencepiece",
 ]
 
 # Auto-discovered by the server registry once installed (no core edit needed).
