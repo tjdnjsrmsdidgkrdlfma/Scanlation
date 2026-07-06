@@ -12,15 +12,12 @@ this tool just triggers the run and prints a one-line-per-region summary.
 time (cache ignored) — no cache-clearing between repro runs. Pass --use-cache to
 honor the cache instead.
 
-Requests go one at a time by default; --concurrency N sends N in parallel, which
-reproduces the concurrent-load failures the extension hits when a page loads many
-images at once (the server's translate slots overrun -> timeouts -> batch fallback).
+All images are sent AT ONCE (one request each, in parallel), mirroring how the
+extension hits a page that loads many images simultaneously — so the concurrent-load
+failures (translate slots overrun -> timeouts -> batch fallback) reproduce here too.
 
-  # every image under a folder, forced fresh, against the local docker port
+  # every image under a folder, all fired at once, forced fresh
   python tools/run_image.py samples/
-
-  # reproduce concurrent-load failures (many images at once, like real browsing)
-  python tools/run_image.py samples/ --concurrency 6
 
   # specific files, remote server behind nginx, with the auth token
   python tools/run_image.py a.png b.png --server https://scan.example.com --token SECRET
@@ -90,9 +87,6 @@ def main() -> int:
     ap.add_argument("--use-cache", action="store_true",
                     help="honor the cache (default: force a fresh run each time)")
     ap.add_argument("--quiet", action="store_true", help="print only the region count per image")
-    ap.add_argument("--concurrency", type=int, default=1, metavar="N",
-                    help="send N requests in parallel (default 1 = sequential). >1 reproduces "
-                         "concurrent-load failures like real browsing (many images at once)")
     a = ap.parse_args()
 
     server = a.server.rstrip("/")
@@ -101,8 +95,7 @@ def main() -> int:
     if not imgs:
         print("no images found", file=sys.stderr)
         return 1
-    conc = max(1, a.concurrency)
-    print(f"POST {server}/run_pipeline/  ({len(imgs)} images, force={force}, concurrency={conc})",
+    print(f"POST {server}/run_pipeline/  ({len(imgs)} images at once, force={force})",
           file=sys.stderr)
 
     def work(img: Path):
@@ -114,7 +107,7 @@ def main() -> int:
             return img, None, f"ERROR {e}"
 
     failures = 0
-    with ThreadPoolExecutor(max_workers=conc) as ex:
+    with ThreadPoolExecutor(max_workers=len(imgs)) as ex:
         for fut in as_completed([ex.submit(work, img) for img in imgs]):
             img, result, err = fut.result()
             if err:
