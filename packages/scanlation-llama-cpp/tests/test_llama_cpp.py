@@ -57,18 +57,19 @@ def test_missing_model_raises():
     assert raised, "translate must raise when no model is selected"
 
 
-def test_short_text_skips():
+def test_blank_skips_but_short_text_translates():
     tr = LlamaCppTranslator()
-    called = False
+    calls = {"n": 0}
 
     def fake(body):
-        nonlocal called
-        called = True
+        calls["n"] += 1
         return {"choices": [{"message": {"content": "x"}}]}
 
     tr._chat = fake
-    assert tr.translate("あ", "ja", "ko", {}) == "あ"
-    assert called is False
+    assert tr.translate("  ", "ja", "ko", {}) == ""              # blank -> no model call
+    assert calls["n"] == 0
+    assert tr.translate("あ", "ja", "ko", {"model": "m"}) == "x"  # 1-char now goes to the model
+    assert calls["n"] == 1
 
 
 def test_batch_builds_response_format_and_aligns():
@@ -106,7 +107,7 @@ TESTS = [
     test_builds_openai_chat_request,
     test_keep_think_when_disabled,
     test_missing_model_raises,
-    test_short_text_skips,
+    test_blank_skips_but_short_text_translates,
     test_batch_builds_response_format_and_aligns,
     test_batch_falls_back_on_wrong_length,
 ]

@@ -53,19 +53,19 @@ def test_options_override():
     assert body["options"]["temperature"] == 0.7
 
 
-def test_short_text_skips_model_call():
+def test_blank_skips_but_short_text_translates():
     tr = OllamaTranslator()
-    called = False
+    calls = {"n": 0}
 
     def fake(body):
-        nonlocal called
-        called = True
+        calls["n"] += 1
         return {"response": "x"}
 
     tr._generate = fake
-    assert tr.translate("あ", "ja", "ko", {}) == "あ"  # <=2 chars returned as-is
-    assert tr.translate("  ", "ja", "ko", {}) == ""
-    assert called is False
+    assert tr.translate("  ", "ja", "ko", {}) == ""              # blank -> no model call
+    assert calls["n"] == 0
+    assert tr.translate("あ", "ja", "ko", {"model": "m"}) == "x"  # 1-char now goes to the model
+    assert calls["n"] == 1
 
 
 def test_missing_model_raises():
@@ -96,18 +96,18 @@ def test_batch_builds_format_request_and_aligns():
     assert 'src="japanese"' in captured["prompt"] and 'dst="korean"' in captured["prompt"]
 
 
-def test_batch_passes_through_short_texts():
+def test_batch_passes_through_blanks():
     tr = OllamaTranslator()
     calls = {"n": 0}
 
     def fake_generate(body):
         calls["n"] += 1
-        return {"response": json.dumps({"t0": "번역"})}  # only the one long text is batched
+        return {"response": json.dumps({"t0": "가", "t1": "나"})}  # both non-blank texts batched
 
     tr._generate = fake_generate
-    out = tr.translate_batch(["あ", "これは十分に長い文章", "  "], "ja", "ko", {"model": "m"})
-    assert out == ["あ", "번역", ""]  # short/empty kept in place, long one translated
-    assert calls["n"] == 1            # exactly one model call (for the single long text)
+    out = tr.translate_batch(["あ", "  ", "長い文章"], "ja", "ko", {"model": "m"})
+    assert out == ["가", "", "나"]  # blank kept in place; short + long both translated, aligned
+    assert calls["n"] == 1          # one batch call covers both non-blank texts
 
 
 def test_batch_falls_back_to_per_text_on_bad_json():
@@ -129,10 +129,10 @@ def test_batch_falls_back_to_per_text_on_bad_json():
 TESTS = [
     test_builds_request_from_tuned_config,
     test_options_override,
-    test_short_text_skips_model_call,
+    test_blank_skips_but_short_text_translates,
     test_missing_model_raises,
     test_batch_builds_format_request_and_aligns,
-    test_batch_passes_through_short_texts,
+    test_batch_passes_through_blanks,
     test_batch_falls_back_to_per_text_on_bad_json,
 ]
 

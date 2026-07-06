@@ -81,7 +81,7 @@ class HttpTranslatorBase(EngineBase):
 
     def translate(self, text: str, src: str, dst: str, options: dict[str, Any]) -> str:
         text = text.strip()
-        if len(text) <= 2:  # punctuation/short tokens: not worth a model call
+        if not text:  # blank OCR: nothing to translate
             return text
 
         options = self.resolve_options(options)
@@ -96,42 +96,43 @@ class HttpTranslatorBase(EngineBase):
         self, texts: list[str], src: str, dst: str, options: dict[str, Any]
     ) -> list[str]:
         """Translate many texts in one model call and return them aligned to the
-        input order. Short (<=2 char) texts are passed through unchanged, same as
-        translate(). ANY failure (parse error, wrong count, HTTP error, num_ctx
-        overflow -> truncated JSON) falls back to a per-text translate() loop, so
-        the result is always complete and aligned — just slower on that page."""
+        input order. Blank texts pass through unchanged; every non-blank text goes
+        to the model (no length threshold — think-off makes even 1-2 char SFX cheap
+        enough). ANY failure (parse error, wrong count, HTTP error, num_ctx overflow
+        -> truncated JSON) falls back to a per-text translate() loop, so the result
+        is always complete and aligned — just slower on that page."""
         options = self.resolve_options(options)
         stripped = [t.strip() for t in texts]
-        long_idx = [i for i, t in enumerate(stripped) if len(t) > 2]
-        if not long_idx:  # nothing worth a model call (all short/empty)
+        idx = [i for i, t in enumerate(stripped) if t]  # non-blank -> worth a model call
+        if not idx:  # all blank
             return stripped
 
         model = options.get("model")
         if not model:
             raise ValueError(f"no {self.display_name} model selected — pick one in /admin")
-        longs = [stripped[i] for i in long_idx]
+        items = [stripped[i] for i in idx]
         system = options.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
-        prompt = build_batch_prompt(longs, src, dst, options.get("context", ""))
-        schema = batch_schema(len(longs))
+        prompt = build_batch_prompt(items, src, dst, options.get("context", ""))
+        schema = batch_schema(len(items))
         raw = None
         try:
             raw = self._translate_batch_call(model, system, prompt, schema, options)
             obj = json.loads(raw)
-            translated = [obj[f"t{i}"] for i in range(len(longs))]  # KeyError -> fallback
+            translated = [obj[f"t{i}"] for i in range(len(items))]  # KeyError -> fallback
         except Exception as e:  # noqa: BLE001 - any failure -> safe per-text fallback
             # Surface WHY the batch failed so it's diagnosable from logs: JSONDecodeError
             # = truncated JSON (num_ctx too small), HTTPStatusError = backend, KeyError =
             # wrong item count. The raw response (DEBUG) pins truncation vs bad shape.
             self._log.warning(
                 "%s batch of %d failed (%s: %s); falling back to per-text",
-                self.name, len(longs), type(e).__name__, e,
+                self.name, len(items), type(e).__name__, e,
             )
             self._log.debug("batch prompt=%d chars; raw response=%r",
                             len(prompt), (raw[:500] if isinstance(raw, str) else raw))
-            translated = [self.translate(t, src, dst, options) for t in longs]
+            translated = [self.translate(t, src, dst, options) for t in items]
 
-        out = list(stripped)  # start from the passthrough (short texts kept in place)
-        for i, tr in zip(long_idx, translated):
+        out = list(stripped)  # blanks kept in place
+        for i, tr in zip(idx, translated):
             out[i] = (tr if isinstance(tr, str) else str(tr)).strip()
         return out
 
