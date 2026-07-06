@@ -113,12 +113,21 @@ class HttpTranslatorBase(EngineBase):
         system = options.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
         prompt = build_batch_prompt(longs, src, dst, options.get("context", ""))
         schema = batch_schema(len(longs))
+        raw = None
         try:
             raw = self._translate_batch_call(model, system, prompt, schema, options)
             obj = json.loads(raw)
             translated = [obj[f"t{i}"] for i in range(len(longs))]  # KeyError -> fallback
-        except Exception:  # noqa: BLE001 - any failure -> safe per-text fallback
-            self._log.warning("%s batch of %d failed; falling back to per-text", self.name, len(longs))
+        except Exception as e:  # noqa: BLE001 - any failure -> safe per-text fallback
+            # Surface WHY the batch failed so it's diagnosable from logs: JSONDecodeError
+            # = truncated JSON (num_ctx too small), HTTPStatusError = backend, KeyError =
+            # wrong item count. The raw response (DEBUG) pins truncation vs bad shape.
+            self._log.warning(
+                "%s batch of %d failed (%s: %s); falling back to per-text",
+                self.name, len(longs), type(e).__name__, e,
+            )
+            self._log.debug("batch prompt=%d chars; raw response=%r",
+                            len(prompt), (raw[:500] if isinstance(raw, str) else raw))
             translated = [self.translate(t, src, dst, options) for t in longs]
 
         out = list(stripped)  # start from the passthrough (short texts kept in place)

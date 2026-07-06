@@ -59,7 +59,17 @@ def detect_and_recognize(
     out: list[tuple[str, Region]] = []
     for region in regions:
         crop = deskew_crop(img, region)
+        t_crop = time.perf_counter()
         text = recognizer.recognize(crop, region, opt_recognize).strip()
+        # One line per region (verbose/DEBUG): what was detected, where, its class,
+        # per-crop recognize time, and what OCR read — logged even when empty
+        # ("detected but recognized nothing" is itself a signal). See /admin 동작.
+        logger.debug(
+            "  #%d %s bbox=%s%s score=%.2f %.0fms -> %r",
+            region.order, region.label or "?", region.bbox,
+            " vert" if region.vertical else "", region.score,
+            (time.perf_counter() - t_crop) * 1000, text,
+        )
         if text:
             out.append((text, region))
     logger.info(
@@ -100,6 +110,8 @@ def translate_regions(
         "translate %s: %d texts %.0fms",
         getattr(translator, "name", "?"), len(texts), (time.perf_counter() - t0) * 1000,
     )
+    for i, (src_text, dst_text) in enumerate(zip(texts, translations)):
+        logger.debug("  t%d %r -> %r", i, src_text, dst_text)  # verbose: source -> translation
     return [
         {"bounds": region.wire_box(), "source": text, "destination": translation}
         for (text, region), translation in zip(recognized, translations)
