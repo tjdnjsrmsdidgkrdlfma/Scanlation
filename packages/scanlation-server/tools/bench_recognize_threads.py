@@ -61,23 +61,26 @@ def _silenced():
             os.close(fd)
 
 
-def _init(threads: int, force_cpu: bool, idx_q) -> None:
-    """Pool-process setup. Pin the thread count BEFORE importing torch, optionally
-    pin CPU affinity to a distinct logical CPU, then load the model once so the
-    timed region is warm."""
+def _init(threads: int, force_cpu: bool, idx_q, order) -> None:
+    """Pool-process setup. Pin the thread count BEFORE importing torch, pin this
+    worker onto its own slice of CPUs, then load the model once so the timed region
+    is warm."""
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                 "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
         os.environ[var] = str(threads)
     os.environ["TOKENIZERS_PARALLELISM"] = "false"  # silence + avoid tokenizer fork deadlock
 
-    try:  # give each worker its own logical CPU so PHYS/LOGICAL land where we think
-        import psutil  # type: ignore
-        if idx_q is not None:
+    # Pin this worker to `threads` distinct logical CPUs -- a non-overlapping slice
+    # of the physical-first `order` -- so e.g. 8wx1t lands on 8 separate physical
+    # cores instead of the scheduler piling workers onto one. os.sched_setaffinity
+    # is Linux stdlib (no psutil needed); idx (0..workers-1) comes from idx_q.
+    if idx_q is not None and order and hasattr(os, "sched_setaffinity"):
+        try:
             idx = idx_q.get_nowait()
-            ncpu = psutil.cpu_count(logical=True) or 1
-            psutil.Process().cpu_affinity([idx % ncpu])
-    except Exception:  # noqa: BLE001 - pinning is a nicety, never fatal
-        pass
+            cpus = {order[(idx * threads + k) % len(order)] for k in range(threads)}
+            os.sched_setaffinity(0, cpus)
+        except Exception:  # noqa: BLE001 - pinning is a nicety, never fatal
+            pass
 
     with _silenced():  # the model loaders are the noisy part
         import torch
@@ -100,7 +103,7 @@ def _recognize(path: str) -> int:
 
 
 def _run_config(workers: int, threads: int, force_cpu: bool,
-                work: list, warmup: list, pin: bool) -> tuple[float, float]:
+                work: list, warmup: list, pin: bool, order) -> tuple[float, float]:
     """Run one (workers x threads) layout; return (crops/sec, seconds) over `work`
     measured warm (after every worker has spun up + loaded the model)."""
     import multiprocessing as mp
@@ -115,7 +118,7 @@ def _run_config(workers: int, threads: int, force_cpu: bool,
             idx_q = None
 
     ex = ProcessPoolExecutor(max_workers=workers, initializer=_init,
-                             initargs=(threads, force_cpu, idx_q))
+                             initargs=(threads, force_cpu, idx_q, order))
     try:
         # chunksize=1 over >=workers tasks makes every worker spin up + warm before
         # we start the clock, so model-load time never lands inside the timing.
@@ -247,6 +250,36 @@ def _parse_sweep(spec: str, logical: int) -> list[tuple[int, int]]:
     return out
 
 
+def _cpu_topology(logical: int):
+    """From Linux sysfs, return (cpu_order, physical_count):
+      * cpu_order      -- logical CPU ids ordered physical-first (one sibling from
+                          each core, then the next), so cpu_order[:physical] sit on
+                          distinct cores -- used to pin workers onto separate cores.
+      * physical_count -- distinct physical cores (exact, not guessed).
+    Returns (0..logical-1, None) off Linux or if sysfs can't be read."""
+    base = "/sys/devices/system/cpu"
+    groups: dict = {}
+    try:
+        for cpu in range(logical):
+            with open(f"{base}/cpu{cpu}/topology/physical_package_id") as f:
+                pkg = f.read().strip()
+            with open(f"{base}/cpu{cpu}/topology/core_id") as f:
+                core = f.read().strip()
+            groups.setdefault((pkg, core), []).append(cpu)
+    except OSError:
+        return list(range(logical)), None
+    if not groups:
+        return list(range(logical)), None
+    cores = [sorted(v) for _, v in sorted(groups.items())]
+    order, i = [], 0
+    while len(order) < logical:
+        for c in cores:
+            if i < len(c):
+                order.append(c[i])
+        i += 1
+    return order, len(cores)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -259,17 +292,17 @@ def main() -> int:
     args = ap.parse_args()
 
     logical = os.cpu_count() or 1
-    physical, has_psutil = None, False
-    try:
-        import psutil
-        has_psutil = True
-        physical = psutil.cpu_count(logical=False)
-    except Exception:  # noqa: BLE001
-        pass
+    order, physical = _cpu_topology(logical)  # Linux sysfs: physical-first order + exact count
     phys_note = ""
-    if not physical:
-        physical = max(1, logical // 2)  # guess: assume SMT2
-        phys_note = " (guessed; pip install psutil for exact + pinning)"
+    if physical is None:  # off Linux / unreadable sysfs -> psutil, else guess
+        try:
+            import psutil
+            physical = psutil.cpu_count(logical=False)
+        except Exception:  # noqa: BLE001
+            physical = None
+        if not physical:
+            physical = max(1, logical // 2)  # last resort: assume SMT2
+            phys_note = " (guessed; no sysfs/psutil)"
 
     if args.workers:
         sweep = _parse_sweep(args.workers, logical)
@@ -287,7 +320,7 @@ def main() -> int:
 
     crops, source = _build_crops(args.data, args.detect)
     work = _cycle_to(crops, args.items)
-    pin = has_psutil
+    pin = hasattr(os, "sched_setaffinity")  # Linux: pin each worker onto its own cores
 
     rows = [
         "# manga-ocr CPU recognize -- thread-layout benchmark",
@@ -306,7 +339,7 @@ def main() -> int:
     base = None
     for workers, threads in sweep:
         rate, dt = _run_config(workers, threads, True, work,  # force_cpu: this bench is CPU-only
-                               _cycle_to(crops, workers * 2), pin)
+                               _cycle_to(crops, workers * 2), pin, order)
         base = base or rate
         layout = f"{workers}w x {threads}t"
         print(f"{layout:>14} {workers * threads:>6} {rate:>10.2f} {dt:>7.2f} {rate / base:>7.2f}x")
