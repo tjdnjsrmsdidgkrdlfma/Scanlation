@@ -46,20 +46,20 @@ def detect_and_recognize(
     detector: Detector,
     recognizer: Recognizer,
     src: str,
-    opt_box: dict[str, Any],
-    opt_ocr: dict[str, Any],
+    opt_detect: dict[str, Any],
+    opt_recognize: dict[str, Any],
 ) -> list[tuple[str, Region]]:
     """Detect regions, order them, deskew+recognize each. Returns non-empty
     (text, region) pairs in reading order. This is the GPU/model half of the
     pipeline — the route runs it under the GPU lock. assign_reading_order is
     called exactly once here (it assigns region.order)."""
     t0 = time.perf_counter()
-    regions = assign_reading_order(detector.detect(img, opt_box), vertical_hint=(src == "ja"))
+    regions = assign_reading_order(detector.detect(img, opt_detect), vertical_hint=(src == "ja"))
     t_det = time.perf_counter()
     out: list[tuple[str, Region]] = []
     for region in regions:
         crop = deskew_crop(img, region)
-        text = recognizer.recognize(crop, region, opt_ocr).strip()
+        text = recognizer.recognize(crop, region, opt_recognize).strip()
         if text:
             out.append((text, region))
     logger.info(
@@ -86,7 +86,7 @@ def translate_regions(
     translator: Translator,
     src: str,
     dst: str,
-    opt_tsl: dict[str, Any],
+    opt_translate: dict[str, Any],
 ) -> list[dict]:
     """Translate recognized (text, region) pairs -> the wire result list. This is
     the LLM half of the pipeline — the route runs it OUTSIDE the GPU lock."""
@@ -95,14 +95,14 @@ def translate_regions(
         return []
     texts = [text for text, _ in recognized]
     t0 = time.perf_counter()
-    tsls = _translate_all(texts, src, dst, translator, opt_tsl)
+    translations = _translate_all(texts, src, dst, translator, opt_translate)
     logger.info(
         "translate %s: %d texts %.0fms",
         getattr(translator, "name", "?"), len(texts), (time.perf_counter() - t0) * 1000,
     )
     return [
-        {"ocr": text, "tsl": tsl, "box": region.wire_box()}
-        for (text, region), tsl in zip(recognized, tsls)
+        {"bounds": region.wire_box(), "source": text, "destination": translation}
+        for (text, region), translation in zip(recognized, translations)
     ]
 
 
@@ -114,13 +114,13 @@ def run_pipeline(
     translator: Translator,
     src: str,
     dst: str,
-    opt_box: dict[str, Any],
-    opt_ocr: dict[str, Any],
-    opt_tsl: dict[str, Any],
+    opt_detect: dict[str, Any],
+    opt_recognize: dict[str, Any],
+    opt_translate: dict[str, Any],
 ) -> list[dict]:
     """Detect+recognize then translate — the composed reference path (tests, and
     any single-call use). The route splits these two halves across the GPU lock."""
     recognized = detect_and_recognize(
-        img, detector=detector, recognizer=recognizer, src=src, opt_box=opt_box, opt_ocr=opt_ocr
+        img, detector=detector, recognizer=recognizer, src=src, opt_detect=opt_detect, opt_recognize=opt_recognize
     )
-    return translate_regions(recognized, translator=translator, src=src, dst=dst, opt_tsl=opt_tsl)
+    return translate_regions(recognized, translator=translator, src=src, dst=dst, opt_translate=opt_translate)

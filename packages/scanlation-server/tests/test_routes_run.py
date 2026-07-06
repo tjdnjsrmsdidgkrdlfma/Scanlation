@@ -13,8 +13,8 @@ def test_run_pipeline_work_returns_boxes():
     result = r.json()["result"]
     assert len(result) == 2
     for item in result:
-        assert set(item) == {"ocr", "tsl", "box"}
-        assert len(item["box"]) == 4
+        assert set(item) == {"bounds", "source", "destination"}
+        assert len(item["bounds"]) == 4
 
 
 def test_run_pipeline_md5_mismatch_is_400():

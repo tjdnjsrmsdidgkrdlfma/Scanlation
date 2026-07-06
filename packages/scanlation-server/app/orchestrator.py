@@ -39,11 +39,11 @@ class RunPlan:
     translator: str
     src: str
     dst: str
-    engines: str            # "det+rec+tsl"
-    opt_box: dict
-    opt_ocr: dict
-    opt_tsl: dict
-    oh: str                 # opt_hash(opt_box, opt_ocr, opt_tsl) — cache key part
+    engines: str            # "det+rec+tr"
+    opt_detect: dict
+    opt_recognize: dict
+    opt_translate: dict
+    oh: str                 # opt_hash(opt_detect, opt_recognize, opt_translate) — cache key part
 
     @property
     def cache_key(self) -> tuple:
@@ -55,16 +55,16 @@ def make_plan(request_options: dict | None) -> RunPlan:
     """Resolve the current selection + merge this request's option overrides into
     a RunPlan (request options win over the persisted per-engine overrides)."""
     sel = state.selection
-    det, rec, tsl = sel.detector, sel.recognizer, sel.translator
-    opt_box = state.options_for(det, request_options)
-    opt_ocr = state.options_for(rec, request_options)
-    opt_tsl = state.translator_options(tsl, request_options)
+    det, rec, tr = sel.detector, sel.recognizer, sel.translator
+    opt_detect = state.options_for(det, request_options)
+    opt_recognize = state.options_for(rec, request_options)
+    opt_translate = state.translator_options(tr, request_options)
     return RunPlan(
-        detector=det, recognizer=rec, translator=tsl,
+        detector=det, recognizer=rec, translator=tr,
         src=sel.lang_src, dst=sel.lang_dst,
-        engines=f"{det}+{rec}+{tsl}",
-        opt_box=opt_box, opt_ocr=opt_ocr, opt_tsl=opt_tsl,
-        oh=opt_hash(opt_box, opt_ocr, opt_tsl),
+        engines=f"{det}+{rec}+{tr}",
+        opt_detect=opt_detect, opt_recognize=opt_recognize, opt_translate=opt_translate,
+        oh=opt_hash(opt_detect, opt_recognize, opt_translate),
     )
 
 
@@ -88,7 +88,7 @@ def _read_sync(img, plan: RunPlan):
     translator = registry.get("translator", plan.translator)
     recognized = detect_and_recognize(
         img, detector=detector, recognizer=recognizer,
-        src=plan.src, opt_box=plan.opt_box, opt_ocr=plan.opt_ocr,
+        src=plan.src, opt_detect=plan.opt_detect, opt_recognize=plan.opt_recognize,
     )
     return recognized, translator
 
@@ -98,7 +98,7 @@ def _translate_sync(recognized, translator, plan: RunPlan):
     Runs in the threadpool OUTSIDE the GPU lock (ollama is a separate process),
     so one image's translation overlaps the next image's detect+recognize."""
     return translate_regions(
-        recognized, translator=translator, src=plan.src, dst=plan.dst, opt_tsl=plan.opt_tsl
+        recognized, translator=translator, src=plan.src, dst=plan.dst, opt_translate=plan.opt_translate
     )
 
 
@@ -157,7 +157,7 @@ async def run_page(plan: RunPlan, md5: str, contents: str) -> list:
         t_tsl = time.perf_counter()
         cache.put_run(md5, *plan.cache_key, result)
         logger.info(
-            "md5=%s ok regions=%d decode=%.0f lockwait=%.0f detect+ocr=%.0f translate=%.0f total=%.0fms",
+            "md5=%s ok regions=%d decode=%.0f lockwait=%.0f detect+recognize=%.0f translate=%.0f total=%.0fms",
             md5[:8], len(recognized),
             (t_dec - t0) * 1000, (t_lock - t_dec) * 1000, (t_det - t_lock) * 1000,
             (t_tsl - t_det) * 1000, (t_tsl - t0) * 1000,

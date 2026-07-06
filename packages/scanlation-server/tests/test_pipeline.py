@@ -25,15 +25,15 @@ def test_dummy_pipeline_golden():
         recognizer=DummyRecognizer(),
         translator=DummyTranslator(),
         src="ja", dst="ko",
-        opt_box={}, opt_ocr={}, opt_tsl={},
+        opt_detect={}, opt_recognize={}, opt_translate={},
     )
     assert len(result) == 2
-    assert result[0]["ocr"] == "REGION-0"
-    assert result[0]["tsl"] == "[ja->ko] REGION-0"
-    assert result[1]["ocr"] == "REGION-1"
+    assert result[0]["source"] == "REGION-0"
+    assert result[0]["destination"] == "[ja->ko] REGION-0"
+    assert result[1]["source"] == "REGION-1"
     for item in result:
-        assert len(item["box"]) == 4
-        x0, y0, x1, y1 = item["box"]
+        assert len(item["bounds"]) == 4
+        x0, y0, x1, y1 = item["bounds"]
         assert 0 <= x0 < x1 <= 400 and 0 <= y0 < y1 <= 300
 
 
@@ -63,12 +63,12 @@ def test_batch_path_used_when_available_and_order_preserved():
     result = run_pipeline(
         img,
         detector=DummyDetector(), recognizer=DummyRecognizer(), translator=tr,
-        src="ja", dst="ko", opt_box={}, opt_ocr={}, opt_tsl={},
+        src="ja", dst="ko", opt_detect={}, opt_recognize={}, opt_translate={},
     )
     assert len(result) == 2
     assert tr.batch_calls == 1 and tr.single_calls == 0  # one batch, no per-text
-    assert result[0]["ocr"] == "REGION-0" and result[0]["tsl"] == "[batch->ko] REGION-0"
-    assert result[1]["ocr"] == "REGION-1" and result[1]["tsl"] == "[batch->ko] REGION-1"
+    assert result[0]["source"] == "REGION-0" and result[0]["destination"] == "[batch->ko] REGION-0"
+    assert result[1]["source"] == "REGION-1" and result[1]["destination"] == "[batch->ko] REGION-1"
 
 
 def test_no_batch_method_falls_back_to_per_text():
@@ -78,9 +78,9 @@ def test_no_batch_method_falls_back_to_per_text():
     result = run_pipeline(
         img,
         detector=DummyDetector(), recognizer=DummyRecognizer(), translator=DummyTranslator(),
-        src="ja", dst="ko", opt_box={}, opt_ocr={}, opt_tsl={},
+        src="ja", dst="ko", opt_detect={}, opt_recognize={}, opt_translate={},
     )
-    assert result[0]["tsl"] == "[ja->ko] REGION-0"  # dummy per-text echo
+    assert result[0]["destination"] == "[ja->ko] REGION-0"  # dummy per-text echo
 
 
 TESTS = [

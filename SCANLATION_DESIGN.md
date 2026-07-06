@@ -5,7 +5,7 @@
 > **이 문서의 목적:** 컨텍스트가 길어져 **새 세션에서 이어서 빌드**하기 위한 자족적(self-contained) 설계서. 사전 지식 없이 이 문서만으로 구현을 시작할 수 있도록 작성됨.
 
 > ⚠ **이후 구현에서 바뀐 점 (이 문서는 원 설계 기록):** 현재 상태·사용법은 [README.md](README.md), 에이전트 지침은 [CLAUDE.md](CLAUDE.md)를 우선한다. 원 설계 대비 주요 divergence:
-> - **역할 어휘 통일** — 구 `ocr_extension` drop-in 호환(BOX/OCR/TSL)을 **폐기**하고 서버·와이어·확장·admin 전 계층을 `detector`/`recognizer`/`translator`로 통일. (결과 키 `{ocr,tsl,box}`만 데이터 필드로 유지)
+> - **역할 어휘 통일** — 구 `ocr_extension` drop-in 호환(BOX/OCR/TSL)을 **폐기**하고 서버·와이어·확장·admin 전 계층을 `detector`/`recognizer`/`translator`로 통일. 결과 아이템 키도 `{bounds, source, destination}`으로 개명(구 `{ocr,tsl,box}`).
 > - **엔드포인트 정리 (아래 §2.1 표는 원 설계 기록이라 그대로 둔다)** — 아무 클라도 호출하지 않는 구 프로토콜 잔재 `run_tsl`·`get_trans`·`get_active_options`·`get_plugin_data`를 **삭제**(설치 상태·번역 조회는 각각 `/get_settings/`·페이지 파이프라인에 흡수됨), 나머지는 실제 역할/동작에 맞춰 **리네임**: `run_ocrtsl`→`run_pipeline`, `set_models`→`set_engines`, `set_lang`→`set_languages`, `manage_plugins`→`install_plugins`. 용어 규칙도 통일 — **plugin=설치 단위, engine=런타임**.
 > - **설정 = `/admin` 단일 소스** — 엔진·모델·언어·프롬프트를 서버 관리 페이지(`/admin`, `state.json` 영속)에서 지정. `OLLAMA_MODEL`/`LLAMACPP_MODEL` 등 **모델 env 폴백 제거**(미설정 시 에러). 모델은 백엔드 설치 목록 드롭다운으로 선택.
 > - **테스트 = 자체 핸드롤 러너** — pytest 미사용. `python -m tests`(빠른 스위트) / `python -m tests.test_comic_text_and_bubble_detector`(개별 스모크).
@@ -52,7 +52,7 @@
 > ⚠ **이후 변경됨:** 구 `ocr_extension` drop-in 호환 목표는 폐기했다. 서버·번들 확장 둘 다
 > 이 레포 소유라, 역할 필드를 끝단까지 **detector/recognizer/translator**로 개명했다
 > (`BOXModels→detectors`, `box_selected→detector_selected`, `box_model_id→detector` 등).
-> 결과 아이템 키 `{ocr, tsl, box}`만 데이터 필드로 유지. 아래 표는 원 설계 기록.
+> 결과 아이템 키는 `{bounds, source, destination}`으로 개명(구 `{ocr, tsl, box}`). 아래 표는 원 설계 기록.
 
 | 엔드포인트 | 요청 | 응답 |
 |---|---|---|

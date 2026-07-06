@@ -27,7 +27,7 @@ def handshake_payload() -> dict:
     iso = list(LANGUAGES.keys())
     dets = registry.names("detector")
     recs = registry.names("recognizer")
-    tsls = registry.names("translator")
+    translators = registry.names("translator")
     return {
         "version": __version_array__,
         "Languages": iso,
@@ -36,10 +36,10 @@ def handshake_payload() -> dict:
         "Languages_hr": [LANGUAGES[k] for k in iso],
         "detectors": dets,
         "recognizers": recs,
-        "translators": tsls,
+        "translators": translators,
         "detectors_hr": _hr("detector", dets),
         "recognizers_hr": _hr("recognizer", recs),
-        "translators_hr": _hr("translator", tsls),
+        "translators_hr": _hr("translator", translators),
         "detector_selected": sel.detector,
         "recognizer_selected": sel.recognizer,
         "translator_selected": sel.translator,

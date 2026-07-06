@@ -24,7 +24,7 @@ def test_state_json_roundtrip():
     try:
         context.base_dir = Path(tempfile.mkdtemp())  # settings.data_dir delegates here
         st = AppState()
-        st.set_engines("det-x", "rec-x", "tsl-x")
+        st.set_engines("det-x", "rec-x", "tr-x")
         st.set_languages("en", "ja")
         st.set_engine_device("rec-x", "cuda")
         st.set_options("x", {"a": 1})

@@ -230,25 +230,25 @@
 
   // Text follows the show-original toggle; the full text is also the hover title.
   function setBoxText(box) {
-    box.textContent = cfg.showTranslated ? box.dataset.tsl : box.dataset.ocr;
+    box.textContent = cfg.showTranslated ? box.dataset.destination : box.dataset.source;
     box.title = box.textContent;
   }
 
   function makeBox(item, nw, nh) {
-    const f = boxFractions(item.box, nw, nh);
+    const f = boxFractions(item.bounds, nw, nh);
     const div = document.createElement("div");
     div.className = "scanlation-box";
     div.style.left = f.left * 100 + "%";
     div.style.top = f.top * 100 + "%";
     div.style.width = f.w * 100 + "%";
     div.style.height = f.h * 100 + "%";
-    div.dataset.ocr = item.ocr;
-    div.dataset.tsl = item.tsl;
+    div.dataset.source = item.source;
+    div.dataset.destination = item.destination;
     setBoxText(div);
     div.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      navigator.clipboard.writeText(div.dataset.ocr).catch(() => {});
+      navigator.clipboard.writeText(div.dataset.source).catch(() => {});
     });
     return div;
   }
@@ -258,7 +258,7 @@
     const dispH = entry.img.clientHeight || entry.img.height || 1;
     const [nw, nh] = naturalSize(entry.img);
     for (const box of entry.boxes) {
-      const f = boxFractions(JSON.parse(box.dataset.boxraw), nw, nh);
+      const f = boxFractions(JSON.parse(box.dataset.boundsraw), nw, nh);
       const wpx = f.w * dispW;
       const hpx = f.h * dispH;
       // size font by text length vs box area so long text shrinks to fit
@@ -276,7 +276,7 @@
     const entry = { img, wrapper, boxes: [] };
     for (const item of result) {
       const box = makeBox(item, nw, nh);
-      box.dataset.boxraw = JSON.stringify(item.box);
+      box.dataset.boundsraw = JSON.stringify(item.bounds);
       wrapper.appendChild(box);
       entry.boxes.push(box);
     }
@@ -296,7 +296,7 @@
     badge.title = msg; // cause (e.g. "server 502: ...") on hover
     wrapper.appendChild(badge);
     // boxes stays empty: the badge is a child of wrapper (removed with it) and
-    // has no boxraw, so it must not go through sizeFonts()/onResize().
+    // has no boundsraw, so it must not go through sizeFonts()/onResize().
     tracked.push({ img, wrapper, boxes: [] });
   }
 
