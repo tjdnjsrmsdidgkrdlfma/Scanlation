@@ -7,8 +7,9 @@ shape are the user's working setup. Key tunings:
   * num_ctx=2048 -> one KV size for the single + batch paths (no model reload
                     when the pipeline switches between them)
   * temperature=0, seed=42, top_p=1.0, num_gpu=31  -> deterministic, GPU-resident
-  * repeat_penalty=1.3 -> stop runaway repetition on elongated SFX/onomatopoeia
-                    (else a batch's JSON string never closes -> parse fail -> fallback)
+  * repeat_penalty=1.1 (ollama's own default; admin-tunable) -> raise it when
+                    elongated SFX/onomatopoeia loop the model (the batch's JSON
+                    string then never closes -> parse fail -> per-text fallback)
 
 ollama runs as a separate service (env OLLAMA_ENDPOINT, default
 http://127.0.0.1:11434/api). The client lifecycle + guardrails live in
@@ -34,7 +35,7 @@ class OllamaTranslator(HttpTranslatorBase):
         "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
         "seed": {"type": int, "default": 42, "description": "RNG seed."},
         "top_p": {"type": float, "default": 1.0, "description": "Nucleus sampling p."},
-        "repeat_penalty": {"type": float, "default": 1.3, "description": "Penalize token repetition (ollama default 1.1). Raise to stop runaway loops on elongated SFX/onomatopoeia (else a batch's JSON string never closes). Too high hurts normal fluency."},
+        "repeat_penalty": {"type": float, "default": 1.1, "description": "Penalize token repetition (ollama's own default 1.1 = neutral). Raise (e.g. 1.3-1.5) to stop runaway loops on elongated SFX/onomatopoeia (else a batch's JSON string never closes). Too high hurts normal fluency."},
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking' (slower; off for speed)."},
     }
 
