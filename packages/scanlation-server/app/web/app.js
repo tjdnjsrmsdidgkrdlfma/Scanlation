@@ -288,6 +288,36 @@ function render() {
   syncInstallPoll();
 }
 
+// Switching language re-renders every form from DATA (to re-localize dynamically
+// built strings like option descriptions), which would wipe not-yet-saved edits.
+// Snapshot the editable controls before that re-render and restore them after —
+// keyed by id, or by engine+opt for the per-engine option blocks — so toggling
+// the language never discards in-progress input. (The auth gate is outside #app.)
+function formKey(el) {
+  if (el.id) return "#" + el.id;
+  const block = el.closest("[data-engine]");
+  const eng = block ? block.dataset.engine : "";
+  if (el.dataset.opt) return `opt:${eng}:${el.dataset.opt}`;
+  if (el.hasAttribute("data-engine-device")) return `dev:${eng}`;
+  return "";
+}
+function captureForm() {
+  const snap = {};
+  document.querySelectorAll("#app input, #app select, #app textarea").forEach((el) => {
+    const k = formKey(el);
+    if (k) snap[k] = el.type === "checkbox" ? el.checked : el.value;
+  });
+  return snap;
+}
+function restoreForm(snap) {
+  document.querySelectorAll("#app input, #app select, #app textarea").forEach((el) => {
+    const k = formKey(el);
+    if (!(k in snap)) return;
+    if (el.type === "checkbox") el.checked = snap[k];
+    else el.value = snap[k];
+  });
+}
+
 // While the server reports an install running that THIS tab isn't driving (e.g. a
 // page reloaded mid-install, or another tab kicked it off), poll so the row flips
 // from "설치 중…" to "설치됨" on its own. The driving tab updates via its stream.
@@ -829,7 +859,7 @@ $("lang-toggle").addEventListener("click", (ev) => {
   if (!opt || opt.dataset.lang === LANG) return;
   setLang(opt.dataset.lang);
   applyLang();
-  if (DATA) render();
+  if (DATA) { const snap = captureForm(); render(); restoreForm(snap); }
 });
 $("tabbar").addEventListener("click", (ev) => {
   const tab = ev.target.closest(".tab");
