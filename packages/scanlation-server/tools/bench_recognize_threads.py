@@ -47,6 +47,7 @@ def _init(threads: int, force_cpu: bool, idx_q) -> None:
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                 "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
         os.environ[var] = str(threads)
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"  # silence + avoid tokenizer fork deadlock
 
     try:  # give each worker its own logical CPU so PHYS/LOGICAL land where we think
         import psutil  # type: ignore
@@ -169,6 +170,35 @@ def _detected_crops(files: list[Path]) -> list[str]:
     return crops
 
 
+def _detect_child(files, q) -> None:
+    """Run detection and hand the crop paths back over `q`. Runs in a throwaway
+    subprocess (see _detect_isolated) so torch stays out of the parent."""
+    try:
+        q.put(("ok", _detected_crops(files)))
+    except BaseException as e:  # noqa: BLE001 - ship any failure across the boundary
+        q.put(("err", f"{type(e).__name__}: {e}"))
+
+
+def _detect_isolated(files) -> list:
+    """Detect crops in a forked subprocess so the parent -- which later forks the
+    recognize pool -- never imports torch. Forking a process that has already
+    initialised torch deadlocks the child on inherited thread-pool locks; that is
+    exactly what hung the in-process --detect path."""
+    import multiprocessing as mp
+    try:
+        ctx = mp.get_context("fork")
+    except ValueError:  # no fork (Windows); --detect is a Linux-server path anyway
+        ctx = mp.get_context()
+    q = ctx.Queue()
+    p = ctx.Process(target=_detect_child, args=(files, q))
+    p.start()
+    status, payload = q.get()
+    p.join()
+    if status == "err":
+        sys.exit(f"detect failed: {payload}")
+    return payload
+
+
 def _build_crops(data, use_detect: bool) -> tuple[list[str], str]:
     """Return (crop paths, human source label). No --data -> synthetic."""
     if data is None:
@@ -178,7 +208,7 @@ def _build_crops(data, use_detect: bool) -> tuple[list[str], str]:
     if not files:
         sys.exit(f"no images found under {data}")
     if use_detect:
-        return _detected_crops(files), f"detected from {len(files)} pages"
+        return _detect_isolated(files), f"detected from {len(files)} pages"
     return [str(p) for p in files], f"{len(files)} image files"
 
 
