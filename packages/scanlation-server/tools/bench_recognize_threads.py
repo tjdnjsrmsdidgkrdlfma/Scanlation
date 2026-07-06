@@ -262,9 +262,18 @@ def main() -> int:
         "  ceiling, not the core count.",
     ]
 
-    report = Path.cwd() / f"bench_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-    report.write_text("\n".join(rows) + "\n", encoding="utf-8")
-    print(f"\nreport written: {report}")
+    name = f"bench_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    body = "\n".join(rows) + "\n"
+    # cwd first (nice on a normal checkout); fall back to the temp dir so a
+    # read-only cwd (e.g. `/` inside the container as a non-root user) can't throw
+    # away a finished run.
+    for target in (Path.cwd() / name, Path(tempfile.gettempdir()) / name):
+        try:
+            target.write_text(body, encoding="utf-8")
+            print(f"\nreport written: {target}")
+            return 0
+        except OSError as e:  # noqa: PERF203
+            print(f"(could not write {target}: {e})")
     return 0
 
 
