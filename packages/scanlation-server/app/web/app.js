@@ -42,7 +42,7 @@ const I18N = {
     "prompt.save": "저장 & 사용",
     "prompt.note": "빌트인을 편집해 같은 이름으로 저장하면 그 이름의 커스텀 프리셋이 덮어씁니다. 새 이름으로 저장하면 복제됩니다. 커스텀을 삭제하면 빌트인으로 되돌아갑니다.",
     "options.h2": "플러그인 옵션",
-    "options.hint": "선택된 플러그인의 옵션 (예: TSL 모델 태그)",
+    "options.hint": "선택된 플러그인의 옵션 (예: 번역 모델 태그)",
     "options.none": "설정 가능한 옵션이 없습니다.",
     "options.notInstalled": "이 플러그인은 설치되어 있지 않습니다. 「플러그인 설치」 탭에서 설치하세요.",
     // engine option descriptions (ko override of the server's English schema desc)
@@ -133,7 +133,7 @@ const I18N = {
     "prompt.save": "Save & use",
     "prompt.note": "Editing a builtin and saving under the same name creates a custom preset that overrides it. Saving under a new name clones it. Deleting a custom preset reverts to the builtin.",
     "options.h2": "Plugin options",
-    "options.hint": "Options for the selected plugins (e.g. TSL model tag)",
+    "options.hint": "Options for the selected plugins (e.g. translation model tag)",
     "options.none": "No configurable options.",
     "options.notInstalled": "This plugin isn't installed. Install it in the Install plugins tab.",
     "plugins.h2": "Plugin installation",
