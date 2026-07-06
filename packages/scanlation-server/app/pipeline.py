@@ -66,7 +66,7 @@ def detect_and_recognize(
         # ("detected but recognized nothing" is itself a signal). See /admin 동작.
         logger.debug(
             "  #%d %s bbox=%s%s score=%.2f %.0fms -> %r",
-            region.order, region.label or "?", region.bbox,
+            region.order, getattr(region, "label", "") or "?", region.bbox,
             " vert" if region.vertical else "", region.score,
             (time.perf_counter() - t_crop) * 1000, text,
         )
