@@ -10,8 +10,10 @@ Plugin-facing only: the server core must not import this module (see device.py).
 """
 from __future__ import annotations
 
+import logging
+
 from scanlation_sdk.contracts import EngineBase
-from scanlation_sdk.device import pick_device, release_cuda_cache
+from scanlation_sdk.device import device_label, pick_device, release_cuda_cache
 
 
 class LocalModelEngineBase(EngineBase):
@@ -53,8 +55,12 @@ class LocalModelEngineBase(EngineBase):
             return
         if not self.is_installed():
             raise RuntimeError(f"{self.name} weights not installed. {self.INSTALL_HINT}")
-        self._load(pick_device(self._device_override or self.DEFAULT_DEVICE))
+        device = pick_device(self._device_override or self.DEFAULT_DEVICE)
+        self._load(device)
         self._loaded = True
+        # Uniform load line for every local engine (per-engine logger namespace kept).
+        logging.getLogger(f"scanlation.{self.name}").info(
+            "%s loaded on %s", self.display_name, device_label(device))
 
     def unload(self) -> None:
         self._unload()

@@ -57,7 +57,6 @@ class MangaOcrRecognizer(LocalModelEngineBase):
         # force CPU only when the device hint resolves to cpu; cuda/rocm lets torch pick.
         force_cpu = device == "cpu"
         self._m = MangaOcr(force_cpu=force_cpu)
-        logger.info("manga-ocr loaded (force_cpu=%s)", force_cpu)
 
     def _unload(self) -> None:
         self._m = None

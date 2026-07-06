@@ -92,7 +92,6 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
             from transformers import RTDetrV2ForObjectDetection
             model = RTDetrV2ForObjectDetection.from_pretrained(str(d), local_files_only=True)
         self._model = model.to(self._device).eval()
-        logger.info("RT-DETR loaded from %s on %s", d.name, self._device)
 
     def _unload(self) -> None:
         self._model = None

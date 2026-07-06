@@ -23,6 +23,12 @@ def pick_device(hint: str) -> str:
     return "cpu"
 
 
+def device_label(device: str) -> str:
+    """User-facing label for a resolved torch device: 'cpu' -> 'CPU', 'cuda' ->
+    'GPU' (matches the admin UI's CPU/GPU wording). Anything else -> uppercased."""
+    return {"cpu": "CPU", "cuda": "GPU"}.get(device.lower(), device.upper())
+
+
 def release_cuda_cache() -> None:
     """Free cached VRAM after an unload; silent no-op without torch/GPU."""
     try:

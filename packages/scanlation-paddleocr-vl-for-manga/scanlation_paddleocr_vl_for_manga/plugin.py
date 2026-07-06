@@ -93,7 +93,6 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
             device_map=device,
             local_files_only=True,  # contract: load() never downloads
         ).eval()
-        logger.info("PaddleOCR-VL loaded on %s", device)
 
     def _unload(self) -> None:
         self._model = None
