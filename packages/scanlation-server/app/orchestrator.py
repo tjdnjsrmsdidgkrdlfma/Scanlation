@@ -153,14 +153,19 @@ async def run_page(plan: RunPlan, md5: str, contents: str) -> list:
             recognized, translator = await run_in_threadpool(_read_sync, img, plan)
         t_det = time.perf_counter()
         async with state.translate_sem:
+            t_sem = time.perf_counter()  # sem acquired: split our queue-wait from the actual call
             result = await run_in_threadpool(_translate_sync, recognized, translator, plan)
         t_tsl = time.perf_counter()
         cache.put_run(md5, *plan.cache_key, result)
+        # semwait = time queued on translate_sem (our backpressure); translate = the
+        # actual backend call (ollama generate + any ollama-side queue). Splitting them
+        # tells whether OUR limit or the BACKEND is the bottleneck when translates pile up.
         logger.info(
-            "md5=%s ok regions=%d decode=%.0f lockwait=%.0f detect+recognize=%.0f translate=%.0f total=%.0fms",
+            "md5=%s ok regions=%d decode=%.0f lockwait=%.0f detect+recognize=%.0f "
+            "semwait=%.0f translate=%.0f total=%.0fms",
             md5[:8], len(recognized),
             (t_dec - t0) * 1000, (t_lock - t_dec) * 1000, (t_det - t_lock) * 1000,
-            (t_tsl - t_det) * 1000, (t_tsl - t0) * 1000,
+            (t_sem - t_det) * 1000, (t_tsl - t_sem) * 1000, (t_tsl - t0) * 1000,
         )
         return result
 
