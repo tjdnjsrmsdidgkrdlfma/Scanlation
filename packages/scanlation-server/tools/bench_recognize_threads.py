@@ -273,9 +273,17 @@ def main() -> int:
 
     if args.workers:
         sweep = _parse_sweep(args.workers, logical)
-    else:  # baseline + a small curve that includes PHYS and LOGICAL
-        counts = sorted({2, physical, logical} & set(range(1, logical + 1)))
-        sweep = [(1, logical)] + [(c, 1) for c in counts]
+    else:
+        # baseline (1 worker, all cores) + a 1-thread-per-worker scaling curve
+        # (powers of two up to the logical count, plus the physical & logical marks)
+        pts, c = {physical, logical}, 1
+        while c <= logical:
+            pts.add(c)
+            c *= 2
+        sweep = [(1, logical)] + [(w, 1) for w in sorted(pts) if w <= logical]
+        # + 2-thread-per-worker at the physical marks, so "same cores, 1t vs 2t"
+        # is visible: 8wx2t vs 16wx1t (both 16 cores), 4wx2t vs 8wx1t (both 8).
+        sweep += [(w, 2) for w in sorted({max(1, physical // 2), physical})]
 
     crops, source = _build_crops(args.data, args.detect)
     work = _cycle_to(crops, args.items)
