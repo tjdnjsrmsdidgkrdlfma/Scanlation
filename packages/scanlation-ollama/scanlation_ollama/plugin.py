@@ -7,9 +7,11 @@ shape are the user's working setup. Key tunings:
   * num_ctx=2048 -> one KV size for the single + batch paths (no model reload
                     when the pipeline switches between them)
   * temperature=0, seed=42, top_p=1.0, num_gpu=31  -> deterministic, GPU-resident
-  * repeat_penalty=1.1 (ollama's own default; admin-tunable) -> raise it when
-                    elongated SFX/onomatopoeia loop the model (the batch's JSON
-                    string then never closes -> parse fail -> per-text fallback)
+  * repeat_penalty / frequency_penalty (admin-tunable anti-repetition) -> elongated
+                    SFX/onomatopoeia send the model into a loop, so the batch's JSON
+                    string never closes -> parse fail -> per-text fallback. repeat_penalty
+                    is flat (often can't break a confident loop); frequency_penalty
+                    escalates with the repeat count and does. Both default to neutral.
 
 ollama runs as a separate service (env OLLAMA_ENDPOINT, default
 http://127.0.0.1:11434/api). The client lifecycle + guardrails live in
@@ -35,7 +37,8 @@ class OllamaTranslator(HttpTranslatorBase):
         "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
         "seed": {"type": int, "default": 42, "description": "RNG seed."},
         "top_p": {"type": float, "default": 1.0, "description": "Nucleus sampling p."},
-        "repeat_penalty": {"type": float, "default": 1.1, "description": "Penalize token repetition (ollama's own default 1.1 = neutral). Raise (e.g. 1.3-1.5) to stop runaway loops on elongated SFX/onomatopoeia (else a batch's JSON string never closes). Too high hurts normal fluency."},
+        "repeat_penalty": {"type": float, "default": 1.1, "description": "Flat repetition penalty (ollama default 1.1 = neutral). Divides a repeated token's score once — often can't break a confident SFX loop. Prefer frequency_penalty for that."},
+        "frequency_penalty": {"type": float, "default": 0.0, "description": "Escalating repetition penalty: subtracts count×value from a token's score, so it grows with each repeat and bounds runaway SFX/onomatopoeia loops (which flat repeat_penalty can't). Try ~1.0-2.0; 0 = off."},
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking' (slower; off for speed)."},
     }
 
@@ -59,6 +62,7 @@ class OllamaTranslator(HttpTranslatorBase):
             "seed": options["seed"],
             "top_p": options["top_p"],
             "repeat_penalty": options["repeat_penalty"],
+            "frequency_penalty": options["frequency_penalty"],
             "num_gpu": options["num_gpu"],
             "num_ctx": options["num_ctx"],
         }

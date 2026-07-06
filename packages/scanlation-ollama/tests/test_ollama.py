@@ -41,7 +41,7 @@ def test_builds_request_from_tuned_config():
     assert 'text="こんにちは"' in body["prompt"]
     # user's tuned options
     o = body["options"]
-    assert o == {"temperature": 0.0, "seed": 42, "top_p": 1.0, "repeat_penalty": 1.1, "num_gpu": 31, "num_ctx": 2048}
+    assert o == {"temperature": 0.0, "seed": 42, "top_p": 1.0, "repeat_penalty": 1.1, "frequency_penalty": 0.0, "num_gpu": 31, "num_ctx": 2048}
 
 
 def test_options_override():
