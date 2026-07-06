@@ -212,6 +212,9 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .opt-check input:checked + .toggle { background: var(--accent2); }
 .opt-check input:checked + .toggle::after { transform: translateX(14px); background: #fff; }
 .opt-check input:focus-visible + .toggle { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the behavior tab reuses this switch outside .opt-fields (which colours labels
+   var(--txt)), so give its toggle label the same readable text colour */
+[data-view="behavior"] .opt-check { color: var(--txt); }
 .opt-empty { color: var(--muted); font-size: 12px; }
 .opt-device { display: block; margin: 8px 0 4px; }
 .opt-device .desc { color: var(--muted); font-size: 11px; font-weight: 400; }
