@@ -90,6 +90,7 @@ def get_settings() -> dict:
             "prompt_active": sel.prompt_active,
             "min_image_dim": sel.min_image_dim,
             "verbose_log": sel.verbose_log,
+            "translate_concurrency": sel.translate_concurrency,
         },
         "languages": LANGUAGES,
         "engines": {role: _engine_entries(role) for role in ROLE_NAMES},
@@ -156,15 +157,22 @@ def delete_prompt(req: SelectPromptRequest) -> dict:
 @router.post("/set_client_config/")
 def set_client_config(req: SetClientConfigRequest) -> dict:
     """Persist behavior settings (동작 tab): min_image_dim (image filter shorter-side
-    px, delivered to the extension via GET /) and verbose_log (DEBUG logging toggle,
-    re-applied to the live logger)."""
+    px, delivered to the extension via GET /), verbose_log (DEBUG logging toggle,
+    re-applied to the live logger), and translate_concurrency (concurrent-translation
+    limit, swaps translate_sem at runtime)."""
     if req.min_image_dim is not None and req.min_image_dim < 0:
         raise HTTPException(status_code=400, detail="min_image_dim must be >= 0")
-    state.set_client_config(min_image_dim=req.min_image_dim, verbose_log=req.verbose_log)
+    if req.translate_concurrency is not None and req.translate_concurrency < 1:
+        raise HTTPException(status_code=400, detail="translate_concurrency must be >= 1")
+    state.set_client_config(
+        min_image_dim=req.min_image_dim, verbose_log=req.verbose_log,
+        translate_concurrency=req.translate_concurrency,
+    )
     return {
         "status": "success",
         "min_image_dim": state.selection.min_image_dim,
         "verbose_log": state.selection.verbose_log,
+        "translate_concurrency": state.selection.translate_concurrency,
     }
 
 

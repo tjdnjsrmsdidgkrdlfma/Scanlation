@@ -126,6 +126,21 @@ def test_client_config_verbose_log():
         c.post("/set_client_config/", json={"verbose_log": False})  # cleanup (also resets the live logger)
 
 
+def test_client_config_translate_concurrency():
+    c = client()
+    # server-only (NOT in the handshake the extension reads); shown in the admin snapshot
+    assert "translate_concurrency" not in c.get("/").json()
+    assert "translate_concurrency" in c.get("/get_settings/").json()["selection"]
+    try:
+        r = c.post("/set_client_config/", json={"translate_concurrency": 8})
+        assert r.status_code == 200 and r.json()["translate_concurrency"] == 8
+        assert c.get("/get_settings/").json()["selection"]["translate_concurrency"] == 8
+        # below 1 -> 400
+        assert c.post("/set_client_config/", json={"translate_concurrency": 0}).status_code == 400
+    finally:
+        c.post("/set_client_config/", json={"translate_concurrency": 4})  # cleanup
+
+
 TESTS = [
     test_get_settings_shape,
     test_get_settings_merges_catalog,
@@ -136,6 +151,7 @@ TESTS = [
     test_clear_cache_drops_runs,
     test_client_config_min_image_dim,
     test_client_config_verbose_log,
+    test_client_config_translate_concurrency,
 ]
 
 if __name__ == "__main__":

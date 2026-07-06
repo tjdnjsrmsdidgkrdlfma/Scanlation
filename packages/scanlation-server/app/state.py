@@ -39,6 +39,12 @@ class Selection:
     # Seeded from SCANLATION_LOG_LEVEL (DEBUG -> on), toggled at runtime in /admin
     # (동작 tab) and re-applied to the scanlation logger without a restart.
     verbose_log: bool = settings.log_level.upper() == "DEBUG"
+    # Max images translating concurrently off the GPU lock (bounds how many the
+    # server sends to ollama at once). No env — edited in /admin (동작 tab) and
+    # applied at runtime by swapping translate_sem (see AppState.set_client_config).
+    # Match the ollama daemon's OLLAMA_NUM_PARALLEL (the lower of the two = real
+    # parallelism); ollama can't be queried for it, so keeping them in sync is manual.
+    translate_concurrency: int = 4
 
 
 class AppState:
@@ -54,7 +60,8 @@ class AppState:
         self.gpu_lock = asyncio.Lock()
         # Bound concurrent translations (they run off the GPU lock) so many
         # in-flight images don't overrun the ollama backend's parallel slots.
-        self.translate_sem = asyncio.Semaphore(settings.translate_concurrency)
+        # Seeded from the persisted selection; swapped at runtime by set_client_config.
+        self.translate_sem = asyncio.Semaphore(self.selection.translate_concurrency)
         # md5/opts identity -> in-flight Future, so duplicate concurrent
         # requests for the same image attach to one computation.
         self.inflight: dict[tuple, asyncio.Future] = {}
@@ -103,17 +110,24 @@ class AppState:
         return self.selection.devices.get(engine_name)
 
     def set_client_config(
-        self, *, min_image_dim: int | None = None, verbose_log: bool | None = None
+        self, *, min_image_dim: int | None = None, verbose_log: bool | None = None,
+        translate_concurrency: int | None = None,
     ) -> None:
         """Persist behavior settings (the /admin 동작 tab): the extension image
-        filter and the verbose-log toggle. Verbose is re-applied to the live logger
-        immediately so it takes effect without a restart."""
+        filter, the verbose-log toggle, and the concurrent-translation limit. Verbose
+        re-applies to the live logger and translate_concurrency swaps translate_sem —
+        both take effect at runtime without a restart."""
         if min_image_dim is not None:
             self.selection.min_image_dim = max(0, int(min_image_dim))
         if verbose_log is not None:
             self.selection.verbose_log = bool(verbose_log)
             from .logconfig import apply_verbose
             apply_verbose(self.selection.verbose_log)
+        if translate_concurrency is not None:
+            self.selection.translate_concurrency = max(1, int(translate_concurrency))
+            # New Semaphore instance: in-flight translates finish on the old one, new
+            # requests use the new limit (run_page reads state.translate_sem each call).
+            self.translate_sem = asyncio.Semaphore(self.selection.translate_concurrency)
         self.save()
 
     def set_options(self, engine_name: str, options: dict[str, Any]) -> None:

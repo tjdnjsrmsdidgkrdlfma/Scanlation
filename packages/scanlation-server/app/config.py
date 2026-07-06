@@ -39,13 +39,6 @@ class Settings:
     # = no auth (local/dev; the current default). Set it to lock a public deploy.
     auth_token: str = field(default_factory=lambda: _env("SCANLATION_AUTH_TOKEN", ""))
 
-    # Max images translating concurrently (translation runs off the GPU lock).
-    # Set ~= the ollama server's OLLAMA_NUM_PARALLEL so concurrent requests fill
-    # its parallel slots without overrunning them.
-    translate_concurrency: int = field(
-        default_factory=lambda: int(_env("SCANLATION_TRANSLATE_CONCURRENCY", "4"))
-    )
-
     # Log level for the app's own loggers (scanlation.*). Third-party libs stay at
     # WARNING (root) so transformers/httpx don't drown the log. See app.logconfig.
     log_level: str = field(default_factory=lambda: _env("SCANLATION_LOG_LEVEL", "INFO"))

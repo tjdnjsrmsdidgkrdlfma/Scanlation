@@ -82,6 +82,8 @@ const I18N = {
     "behavior.minDim.desc": "이미지의 짧은 변이 이 값보다 작으면 아이콘·배너로 보고 번역하지 않습니다. 확장이 접속 시 이 값을 받아 적용합니다. 0 = 모든 이미지 번역.",
     "behavior.verbose.label": "상세 로그 (DEBUG)",
     "behavior.verbose.desc": "켜면 탐지 영역·bounds·OCR/번역 결과를 로그에 남깁니다(진단용, 재시작 없이 즉시 적용). 끄면 개수·시간 요약만.",
+    "behavior.concurrency.label": "동시 번역 이미지 수",
+    "behavior.concurrency.desc": "GPU 락 밖에서 한 번에 번역할 이미지 수(재시작 없이 즉시 적용). ollama의 OLLAMA_NUM_PARALLEL과 맞추세요 — 둘 중 낮은 값이 실제 병렬도이고, 이 값만 높이면 요청이 큐에 밀려 타임아웃·폴백이 납니다.",
     "toast.behaviorSaved": "동작 설정 저장됨",
     "field.default": "(기본값)",
     "field.defaultPrefix": "기본",
@@ -163,6 +165,8 @@ const I18N = {
     "behavior.minDim.desc": "Images whose shorter side is under this are treated as icons/banners and not translated. The extension picks this up on connect. 0 = translate everything.",
     "behavior.verbose.label": "Verbose logs (DEBUG)",
     "behavior.verbose.desc": "Logs each detection's bounds, OCR text and translation (for diagnosis; applied instantly, no restart). Off = counts/timing summary only.",
+    "behavior.concurrency.label": "Concurrent translations",
+    "behavior.concurrency.desc": "How many images translate at once off the GPU lock (applied instantly, no restart). Match the ollama daemon's OLLAMA_NUM_PARALLEL — the lower of the two is the real parallelism; setting only this higher just queues requests into timeouts/fallback.",
     "toast.behaviorSaved": "Behavior settings saved",
     "field.default": "(default)",
     "field.defaultPrefix": "default",
@@ -565,6 +569,7 @@ function renderPlugins() {
 function renderBehavior() {
   $("min-image-dim").value = DATA.selection.min_image_dim;
   $("verbose-log").checked = !!DATA.selection.verbose_log;
+  $("translate-concurrency").value = DATA.selection.translate_concurrency;
 }
 
 // --- actions --------------------------------------------------------------
@@ -840,9 +845,11 @@ async function clearCache() {
 async function saveBehavior() {
   try {
     const n = parseInt($("min-image-dim").value, 10);
+    const c = parseInt($("translate-concurrency").value, 10);
     await postJSON("/set_client_config/", {
       min_image_dim: Number.isFinite(n) ? n : 0,
       verbose_log: $("verbose-log").checked,
+      translate_concurrency: Number.isFinite(c) ? Math.max(1, c) : 1,
     });
     toast(t("toast.behaviorSaved"), "ok");
     await load();

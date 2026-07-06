@@ -29,10 +29,13 @@ def test_state_json_roundtrip():
         st.set_engine_device("rec-x", "cuda")
         st.set_options("x", {"a": 1})
         st.save_prompt("mine", "PROMPT")
-        st.set_client_config(min_image_dim=123, verbose_log=True)
+        old_sem = st.translate_sem
+        st.set_client_config(min_image_dim=123, verbose_log=True, translate_concurrency=8)
+        assert st.translate_sem is not old_sem  # semaphore instance swapped at runtime
         # a fresh instance reads state.json back; dataclass equality covers every field
         assert AppState().selection == st.selection
         assert AppState().selection.verbose_log is True  # verbose toggle persisted
+        assert AppState().selection.translate_concurrency == 8  # concurrency persisted
     finally:
         context.base_dir = saved_base
 

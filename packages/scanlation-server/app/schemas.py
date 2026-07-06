@@ -69,3 +69,4 @@ class SelectPromptRequest(BaseModel):
 class SetClientConfigRequest(BaseModel):
     min_image_dim: Optional[int] = None   # extension image filter (shorter-side px)
     verbose_log: Optional[bool] = None    # DEBUG logging toggle (per-detection/translation detail)
+    translate_concurrency: Optional[int] = None  # max images translating at once (swaps translate_sem)

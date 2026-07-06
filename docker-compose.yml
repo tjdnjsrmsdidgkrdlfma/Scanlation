@@ -32,10 +32,8 @@ services:
       # secret in a gitignored .env next to this file (SCANLATION_AUTH_TOKEN=...);
       # empty/absent = no auth. Enter the same value in the extension popup + /admin.
       SCANLATION_AUTH_TOKEN: ${SCANLATION_AUTH_TOKEN:-}
-      # Max images translating at once (translation runs off the GPU lock). Match
-      # the host ollama's OLLAMA_NUM_PARALLEL so concurrent requests fill its
-      # parallel slots without overrunning them. See the "ollama 동시성" README note.
-      SCANLATION_TRANSLATE_CONCURRENCY: ${SCANLATION_TRANSLATE_CONCURRENCY:-4}
+      # Concurrent-translation limit is no longer an env: it's set in /admin (동작 tab,
+      # persisted to state.json). Match it to the host ollama's OLLAMA_NUM_PARALLEL (below).
       # Log level for scanlation.* (timing/plugin lines). DEBUG for more detail.
       SCANLATION_LOG_LEVEL: ${SCANLATION_LOG_LEVEL:-INFO}
       # Timezone for log timestamps. The slim base is UTC by default, so %(asctime)s
