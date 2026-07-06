@@ -7,6 +7,8 @@ shape are the user's working setup. Key tunings:
   * num_ctx=2048 -> one KV size for the single + batch paths (no model reload
                     when the pipeline switches between them)
   * temperature=0, seed=42, top_p=1.0, num_gpu=31  -> deterministic, GPU-resident
+  * repeat_penalty=1.3 -> stop runaway repetition on elongated SFX/onomatopoeia
+                    (else a batch's JSON string never closes -> parse fail -> fallback)
 
 ollama runs as a separate service (env OLLAMA_ENDPOINT, default
 http://127.0.0.1:11434/api). The client lifecycle + guardrails live in
@@ -32,6 +34,7 @@ class OllamaTranslator(HttpTranslatorBase):
         "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
         "seed": {"type": int, "default": 42, "description": "RNG seed."},
         "top_p": {"type": float, "default": 1.0, "description": "Nucleus sampling p."},
+        "repeat_penalty": {"type": float, "default": 1.3, "description": "Penalize token repetition (ollama default 1.1). Raise to stop runaway loops on elongated SFX/onomatopoeia (else a batch's JSON string never closes). Too high hurts normal fluency."},
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking' (slower; off for speed)."},
     }
 
@@ -54,6 +57,7 @@ class OllamaTranslator(HttpTranslatorBase):
             "temperature": options["temperature"],
             "seed": options["seed"],
             "top_p": options["top_p"],
+            "repeat_penalty": options["repeat_penalty"],
             "num_gpu": options["num_gpu"],
             "num_ctx": options["num_ctx"],
         }

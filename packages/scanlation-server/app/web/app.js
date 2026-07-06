@@ -55,6 +55,7 @@ const I18N = {
     "opt.Ollama.model": "ollama 모델 태그 (예: gemma4:31b). 필수 — /admin에서 선택",
     "opt.Ollama.num_ctx": "KV 캐시 컨텍스트 창 (번역 입력은 짧음)",
     "opt.Ollama.num_gpu": "GPU로 오프로드할 레이어 수",
+    "opt.Ollama.repeat_penalty": "토큰 반복 억제 (ollama 기본 1.1). SFX·의성어 늘임(으으으…) 폭주를 막으려면 올림. 너무 높으면 일반 번역이 어색해짐.",
     "opt.llama.cpp.model": "모델 id (서버 /v1/models). 필수 — /admin에서 선택",
     "opt.llama.cpp.max_tokens": "생성 최대 토큰 수",
     "plugins.h2": "플러그인 설치",
