@@ -27,6 +27,7 @@ spawn stays happy.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 import tempfile
@@ -38,6 +39,26 @@ from pathlib import Path
 # --- per-process worker state (one set per pool process) ---
 _MODEL = None
 _CACHE: dict = {}
+
+
+@contextlib.contextmanager
+def _silenced():
+    """Send this process's stdout+stderr to devnull at the fd level for the block,
+    then restore. Model loaders (loguru 'Using CPU', tqdm 'Loading weights', the HF
+    hub warning) write to those fds; workers/childs return data over pipes, not
+    stdout, so nothing useful is lost -- only the chatter. Restored on exit so a
+    genuine error afterwards is still visible."""
+    save1, save2 = os.dup(1), os.dup(2)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
+        yield
+    finally:
+        os.dup2(save1, 1)
+        os.dup2(save2, 2)
+        for fd in (devnull, save1, save2):
+            os.close(fd)
 
 
 def _init(threads: int, force_cpu: bool, idx_q) -> None:
@@ -58,12 +79,12 @@ def _init(threads: int, force_cpu: bool, idx_q) -> None:
     except Exception:  # noqa: BLE001 - pinning is a nicety, never fatal
         pass
 
-    import torch
-    torch.set_num_threads(threads)
-    from manga_ocr import MangaOcr  # lazy: torch + transformers
-
-    global _MODEL
-    _MODEL = MangaOcr(force_cpu=force_cpu)
+    with _silenced():  # the model loaders are the noisy part
+        import torch
+        torch.set_num_threads(threads)
+        from manga_ocr import MangaOcr  # lazy: torch + transformers
+        global _MODEL
+        _MODEL = MangaOcr(force_cpu=force_cpu)
 
 
 def _recognize(path: str) -> int:
@@ -174,7 +195,9 @@ def _detect_child(files, q) -> None:
     """Run detection and hand the crop paths back over `q`. Runs in a throwaway
     subprocess (see _detect_isolated) so torch stays out of the parent."""
     try:
-        q.put(("ok", _detected_crops(files)))
+        with _silenced():  # detector load + transformers chatter
+            crops = _detected_crops(files)
+        q.put(("ok", crops))
     except BaseException as e:  # noqa: BLE001 - ship any failure across the boundary
         q.put(("err", f"{type(e).__name__}: {e}"))
 
