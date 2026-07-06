@@ -113,6 +113,19 @@ def test_client_config_min_image_dim():
         c.post("/set_client_config/", json={"min_image_dim": 80})  # cleanup
 
 
+def test_client_config_verbose_log():
+    c = client()
+    # server-only (NOT in the handshake the extension reads); shown in the admin snapshot
+    assert "verbose_log" not in c.get("/").json()
+    assert "verbose_log" in c.get("/get_settings/").json()["selection"]
+    try:
+        r = c.post("/set_client_config/", json={"verbose_log": True})
+        assert r.status_code == 200 and r.json()["verbose_log"] is True
+        assert c.get("/get_settings/").json()["selection"]["verbose_log"] is True
+    finally:
+        c.post("/set_client_config/", json={"verbose_log": False})  # cleanup (also resets the live logger)
+
+
 TESTS = [
     test_get_settings_shape,
     test_get_settings_merges_catalog,
@@ -122,6 +135,7 @@ TESTS = [
     test_active_prompt_injected_into_translator_options,
     test_clear_cache_drops_runs,
     test_client_config_min_image_dim,
+    test_client_config_verbose_log,
 ]
 
 if __name__ == "__main__":

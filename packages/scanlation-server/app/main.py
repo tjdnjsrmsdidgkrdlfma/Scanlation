@@ -63,6 +63,10 @@ async def _log_requests(request: Request, call_next):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging(settings.log_level)
+    # The persisted 동작-tab verbose toggle wins over the env default after a restart.
+    from .logconfig import apply_verbose
+    from .state import state
+    apply_verbose(state.selection.verbose_log)
     settings.ensure_dirs()
     yield
 

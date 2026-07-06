@@ -78,6 +78,8 @@ const I18N = {
     "behavior.hint": "확장 동작 설정",
     "behavior.minDim.label": "최소 이미지 변 (px)",
     "behavior.minDim.desc": "이미지의 짧은 변이 이 값보다 작으면 아이콘·배너로 보고 번역하지 않습니다. 확장이 접속 시 이 값을 받아 적용합니다. 0 = 모든 이미지 번역.",
+    "behavior.verbose.label": "상세 로그 (DEBUG)",
+    "behavior.verbose.desc": "켜면 탐지 영역·bounds·OCR/번역 결과를 로그에 남깁니다(진단용, 재시작 없이 즉시 적용). 끄면 개수·시간 요약만.",
     "toast.behaviorSaved": "동작 설정 저장됨",
     "field.default": "(기본값)",
     "field.defaultPrefix": "기본",
@@ -157,6 +159,8 @@ const I18N = {
     "behavior.hint": "Extension behavior settings",
     "behavior.minDim.label": "Min image side (px)",
     "behavior.minDim.desc": "Images whose shorter side is under this are treated as icons/banners and not translated. The extension picks this up on connect. 0 = translate everything.",
+    "behavior.verbose.label": "Verbose logs (DEBUG)",
+    "behavior.verbose.desc": "Logs each detection's bounds, OCR text and translation (for diagnosis; applied instantly, no restart). Off = counts/timing summary only.",
     "toast.behaviorSaved": "Behavior settings saved",
     "field.default": "(default)",
     "field.defaultPrefix": "default",
@@ -528,6 +532,7 @@ function renderPlugins() {
 // --- behavior (client settings, delivered to the extension via handshake) -
 function renderBehavior() {
   $("min-image-dim").value = DATA.selection.min_image_dim;
+  $("verbose-log").checked = !!DATA.selection.verbose_log;
 }
 
 // --- actions --------------------------------------------------------------
@@ -803,7 +808,10 @@ async function clearCache() {
 async function saveBehavior() {
   try {
     const n = parseInt($("min-image-dim").value, 10);
-    await postJSON("/set_client_config/", { min_image_dim: Number.isFinite(n) ? n : 0 });
+    await postJSON("/set_client_config/", {
+      min_image_dim: Number.isFinite(n) ? n : 0,
+      verbose_log: $("verbose-log").checked,
+    });
     toast(t("toast.behaviorSaved"), "ok");
     await load();
   } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }

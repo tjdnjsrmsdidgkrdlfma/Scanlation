@@ -47,3 +47,10 @@ def configure_logging(level: str = "INFO") -> None:
             "uvicorn.access": {"handlers": [], "level": "WARNING", "propagate": False},
         },
     })
+
+
+def apply_verbose(on: bool) -> None:
+    """Flip the app's own logger (scanlation.*) to DEBUG for the verbose
+    per-detection/translation detail, or back to INFO — at runtime, no reconfigure.
+    Called by the /admin 동작 toggle and once at startup from the persisted state."""
+    logging.getLogger("scanlation").setLevel(logging.DEBUG if on else logging.INFO)

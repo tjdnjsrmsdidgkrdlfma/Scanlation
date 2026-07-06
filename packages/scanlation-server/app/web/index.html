@@ -94,6 +94,10 @@
         <button class="btn primary" id="save-behavior" data-i18n="btn.save">저장</button>
       </div>
       <p class="note" data-i18n="behavior.minDim.desc">이미지의 짧은 변이 이 값보다 작으면 아이콘·배너로 보고 번역하지 않습니다. 확장이 접속 시 이 값을 받아 적용합니다. 0 = 모든 이미지 번역.</p>
+      <div class="row">
+        <label class="grow"><input id="verbose-log" type="checkbox" /> <span data-i18n="behavior.verbose.label">상세 로그 (DEBUG)</span></label>
+      </div>
+      <p class="note" data-i18n="behavior.verbose.desc">켜면 탐지 영역·bounds·OCR/번역 결과를 로그에 남깁니다(진단용, 재시작 없이 즉시 적용). 끄면 개수·시간 요약만.</p>
     </section>
 
     <!-- 유지보수 -->

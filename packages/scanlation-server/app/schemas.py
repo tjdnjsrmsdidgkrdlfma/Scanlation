@@ -68,3 +68,4 @@ class SelectPromptRequest(BaseModel):
 # --- admin: /set_client_config/ (동작 tab) ---------------------------------
 class SetClientConfigRequest(BaseModel):
     min_image_dim: Optional[int] = None   # extension image filter (shorter-side px)
+    verbose_log: Optional[bool] = None    # DEBUG logging toggle (per-detection/translation detail)

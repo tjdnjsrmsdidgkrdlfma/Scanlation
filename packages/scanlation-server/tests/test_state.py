@@ -29,9 +29,10 @@ def test_state_json_roundtrip():
         st.set_engine_device("rec-x", "cuda")
         st.set_options("x", {"a": 1})
         st.save_prompt("mine", "PROMPT")
-        st.set_client_config(min_image_dim=123)
+        st.set_client_config(min_image_dim=123, verbose_log=True)
         # a fresh instance reads state.json back; dataclass equality covers every field
         assert AppState().selection == st.selection
+        assert AppState().selection.verbose_log is True  # verbose toggle persisted
     finally:
         context.base_dir = saved_base
 

@@ -89,6 +89,7 @@ def get_settings() -> dict:
             "lang_dst": sel.lang_dst,
             "prompt_active": sel.prompt_active,
             "min_image_dim": sel.min_image_dim,
+            "verbose_log": sel.verbose_log,
         },
         "languages": LANGUAGES,
         "engines": {role: _engine_entries(role) for role in ROLE_NAMES},
@@ -154,12 +155,17 @@ def delete_prompt(req: SelectPromptRequest) -> dict:
 
 @router.post("/set_client_config/")
 def set_client_config(req: SetClientConfigRequest) -> dict:
-    """Persist extension-behavior settings (동작 tab). Currently: min_image_dim
-    (the image filter's shorter-side px). Delivered to the extension via GET /."""
+    """Persist behavior settings (동작 tab): min_image_dim (image filter shorter-side
+    px, delivered to the extension via GET /) and verbose_log (DEBUG logging toggle,
+    re-applied to the live logger)."""
     if req.min_image_dim is not None and req.min_image_dim < 0:
         raise HTTPException(status_code=400, detail="min_image_dim must be >= 0")
-    state.set_client_config(min_image_dim=req.min_image_dim)
-    return {"status": "success", "min_image_dim": state.selection.min_image_dim}
+    state.set_client_config(min_image_dim=req.min_image_dim, verbose_log=req.verbose_log)
+    return {
+        "status": "success",
+        "min_image_dim": state.selection.min_image_dim,
+        "verbose_log": state.selection.verbose_log,
+    }
 
 
 @router.post("/clear_cache/")

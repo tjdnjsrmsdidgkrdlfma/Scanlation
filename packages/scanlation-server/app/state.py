@@ -35,6 +35,10 @@ class Selection:
     # Client behavior (delivered to the extension via the handshake): skip images
     # whose shorter side is under this many px (icons/banners). 0 = no filter.
     min_image_dim: int = settings.min_image_dim
+    # Verbose (DEBUG) logging: per-detection/translation detail (see app.pipeline).
+    # Seeded from SCANLATION_LOG_LEVEL (DEBUG -> on), toggled at runtime in /admin
+    # (동작 tab) and re-applied to the scanlation logger without a restart.
+    verbose_log: bool = settings.log_level.upper() == "DEBUG"
 
 
 class AppState:
@@ -98,10 +102,18 @@ class AppState:
         DEFAULT_DEVICE (there is no global device)."""
         return self.selection.devices.get(engine_name)
 
-    def set_client_config(self, *, min_image_dim: int | None = None) -> None:
-        """Persist extension-behavior settings (the /admin 동작 tab)."""
+    def set_client_config(
+        self, *, min_image_dim: int | None = None, verbose_log: bool | None = None
+    ) -> None:
+        """Persist behavior settings (the /admin 동작 tab): the extension image
+        filter and the verbose-log toggle. Verbose is re-applied to the live logger
+        immediately so it takes effect without a restart."""
         if min_image_dim is not None:
             self.selection.min_image_dim = max(0, int(min_image_dim))
+        if verbose_log is not None:
+            self.selection.verbose_log = bool(verbose_log)
+            from .logconfig import apply_verbose
+            apply_verbose(self.selection.verbose_log)
         self.save()
 
     def set_options(self, engine_name: str, options: dict[str, Any]) -> None:
