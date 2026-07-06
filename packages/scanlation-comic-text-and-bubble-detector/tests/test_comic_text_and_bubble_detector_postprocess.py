@@ -59,6 +59,8 @@ def test_to_regions_axis_aligned_and_vertical_flag():
     assert r.angle == 0.0
     assert r.vertical is True
     assert abs(r.score - 0.7) < 1e-6
+    assert r.label == "text_free"  # detector class carried onto the region
+    assert to_regions([_det(0, 0, 10, 5, label="text_bubble")])[0].label == "text_bubble"
 
 
 TESTS = [

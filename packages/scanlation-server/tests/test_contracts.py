@@ -25,6 +25,13 @@ def test_region_from_quad_bbox_is_enclosing():
     assert r.angle == 15.0
 
 
+def test_region_label_defaults_empty_and_passes_through():
+    assert Region.from_bbox(0, 0, 10, 10).label == ""          # unclassified default
+    r = Region.from_bbox(0, 0, 10, 10, label="text_free")
+    assert r.label == "text_free"                              # detector class carried
+    assert len(r.wire_box()) == 4                              # label stays off the wire
+
+
 def test_dummy_engines_satisfy_protocols():
     assert isinstance(DummyDetector(), Detector)
     assert isinstance(DummyRecognizer(), Recognizer)
@@ -153,6 +160,7 @@ def test_local_engine_device_override():
 TESTS = [
     test_region_from_bbox_shape_and_wire,
     test_region_from_quad_bbox_is_enclosing,
+    test_region_label_defaults_empty_and_passes_through,
     test_dummy_engines_satisfy_protocols,
     test_dummy_detector_emits_rotated_region,
     test_pick_device_cpu_is_pinned,

@@ -74,5 +74,5 @@ def to_regions(dets: list[Det]) -> list[Region]:
     out: list[Region] = []
     for d in dets:
         x0, y0, x1, y1 = d.xyxy
-        out.append(Region.from_bbox(x0, y0, x1, y1, score=d.score, vertical=(y1 - y0) > (x1 - x0)))
+        out.append(Region.from_bbox(x0, y0, x1, y1, score=d.score, vertical=(y1 - y0) > (x1 - x0), label=d.label))
     return out

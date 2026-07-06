@@ -28,6 +28,7 @@ class Region:
     mask: Optional[np.ndarray] = None       # optional per-region segmentation mask
     score: float = 1.0
     order: int = 0                          # reading order (assigned by pipeline)
+    label: str = ""                         # detector class (e.g. text_bubble/text_free); "" if unclassified. server-internal, not on the wire
 
     @staticmethod
     def _bbox_from_poly(poly: np.ndarray) -> tuple[int, int, int, int]:
