@@ -59,7 +59,15 @@ def run_one(server: str, token: str, img: Path, force: bool) -> list[dict]:
     b64 = base64.b64encode(img.read_bytes()).decode("ascii")
     md5 = hashlib.md5(b64.encode("utf-8")).hexdigest()
     body = json.dumps({"md5": md5, "contents": b64, "force": force}).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        # A bare Python-urllib UA trips Cloudflare's Browser Integrity Check (403,
+        # "error code: 1010") when the server sits behind Cloudflare — the request
+        # never reaches the origin. A real browser UA passes it. (Hitting the origin
+        # directly, e.g. --server http://127.0.0.1:4010 on the host, sidesteps CF entirely.)
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    }
     if token:
         headers["X-Auth-Token"] = token
     req = urllib.request.Request(f"{server}/run_pipeline/", data=body, headers=headers)
