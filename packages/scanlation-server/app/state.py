@@ -42,9 +42,12 @@ class Selection:
     # Max images translating concurrently off the GPU lock (bounds how many the
     # server sends to ollama at once). No env — edited in /admin (동작 tab) and
     # applied at runtime by swapping translate_sem (see AppState.set_client_config).
-    # Match the ollama daemon's OLLAMA_NUM_PARALLEL (the lower of the two = real
-    # parallelism); ollama can't be queried for it, so keeping them in sync is manual.
-    translate_concurrency: int = 4
+    # Default 1 is the safe floor: it never exceeds ollama's OLLAMA_NUM_PARALLEL
+    # (whatever it is), so no request queues into a timeout. Even at 1 the translate
+    # overlaps the next image's detect+recognize (it runs off the GPU lock). Parallel
+    # GENERATION is opt-in: raise this AND OLLAMA_NUM_PARALLEL together (the lower of
+    # the two = real parallelism; ollama can't be queried, so keeping them in sync is manual).
+    translate_concurrency: int = 1
 
 
 class AppState:

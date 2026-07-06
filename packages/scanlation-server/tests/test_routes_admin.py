@@ -138,7 +138,7 @@ def test_client_config_translate_concurrency():
         # below 1 -> 400
         assert c.post("/set_client_config/", json={"translate_concurrency": 0}).status_code == 400
     finally:
-        c.post("/set_client_config/", json={"translate_concurrency": 4})  # cleanup
+        c.post("/set_client_config/", json={"translate_concurrency": 1})  # cleanup (back to default)
 
 
 TESTS = [
