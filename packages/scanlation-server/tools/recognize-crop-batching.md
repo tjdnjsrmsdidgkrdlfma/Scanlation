@@ -1,6 +1,6 @@
 # recognize crop-batching — 설계 분석 (manga-ocr vs PaddleOCR-VL)
 
-작성 2026-07-07. 이건 **측정이 아니라 설계 분석**이다 — 아직 벤치를 짜지 않았고, 여기서 정한 건 "어느 엔진을 어디에 어떻게 배치하면 값어치가 있나"까지다. 실측은 별도(맨 아래 "다음").
+작성 2026-07-07. 설계 분석으로 시작해 같은 날 [bench_recognize_batch.py](bench_recognize_batch.py)로 **실측까지 했고, 실측이 설계 가정을 두 군데 뒤집었다** — 확정된 수치·판단은 아래 **[실측](#실측-2026-07-07)** 절과 갱신된 **[판단](#판단-실측-반영)** 절을 따른다. 이 서두부터 §gpu_lock까지는 실측 전 a-priori 분석으로 남겨둔다(추론 경위).
 
 ## 배경 — 왜 이 문서
 
@@ -12,7 +12,9 @@
 2. **어떤 함정**이 있고, 그 함정이 common case인가 tail인가.
 3. **어디를 손봐야** 하나(통합 지점), 그리고 이게 `gpu_lock` 개편과 얽히나.
 
-**결론 선점**: 배치의 실질 대상은 **manga-ocr 한쪽**이다 — 고정 해상도·CPU 병목·straggler-면역 인코더 세 박자가 맞아 깔끔한 승리. PaddleOCR-VL은 배치가 correctness 문제는 아니지만 **payoff÷effort가 나쁘다**(동적 해상도 ragged + 스텝 단가 + GPU 기본이라 동기 약함). 그리고 배치는 **`gpu_lock`과 무관한 [pipeline.py](../app/pipeline.py) 국소 리팩터**로 들어간다.
+**결론 선점 (a-priori)**: 배치의 실질 대상은 **manga-ocr 한쪽**이다 — 고정 해상도·CPU 병목·straggler-면역 인코더 세 박자가 맞아 깔끔한 승리. PaddleOCR-VL은 배치가 correctness 문제는 아니지만 **payoff÷effort가 나쁘다**(동적 해상도 ragged + 스텝 단가 + GPU 기본이라 동기 약함). 그리고 배치는 **`gpu_lock`과 무관한 [pipeline.py](../app/pipeline.py) 국소 리팩터**로 들어간다.
+
+> **실측이 이 선점을 깎았다.** manga-ocr 배치는 되지만 "깔끔한 승리"는 아니다 — 실제 페이지에서 **~1.27x(B=8)**에 그치고, 같은 베이스라인의 멀티워커(~1.8x)에 진다. "straggler-면역 인코더 은행"은 정확히 뒤집혔다: CPU에서 **인코더는 배치가 거의 안 먹히고**(c_8/c_1≈7), amortize되는 건 디코더인데 하필 거기 straggler가 산다. `pipeline.py` 국소 리팩터라는 점만 그대로. 자세히는 아래 [실측](#실측-2026-07-07).
 
 ## 두 엔진의 구조 차이 (핵심)
 
@@ -51,6 +53,7 @@
 - 합: +6 − 1.7 → **순이득 유지.** straggler 없으면(다 15토큰) 디코드도 30 vs 120으로 압승.
 
 > **c8 ≈ 2·c1은 추정치다.** 실제 배치 단가는 안 재봤다. 이 문서의 유일한 정량 미지수이고, 아래 벤치가 이걸 확정한다.
+> → **실측: c_8/c_1 = 3.47**(추정 2보다 큼). 인코더가 안 amortize돼서다 — 이 예시가 깔던 "인코더 은행" 전제 자체가 틀렸다. [실측](#실측-2026-07-07) 참고.
 
 ## ragged / left-pad / VRAM — PaddleOCR-VL 쪽 실제 비용
 
@@ -111,21 +114,68 @@ for region in regions:
 2. **lock 제거만으로 end-to-end 이득은 지금 없다.** 파이프라인이 **translate-bound**라 detect+recognize를 이미지 간 겹쳐도 병목이 **`lockwait` → `semwait`로 자리만 옮긴다**(아티팩트 시뮬레이션 결론). 실측 레버는 **K(`translate_sem`)**이다. recognize 병렬화 1.85배가 end-to-end에 드러나려면 translate가 병목에서 빠져야 하고, 그건 K를 크게 올려야 하는데 `OLLAMA_NUM_PARALLEL`에 묶여 있다.
 3. **값어치 있는 "분리"는 위의 페이지 내 detect→batch-recognize다** — lock 무관, manga-ocr 배치 이득이 실제로 꽂히는 자리. detect/recognize를 아예 별도 stage(각자 pool)로 쪼개는 큰 개편은 그 뒤 로그의 `lockwait`/`semwait`을 보고 결정해도 늦지 않다.
 
-## 판단 (2026-07-07)
+## 실측 (2026-07-07)
 
-- **진행 후보 — manga-ocr `recognize_batch` 시임 + 배치 벤치.** 고정 224·CPU 병목·면역 인코더라 배치가 깔끔한 승리. 위험 낮음. 미지수는 c8/c1과 실제 straggler 분포뿐 → 벤치로 확정.
-- **보류 — PaddleOCR-VL 배치.** correctness 문제는 아니나 ragged/position_ids 엔지니어링 + 스텝 단가 + GPU 기본이라 payoff÷effort 나쁨. per-crop 폴백에 둔다.
-- **독립적으로 유용 — registry 안전성을 `gpu_lock`에서 분리.** 나중에 lock을 어떻게 하든 필요한 정리.
-- **지금 안 함 — `gpu_lock` 제거 / cross-image detect·recognize 병렬화.** translate-bound라 이득 없고 레이스 위험만. K를 올릴 여지가 실측으로 확인된 뒤에.
+[bench_recognize_batch.py](bench_recognize_batch.py)로 잰다 — 실제 페이지(Pixiv 한 챕터 21장)에서 detector로 크롭 42개를 잘라(detect + deskew, 파이프라인과 동일) manga-ocr CPU에서 batch 1~16 스윕. 셋으로 쪼개 잰다: **인코더 단독**(straggler-면역), **고정길이 생성**(L=32, straggler 인위 제거 = 이상적 상한), **자연 생성**(실제 길이 = straggler 포함). PaddleOCR-VL은 컨테이너 torch가 CPU 빌드라 `cuda.is_available()`=False로 이번엔 스킵.
+
+| batch | encoder speedup | fixed-length speedup | natural speedup |
+|---|---|---|---|
+| 1 | 1.00x | 1.00x | 1.00x |
+| 2 | 1.11x | 1.45x | 1.09x |
+| 4 | 1.15x | 1.99x | 1.23x |
+| 8 | 1.15x | **2.30x** | **1.27x** |
+| 16 | 1.04x | 2.40x | 1.16x |
+
+(speedup = 그 batch의 crops/sec ÷ B=1. **핵심 한 줄: 이상적 상한이 2.3x, 실제는 1.27x(B=8).**)
+
+### 뒤집힌 것 1 — 인코더는 CPU에서 "은행"이 아니다
+
+설계는 "인코더가 straggler-면역이라 공짜로 배치되는 은행"이라 봤는데(§straggler, §순이득 예시) **정반대**다. fixed-length의 ms/batch를 인코더/디코더로 쪼개면:
+
+| 부분 | c_8/c_1 | 배치가 먹히나 |
+|---|---|---|
+| 인코더 (ViT 224²) | **6.97** (≈8, 거의 선형) | ❌ B=1에서 이미 CPU 대역폭 포화 |
+| 디코더 (생성 32스텝) | **1.69** | ✅ 잘 amortize |
+
+인코더는 배치로 못 줄이는 **고정세**처럼 작동해 전체 c_8/c_1을 3.47로, 이상적 상한을 **2.3x**로 묶는다. amortize되는 건 디코더 — 문서가 straggler 위험으로 지목했던 바로 그 부분이다.
+
+### 뒤집힌 것 2 — straggler가 이상적 2.3x를 실제 1.27x로 깎는다
+
+배치가 잘 먹히는 디코더가 하필 straggler가 사는 곳이다. 실제 출력 길이는 **median 26 / p90 49 / max 55 토큰**으로 편차가 있고, stock transformers는 continuous batching을 안 해 배치 전체가 최장까지 돈다. 그래서 straggler-free 2.3x가 **자연 생성에선 1.27x(B=8)**로 붕괴한다(처리량 −54%: 13.0 → 6.0 crops/sec). **B=16은 1.16x로 오히려 후퇴** — B=8이 유일한 스윗스팟.
+
+- **정확도 OK**: 배치 경로가 실제 일본어를 per-crop과 동일하게 읽는다(`MangaOcr.__call__`의 `convert("L")` grayscale + `post_process` 복제 확인). 조용한 회귀 없음.
+
+### 배치 vs 멀티워커 — 곱해지지 않는다
+
+둘 다 "1 크롭 × 전 코어 × 직렬"([pipeline.py](../app/pipeline.py) 현재 동작)을 같은 베이스라인으로 잰 값이다:
+
+| 방식 | 실측 | 성격 |
+|---|---|---|
+| crop-batching | ~1.27x | intra-page, pipeline.py 국소 |
+| 멀티워커 ([스레드 벤치](recognize-cpu-threads.md)) | ~1.8x | 동시성, gpu_lock→semaphore 필요 |
+
+**멀티워커가 배치보다 낫고, 둘은 곱해지지 않는다** — 같은 CPU 메모리 대역폭 여유를 두 방식이 나눠 쓰는 것이라, 멀티워커가 이미 대역폭 천장(스레드 벤치가 확인한 flattening) 근처다. 배치는 디코더 weight 읽기를 줄여 천장을 살짝 밀 뿐이고, 순진하게 얹으면(16스레드 배치 × N워커) 오버서브스크립션으로 오히려 느려진다. 합쳐도 ~1.8–2.0x가 상한이지 1.27×1.8=2.3x는 안 나온다.
+
+## 판단 (실측 반영)
+
+- **manga-ocr `recognize_batch` — 보류 쪽으로 기움.** 실이득 1.27x(B=8)로 작고 멀티워커(1.8x)보다 못하다. 저위험 국소 변경이라 값이 0은 아니나, **translate-bound면 end-to-end엔 안 드러난다** → 구현 전 recognize의 end-to-end 비중부터 로그로 확인(§다음).
+- **보류 — PaddleOCR-VL 배치.** ragged/position_ids + 스텝 단가 + GPU 기본이라 payoff÷effort 나쁨(그대로). 아직 미측정 — GPU torch 세팅 후 프로브 재실행.
+- **완료 — registry 안전성을 `gpu_lock`에서 분리.** 커밋 2c7e38e; 자체 lock으로 `gpu_lock`과 무관하게 thread-safe. (§gpu_lock 1번이 요구한 전제.)
+- **CPU recognize를 정말 빠르게 할 거면 배치보다 멀티워커(동시성)가 우선** — 1.8x > 1.27x 실측. 단 `gpu_lock`→semaphore 필요하고, 역시 recognize 비중 확인이 선행. translate-bound면 둘 다 가려진다.
 
 ## 다음 — 실측 항목
 
-1. manga-ocr **배치 forward 단가**: batch 1/2/4/8/16의 crops/sec. [bench_recognize_threads.py](bench_recognize_threads.py) 옆에 배치 축 벤치를 하나 더. → c8/c1 확정, straggler 없는 상한 확인.
-2. 실제 페이지 크롭의 **출력 길이 분포**(straggler 실측): 배치 이득이 순차 대비 실제로 얼마 남는지.
-3. (조건부) PaddleOCR-VL — `PaddleOcrVLProcessor`가 배치 멀티이미지를 패딩까지 지원하는지 코드 확인. 지원하면 재평가.
+1. ~~manga-ocr **배치 forward 단가**(c8/c1)~~ — **완료**([실측](#실측-2026-07-07)): c_8/c_1=3.47, 이상적 2.3x.
+2. ~~실제 페이지 크롭의 **출력 길이 분포**(straggler)~~ — **완료**: median 26/p90 49/max 55 → 실이득 1.27x(B=8).
+3. **결정타 — recognize의 end-to-end 비중.** [orchestrator.py `run_page`](../app/orchestrator.py#L163-L169)가 페이지마다 찍는 `detect+recognize=…ms` vs `translate=…ms`를 실제 처리 로그에서 확인. translate가 지배하면 배치든 멀티워커든 값어치가 marginal → 이게 구현 여부를 최종 판정한다. **이걸 먼저.**
+4. (조건부) PaddleOCR-VL — GPU torch(ROCm)로 바꾼 뒤 벤치의 배치 프로브 재실행. `PaddleOcrVLProcessor`가 배치 멀티이미지를 패딩까지 지원해 출력이 per-crop과 일치하는지(correctness gate). 통과하면 재평가.
 
 ## 관련
 
 - 스레드 배치(intra-op vs 멀티워커) 실측은 [recognize-cpu-threads.md](recognize-cpu-threads.md). 이 문서는 그 "대안 후보(crop 배치)"를 이어받은 것.
 - 동시성·`gpu_lock`·translate 배치의 그림은 아티팩트 [동시성과 번역 배치](https://claude.ai/code/artifact/543ff4c0-d2be-4d4f-9d70-fc35fac17c1f).
 - 통합 지점: [pipeline.py `detect_and_recognize`](../app/pipeline.py) · [orchestrator.py `run_page`](../app/orchestrator.py) · 엔진 [manga-ocr plugin](../../scanlation-manga-ocr/scanlation_manga_ocr/plugin.py) / [PaddleOCR-VL plugin](../../scanlation-paddleocr-vl-for-manga/scanlation_paddleocr_vl_for_manga/plugin.py).
+순서	작업	위험	값어치
+0	registry 안전성 분리	낮음	동시성 전제 + 하이진
+1	동시성 ~4-way (lock→Semaphore)	중(torch 스레드 결정)	K=8 목표 해결
+2	crop-batching	낮음	단일-페이지 지연(선택)
