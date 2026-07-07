@@ -11,9 +11,15 @@ services:
     devices:
       - "/dev/kfd:/dev/kfd"     # ROCm compute node (its presence = "AMD" to detect_gpu_vendor)
       - "/dev/dri:/dev/dri"     # render nodes (cardN / renderDN)
-    group_add:                  # the app user (uid 10001) must be in the host video+render groups
-      - video
-      - render                  # if 'render' resolves wrong, use the numeric GID from `getent group render`
+    # The app user (uid 10001) must be in the host groups that OWN the device nodes.
+    # Use numeric GIDs, not names: 'render' often isn't in the slim image's /etc/group
+    # (-> "Unable to find group render"), and the GID must match the HOST's, not the
+    # container's. Find yours on the host, then set them in .env:
+    #   getent group render   # render:x:<GID>:  -> SCANLATION_RENDER_GID
+    #   getent group video    # video:x:<GID>:   -> SCANLATION_VIDEO_GID
+    group_add:
+      - "${SCANLATION_RENDER_GID:-105}"   # owns /dev/kfd + /dev/dri/renderD* (the important one)
+      - "${SCANLATION_VIDEO_GID:-44}"     # owns /dev/dri/card*
     security_opt:
       - seccomp:unconfined      # some ROCm/HIP stacks need the default seccomp profile relaxed
     environment:
