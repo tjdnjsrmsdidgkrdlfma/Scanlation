@@ -107,15 +107,19 @@ def _detected_crops(files):
 
 
 def _load_crops(data, use_detect: bool):
-    """Return (list[PIL.Image], human source label) from the pages/crops folder."""
+    """Return (list[PIL.Image], human source label) from a pages/crops folder, or a
+    single image file (handy for a quick one-page probe when the data dir is
+    read-only and a throwaway one-image folder isn't an option)."""
     from PIL import Image
     exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-    files = sorted(p for p in Path(data).rglob("*") if p.suffix.lower() in exts)
+    root = Path(data)
+    files = [root] if root.is_file() else sorted(
+        f for f in root.rglob("*") if f.suffix.lower() in exts)
     if not files:
         sys.exit(f"no images found under {data}")
     if use_detect:
         return _detected_crops(files), f"detected from {len(files)} pages"
-    return [Image.open(p).convert("RGB") for p in files], f"{len(files)} image files"
+    return [Image.open(f).convert("RGB") for f in files], f"{len(files)} image files"
 
 
 # --- timing helper -----------------------------------------------------------
@@ -359,7 +363,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("data", nargs="?", default=os.getenv("BENCH_DATA"),
-                    help="folder of manga pages (with --detect) or pre-cut crops; or set $BENCH_DATA")
+                    help="folder of pages OR a single image (with --detect), or pre-cut crops; or set $BENCH_DATA")
     ap.add_argument("--detect", action="store_true",
                     help="treat the folder as pages: detect + deskew real bubble crops")
     ap.add_argument("--batch", default="1,2,4,8,16", help='batch-size sweep, e.g. "1,2,4,8,16"')
