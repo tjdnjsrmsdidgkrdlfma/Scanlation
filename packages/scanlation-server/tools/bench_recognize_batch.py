@@ -319,6 +319,37 @@ def bench_paddle(crops, batch_sizes, device: str, items: int, probe_cap: int, ro
     rows += probe_rows + [""]
 
 
+def _paddle_device(force_cpu: bool) -> tuple[str | None, str]:
+    """Pick the device for the PaddleOCR-VL half and, on a skip, say WHY in a way
+    that's actionable on this project's boxes. Returns (device, reason): device is
+    None -> skip (reason explains it); else the torch device to run on.
+
+    The old message just said 'no CUDA GPU', a dead end on an AMD host -- it didn't
+    distinguish a CPU-only torch (reinstall with 백엔드=GPU so the ROCm wheel is
+    pulled) from a GPU-capable build that still sees no device (passthrough / gfx
+    override). A ROCm torch reports as cuda (see sdk device.py)."""
+    if force_cpu:
+        return "cpu", ""
+    try:
+        import torch
+    except Exception as exc:  # noqa: BLE001 - no torch -> no engine installed yet
+        return None, f"torch not importable ({exc}); install an engine first"
+    if torch.cuda.is_available():
+        return "cuda", ""  # a ROCm build reports True here too -> AMD GPU
+    hip, cuda = torch.version.hip, torch.version.cuda
+    if hip:
+        reason = (f"torch is a ROCm build (hip {hip}) but no GPU is visible -- check device "
+                  "passthrough (docker-compose.rocm.yml: /dev/kfd, /dev/dri) and, for "
+                  "RDNA4/gfx1200, set HSA_OVERRIDE_GFX_VERSION")
+    elif cuda:
+        reason = (f"torch is a CUDA build (cuda {cuda}) but no GPU is visible -- check the "
+                  "NVIDIA container runtime / device passthrough")
+    else:
+        reason = ("torch is a CPU-only build -- reinstall PaddleOCR-VL with 백엔드=GPU in "
+                  "/admin so the ROCm/CUDA torch wheel is pulled")
+    return None, reason
+
+
 def main() -> int:
     # Line-buffer stdout so progress shows live even when it's a Docker pipe
     # (non-TTY defaults to block buffering -> output would only appear at the end).
@@ -362,19 +393,14 @@ def main() -> int:
         bench_manga(crops, batch_sizes, args.items, args.fixed_len, rows)
 
     if not args.no_paddle:
-        try:
-            import torch
-            has_cuda = torch.cuda.is_available()
-        except Exception:  # noqa: BLE001
-            has_cuda = False
-        device = "cuda" if has_cuda else "cpu"
-        if not has_cuda and not args.paddle_cpu:
-            msg = "PaddleOCR-VL skipped: no CUDA GPU (CPU is ~60s/crop; --paddle-cpu to force)."
+        device, reason = _paddle_device(args.paddle_cpu)
+        if device is None:
+            msg = f"PaddleOCR-VL skipped: {reason} (CPU is ~60s/crop; --paddle-cpu to force)."
             print(f"\n{msg}")
             rows += [f"_{msg}_", ""]
         else:
             try:
-                bench_paddle(crops, batch_sizes, "cpu" if args.paddle_cpu else device,
+                bench_paddle(crops, batch_sizes, device,
                              args.paddle_items, args.probe_cap, rows)
             except Exception as exc:  # noqa: BLE001 - a missing paddle install must not lose the manga table
                 print(f"\nPaddleOCR-VL failed: {type(exc).__name__}: {exc}")
