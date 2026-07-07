@@ -129,5 +129,3 @@ for region in regions:
 - 스레드 배치(intra-op vs 멀티워커) 실측은 [recognize-cpu-threads.md](recognize-cpu-threads.md). 이 문서는 그 "대안 후보(crop 배치)"를 이어받은 것.
 - 동시성·`gpu_lock`·translate 배치의 그림은 아티팩트 [동시성과 번역 배치](https://claude.ai/code/artifact/543ff4c0-d2be-4d4f-9d70-fc35fac17c1f).
 - 통합 지점: [pipeline.py `detect_and_recognize`](../app/pipeline.py) · [orchestrator.py `run_page`](../app/orchestrator.py) · 엔진 [manga-ocr plugin](../../scanlation-manga-ocr/scanlation_manga_ocr/plugin.py) / [PaddleOCR-VL plugin](../../scanlation-paddleocr-vl-for-manga/scanlation_paddleocr_vl_for_manga/plugin.py).
-</content>
-</invoke>
