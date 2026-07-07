@@ -8,6 +8,7 @@ from tests.helpers import client, payload, run
 def test_get_settings_shape():
     d = client().get("/get_settings/").json()
     assert set(d) >= {"version", "selection", "languages", "engines", "prompts"}
+    assert "gpus" in d and isinstance(d["gpus"], list)      # host GPU inventory ([] on CPU-only)
     assert set(d["engines"]) == {"detector", "recognizer", "translator"}
     assert "default" in d["prompts"]["builtin"]            # default always present
     # engines carry their OPTION_SCHEMA so the admin can render option fields

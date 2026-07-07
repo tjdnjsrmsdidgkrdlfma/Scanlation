@@ -25,9 +25,10 @@ class Selection:
     lang_dst: str = settings.default_lang_dst
     # {engine_name: {opt: val}} overrides applied on top of schema defaults.
     options: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # {engine_name: "cpu"|"cuda"} per-engine compute-device override. Absent -> the
-    # engine's DEFAULT_DEVICE (its code default). Only in-process engines (detector
-    # + recognizer) honor it; LLM engines are separate processes and ignore it.
+    # {engine_name: "cpu"|"cuda"|"cuda:N"} per-engine compute-device override (N =
+    # GPU index). Absent -> the engine's DEFAULT_DEVICE (its code default). Only
+    # in-process engines (detector + recognizer) honor it; LLM engines are separate
+    # processes and ignore it.
     devices: dict[str, str] = field(default_factory=dict)
     # Active LLM system-prompt preset name (see app.prompts) + user-saved presets.
     prompt_active: str = "default"

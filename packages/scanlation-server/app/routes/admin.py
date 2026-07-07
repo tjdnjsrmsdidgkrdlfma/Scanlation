@@ -21,6 +21,7 @@ from scanlation_sdk.context import LANGUAGES
 from ..cache import cache
 from ..catalog import catalog
 from ..engine_meta import class_meta, safe_is_installed, serialize_schema
+from ..gpus import list_gpus
 from ..plugins_install import installing_names
 from ..prompts import BUILTIN_PROMPTS
 from ..registry import ROLE_NAMES, registry
@@ -93,6 +94,7 @@ def get_settings() -> dict:
             "translate_concurrency": sel.translate_concurrency,
         },
         "languages": LANGUAGES,
+        "gpus": list_gpus(),                # [{index, name}] for the per-engine device picker
         "engines": {role: _engine_entries(role) for role in ROLE_NAMES},
         "installing": installing_names(),   # plugins whose install is running now
 

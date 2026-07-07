@@ -8,16 +8,25 @@ from __future__ import annotations
 
 
 def pick_device(hint: str) -> str:
-    """Resolve a device hint to an actual torch device: 'cpu' pins CPU; anything
-    else means GPU — cuda if actually available, else CPU fallback. The hint is
-    an engine's per-engine override or its DEFAULT_DEVICE (there is no global
-    device). (A ROCm torch build reports cuda.)"""
-    if hint.lower() == "cpu":
+    """Resolve a device hint to an actual torch device: 'cpu' pins CPU; 'cuda' or
+    'cuda:N' means GPU — cuda (optionally the Nth device) if actually available,
+    else CPU fallback. An out-of-range/unparseable index falls back to the default
+    GPU. The hint is an engine's per-engine override or its DEFAULT_DEVICE (there
+    is no global device). (A ROCm torch build reports cuda.)"""
+    hint = hint.lower()
+    if hint == "cpu":
         return "cpu"
     try:
         import torch
         if torch.cuda.is_available():
-            return "cuda"
+            if hint.startswith("cuda:"):
+                try:
+                    idx = int(hint.split(":", 1)[1])
+                except ValueError:
+                    return "cuda"
+                if 0 <= idx < torch.cuda.device_count():
+                    return f"cuda:{idx}"
+            return "cuda"  # bare "cuda" or out-of-range index -> default GPU
     except Exception:  # noqa: BLE001 - no torch -> CPU
         pass
     return "cpu"
@@ -25,8 +34,12 @@ def pick_device(hint: str) -> str:
 
 def device_label(device: str) -> str:
     """User-facing label for a resolved torch device: 'cpu' -> 'CPU', 'cuda' ->
-    'GPU' (matches the admin UI's CPU/GPU wording). Anything else -> uppercased."""
-    return {"cpu": "CPU", "cuda": "GPU"}.get(device.lower(), device.upper())
+    'GPU', 'cuda:N' -> 'GPU N' (matches the admin UI's CPU/GPU wording). Anything
+    else -> uppercased."""
+    device = device.lower()
+    if device.startswith("cuda:"):
+        return f"GPU {device.split(':', 1)[1]}"
+    return {"cpu": "CPU", "cuda": "GPU"}.get(device, device.upper())
 
 
 def release_cuda_cache() -> None:

@@ -5,6 +5,8 @@ are NOT eagerly loaded — that happens lazily on first run_pipeline.
 """
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException
 
 from scanlation_sdk.context import LANGUAGES
@@ -16,7 +18,10 @@ router = APIRouter()
 
 # GPU ("cuda") also covers ROCm — a ROCm torch build exposes HIP under the
 # torch.cuda namespace, so ".to('cuda')" works there too. dml is gone with ctd.
-DEVICES = ("cpu", "cuda")
+# Format-only: accept cpu / cuda / cuda:<n>. Which indices actually exist is the
+# UI's job (it only offers enumerated GPUs) and pick_device's (range-check + fall
+# back at load), so this route stays torch-free and testable without a GPU.
+_DEVICE_RE = re.compile(r"^(cpu|cuda(:\d+)?)$")
 
 
 @router.post("/set_engines/")
@@ -44,8 +49,8 @@ async def set_engine_device(req: SetEngineDeviceRequest) -> dict:
     DEFAULT_DEVICE). On a real change, drop that engine's cached instance under the
     GPU lock so its next request reloads on the resolved device."""
     dev = req.device.strip().lower()
-    if dev and dev not in DEVICES:
-        raise HTTPException(status_code=400, detail=f"device must be one of {DEVICES}")
+    if dev and not _DEVICE_RE.match(dev):
+        raise HTTPException(status_code=400, detail="device must be cpu, cuda, or cuda:<n>")
     if not any(registry.has(role, req.engine) for role in ROLE_NAMES):
         raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
     if (dev or None) != state.resolve_device_for(req.engine):

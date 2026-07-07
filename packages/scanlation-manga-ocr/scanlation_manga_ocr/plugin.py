@@ -57,6 +57,12 @@ class MangaOcrRecognizer(LocalModelEngineBase):
         # force CPU only when the device hint resolves to cpu; cuda/rocm lets torch pick.
         force_cpu = device == "cpu"
         self._m = MangaOcr(force_cpu=force_cpu)
+        # MangaOcr pins the model to .cuda() (= cuda:0); move it to a specific GPU
+        # when an index is given. __call__ follows self.model.device, so every
+        # later crop runs on that GPU. (The one-time warm-up in MangaOcr.__init__
+        # already ran on cuda:0 — a throwaway.)
+        if device.startswith("cuda:"):
+            self._m.model.to(device)
 
     def _unload(self) -> None:
         self._m = None

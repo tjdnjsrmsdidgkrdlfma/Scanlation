@@ -11,6 +11,7 @@ import sys
 from tests import (
     test_contracts,
     test_geometry,
+    test_gpus,
     test_logconfig,
     test_orchestrator,
     test_pipeline,
@@ -33,6 +34,7 @@ if __name__ == "__main__":
         test_pipeline,
         test_state,
         test_registry,
+        test_gpus,
         test_orchestrator,
         test_routes_run,
         test_routes_settings,

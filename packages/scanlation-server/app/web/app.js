@@ -437,16 +437,29 @@ function fieldInput(engine, opt, spec, value) {
   return `<label>${opt} <span class="desc">${optDesc(engine, opt, spec.description)}</span>
     <input type="${inputType}"${step} data-opt="${opt}" data-type="${type}" value="${val}" placeholder="${ph}"/></label>`;
 }
-// Per-engine device <select> — only for engines that load onto a device
-// (uses_device); "" = the engine's DEFAULT_DEVICE. Saved as [data-engine-device]
-// so collectOptions ([data-opt]) never lumps it into the options payload.
+// Per-engine device picker — only for engines that load onto a device
+// (uses_device). Two cascading <select>s: kind (Default/CPU/GPU) + which GPU
+// (shown only when kind=GPU, defaulting to the first GPU). Neither carries
+// [data-opt], so collectOptions never lumps them into the options payload;
+// saveEngineOptions composes them into the device string ("" / "cpu" / "cuda:N").
 function deviceField(e) {
   if (!e.uses_device) return "";
   const cur = e.device || "";
-  const o = (val, label) => `<option value="${val}"${cur === val ? " selected" : ""}>${label}</option>`;
+  const gpus = (DATA && DATA.gpus) || [];
+  // decompose the stored device into (kind, gpu index)
+  let kind = "", gpuIdx = gpus.length ? String(gpus[0].index) : "";
+  if (cur === "cpu") kind = "cpu";
+  else if (cur === "cuda") kind = "gpu";                     // bare -> first GPU (or fallback)
+  else if (cur.startsWith("cuda:")) { kind = "gpu"; gpuIdx = cur.slice(5); }
+  const o = (val, label, sel) => `<option value="${val}"${sel ? " selected" : ""}>${label}</option>`;
   const dflt = `${t("optdev.default")} (${(e.default_device || "cpu").toUpperCase()})`;
+  const kindSel = `<select data-device-kind>${o("", dflt, kind === "")}${o("cpu", "CPU", kind === "cpu")}${o("gpu", "GPU", kind === "gpu")}</select>`;
+  const gpuSel = gpus.length
+    ? ` <select data-device-gpu${kind === "gpu" ? "" : " hidden"}>${
+        gpus.map((g) => o(String(g.index), `GPU ${g.index}: ${g.name}`, String(g.index) === gpuIdx)).join("")}</select>`
+    : "";
   return `<label class="opt-device"><span>${t("optdev.label")}</span> <span class="desc">${t("optdev.desc")}</span>
-    <select data-engine-device>${o("", dflt)}${o("cpu", "CPU")}${o("cuda", "GPU")}</select></label>`;
+    ${kindSel}${gpuSel}</label>`;
 }
 function optBlock(role, e) {
   // The selection can resolve to a catalog-only entry (its package was uninstalled):
@@ -615,8 +628,14 @@ async function deletePrompt() {
 async function saveEngineOptions(engine, blockEl) {
   try {
     await postJSON("/set_options/", { engine, options: collectOptions(blockEl) });
-    const devSel = blockEl.querySelector("[data-engine-device]");
-    if (devSel) await postJSON("/set_engine_device/", { engine, device: devSel.value });
+    const kindSel = blockEl.querySelector("[data-device-kind]");
+    if (kindSel) {
+      const gpuSel = blockEl.querySelector("[data-device-gpu]");
+      let device = "";
+      if (kindSel.value === "cpu") device = "cpu";
+      else if (kindSel.value === "gpu") device = gpuSel ? `cuda:${gpuSel.value}` : "cuda";
+      await postJSON("/set_engine_device/", { engine, device });
+    }
     toast(t("toast.optionsSaved", { engine }), "ok");
     await load();
   } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
@@ -883,6 +902,13 @@ $("engine-options").addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-save-engine]");
   if (!btn) return;
   saveEngineOptions(btn.dataset.saveEngine, btn.closest(".opt-block"));
+});
+// Device kind change: show/hide the "which GPU" select next to it.
+$("engine-options").addEventListener("change", (ev) => {
+  const kindSel = ev.target.closest("[data-device-kind]");
+  if (!kindSel) return;
+  const gpuSel = kindSel.parentElement.querySelector("[data-device-gpu]");
+  if (gpuSel) gpuSel.hidden = kindSel.value !== "gpu";
 });
 $("plugins").addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-install]");

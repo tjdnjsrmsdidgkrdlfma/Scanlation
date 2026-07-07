@@ -2,10 +2,13 @@
 device policy and local-model lifecycle base."""
 from __future__ import annotations
 
+import sys
+import types
+
 import numpy as np
 
 from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
-from scanlation_sdk.device import pick_device
+from scanlation_sdk.device import device_label, pick_device
 from scanlation_sdk.local_engine import LocalModelEngineBase
 from tests.fake_engines import DummyDetector, DummyRecognizer, DummyTranslator
 
@@ -66,6 +69,42 @@ def test_pick_device_gpu_uses_cuda_when_available():
     except Exception:  # noqa: BLE001 - no torch -> stays cpu
         pass
     assert pick_device("cuda") == expected
+
+
+def _fake_torch(available, count):
+    """Minimal torch stub exposing only the cuda bits pick_device reads."""
+    m = types.ModuleType("torch")
+    m.cuda = types.SimpleNamespace(is_available=lambda: available, device_count=lambda: count)
+    return m
+
+
+def test_pick_device_index_preserved_and_ranged():
+    """hint 'cuda:N' -> 'cuda:N' when N is a real device; out-of-range/unparseable
+    -> bare 'cuda'; no GPU -> cpu. Torch is stubbed so this is deterministic."""
+    orig = sys.modules.get("torch")
+    try:
+        sys.modules["torch"] = _fake_torch(True, 2)
+        assert pick_device("cuda:0") == "cuda:0"
+        assert pick_device("cuda:1") == "cuda:1"
+        assert pick_device("cuda:5") == "cuda"     # out of range -> default GPU
+        assert pick_device("cuda:x") == "cuda"     # unparseable index -> default GPU
+        assert pick_device("cuda") == "cuda"
+        assert pick_device("cpu") == "cpu"
+        sys.modules["torch"] = _fake_torch(False, 0)
+        assert pick_device("cuda:1") == "cpu"      # no GPU -> cpu fallback
+    finally:
+        if orig is not None:
+            sys.modules["torch"] = orig
+        else:
+            sys.modules.pop("torch", None)
+
+
+def test_device_label_index():
+    """device_label maps cpu/cuda and formats an indexed GPU."""
+    assert device_label("cpu") == "CPU"
+    assert device_label("cuda") == "GPU"
+    assert device_label("cuda:0") == "GPU 0"
+    assert device_label("cuda:1") == "GPU 1"
 
 
 # --- LocalModelEngineBase lifecycle -----------------------------------------
@@ -165,6 +204,8 @@ TESTS = [
     test_dummy_detector_emits_rotated_region,
     test_pick_device_cpu_is_pinned,
     test_pick_device_gpu_uses_cuda_when_available,
+    test_pick_device_index_preserved_and_ranged,
+    test_device_label_index,
     test_local_engine_lifecycle,
     test_local_engine_device_override,
 ]

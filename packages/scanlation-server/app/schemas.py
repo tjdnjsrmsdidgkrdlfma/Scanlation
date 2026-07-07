@@ -36,7 +36,7 @@ class SetLanguagesRequest(BaseModel):
 # --- /set_engine_device/ ----------------------------------------------------
 class SetEngineDeviceRequest(BaseModel):
     engine: str
-    device: str = ""                     # "cpu"/"cuda"; "" removes the override -> DEFAULT_DEVICE
+    device: str = ""                     # "cpu"/"cuda"/"cuda:N"; "" removes the override -> DEFAULT_DEVICE
 
 
 # --- /install_plugins/ ------------------------------------------------------

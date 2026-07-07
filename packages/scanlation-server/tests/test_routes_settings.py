@@ -30,11 +30,17 @@ def test_set_engine_device_validates():
         r = c.post("/set_engine_device/", json={"engine": "dummy", "device": "cuda"})
         assert r.status_code == 200 and r.json()["device"] == "cuda"
         assert state.resolve_device_for("dummy") == "cuda"
+        # an indexed GPU is accepted (format-only validation) and persists verbatim
+        r = c.post("/set_engine_device/", json={"engine": "dummy", "device": "cuda:1"})
+        assert r.status_code == 200 and r.json()["device"] == "cuda:1"
+        assert state.resolve_device_for("dummy") == "cuda:1"
         # blank removes the override -> back to the engine's DEFAULT_DEVICE
         assert c.post("/set_engine_device/", json={"engine": "dummy", "device": ""}).json()["device"] == ""
         assert state.resolve_device_for("dummy") is None
-        # unknown device -> 400
+        # malformed / unknown devices -> 400
         assert c.post("/set_engine_device/", json={"engine": "dummy", "device": "tpu"}).status_code == 400
+        assert c.post("/set_engine_device/", json={"engine": "dummy", "device": "cuda:x"}).status_code == 400
+        assert c.post("/set_engine_device/", json={"engine": "dummy", "device": "gpu"}).status_code == 400
         # unknown engine -> 400
         assert c.post("/set_engine_device/", json={"engine": "nope", "device": "cpu"}).status_code == 400
     finally:
