@@ -1,0 +1,25 @@
+# ROCm (AMD GPU) override — layer over the CPU-clean base:
+#   docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d --build
+#
+# Makes the container GPU-capable for the torch engines (detect / manga-ocr /
+# PaddleOCR-VL) by passing the AMD GPU devices through. torch is still installed
+# at /admin plugin-install time — pick 백엔드=GPU in the /admin 동작 tab (vendor
+# auto-detects AMD from /dev/kfd) BEFORE installing engines. Real values go in a
+# gitignored .env next to this file.
+services:
+  server:
+    devices:
+      - "/dev/kfd:/dev/kfd"     # ROCm compute node (its presence = "AMD" to detect_gpu_vendor)
+      - "/dev/dri:/dev/dri"     # render nodes (cardN / renderDN)
+    group_add:                  # the app user (uid 10001) must be in the host video+render groups
+      - video
+      - render                  # if 'render' resolves wrong, use the numeric GID from `getent group render`
+    security_opt:
+      - seccomp:unconfined      # some ROCm/HIP stacks need the default seccomp profile relaxed
+    environment:
+      # Expose ONLY the discrete GPU to torch, hiding an integrated iGPU so
+      # list_gpus()/the device picker aren't confused. Verify the index with `rocminfo`.
+      HIP_VISIBLE_DEVICES: ${HIP_VISIBLE_DEVICES:-0}
+      # Optional: spoof a supported ISA when no prebuilt rocm wheel exists for your GPU
+      # (e.g. RDNA4 gfx1200). Pass-through — set in .env only if needed (e.g. 11.0.0).
+      HSA_OVERRIDE_GFX_VERSION:

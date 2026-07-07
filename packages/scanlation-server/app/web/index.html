@@ -108,6 +108,29 @@
         </label>
       </div>
       <p class="note" data-i18n="behavior.concurrency.desc">GPU 락 밖에서 한 번에 번역할 이미지 수(재시작 없이 즉시 적용). ollama의 OLLAMA_NUM_PARALLEL과 맞추세요 — 둘 중 낮은 값이 실제 병렬도이고, 이 값만 높이면 요청이 큐에 밀려 타임아웃·폴백이 납니다.</p>
+      <div class="row">
+        <label class="grow"><span data-i18n="behavior.backend.label">연산 백엔드 (torch)</span>
+          <select id="torch-backend">
+            <option value="cpu">CPU</option>
+            <option value="gpu">GPU</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" id="torch-vendor-row" hidden>
+        <label class="grow"><span data-i18n="behavior.vendor.label">GPU 벤더 (AMD/NVIDIA 둘 다 감지됨)</span>
+          <select id="torch-vendor">
+            <option value="amd">AMD (ROCm)</option>
+            <option value="nvidia">NVIDIA (CUDA)</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" id="torch-index-row" hidden>
+        <label class="grow"><span data-i18n="behavior.torchIndex.label">torch index URL (선택 — ROCm 버전 튜닝)</span>
+          <input id="torch-index" type="text" placeholder="https://download.pytorch.org/whl/rocm6.2" />
+        </label>
+      </div>
+      <p class="note" id="torch-note"></p>
+      <p class="note" data-i18n="behavior.backend.desc">torch 엔진(탐지·인식)을 CPU로 돌릴지 GPU로 돌릴지. GPU면 패스스루된 장치로 벤더(AMD ROCm / NVIDIA CUDA)를 자동 판별해 맞는 torch를 깝니다. 설치 전에 정하세요 — 바꾸면 엔진 재설치(또는 /plugins 리셋 후 재설치)해야 적용됩니다. GPU 패스스루는 docker-compose 오버라이드로 따로 설정.</p>
     </section>
 
     <!-- 유지보수 -->

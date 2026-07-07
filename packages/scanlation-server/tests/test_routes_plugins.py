@@ -53,6 +53,35 @@ def test_install_package_builds_pip_git_command():
     assert "#subdirectory=packages/scanlation-sdk" in joined     # co-installed sdk
 
 
+def test_torch_pip_args_by_backend_and_vendor():
+    """_pip_cmd splices the torch index by /admin backend + auto-detected vendor:
+    cpu -> cpu wheel; gpu+amd -> rocm; gpu+nvidia -> plain PyPI ([]); both/none ->
+    cpu fallback; torch_index overrides; torch_vendor forces vendor on 'both'."""
+    from app import gpus
+    from app import plugins_install as pi
+    from app.catalog import catalog
+    from app.state import state
+
+    entry = catalog()["manga-ocr"]   # torch=True engine
+    sel = state.selection
+    saved = (sel.torch_backend, sel.torch_vendor, sel.torch_index, gpus.detect_gpu_vendor)
+    try:
+        def cmd(backend, detect, vendor="", index=""):
+            sel.torch_backend, sel.torch_vendor, sel.torch_index = backend, vendor, index
+            gpus.detect_gpu_vendor = lambda: detect
+            return " ".join(pi._pip_cmd(entry))
+
+        assert "whl/cpu" in cmd("cpu", detect="amd")                        # cpu backend -> cpu wheel
+        c = cmd("gpu", detect="amd")
+        assert "whl/rocm" in c and "pypi.org/simple" in c                   # gpu + amd -> rocm
+        assert "download.pytorch.org" not in cmd("gpu", detect="nvidia")    # gpu + nvidia -> plain PyPI
+        assert "whl/cpu" in cmd("gpu", detect="both")                       # both unresolved -> cpu fallback
+        assert "whl/rocm6.5" in cmd("gpu", detect="amd", index="https://x/whl/rocm6.5")  # index override
+        assert "whl/rocm" in cmd("gpu", detect="both", vendor="amd")        # torch_vendor forces amd
+    finally:
+        sel.torch_backend, sel.torch_vendor, sel.torch_index, gpus.detect_gpu_vendor = saved
+
+
 def test_install_plugins():
     c = client()
     # dummy has no assets -> install is a no-op success
@@ -66,6 +95,7 @@ def test_install_plugins():
 TESTS = [
     test_catalog_lists_engines,
     test_install_package_builds_pip_git_command,
+    test_torch_pip_args_by_backend_and_vendor,
     test_install_plugins,
 ]
 

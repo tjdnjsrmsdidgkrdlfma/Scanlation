@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import types
 
+from app import gpus
 from app.gpus import list_gpus
 
 from tests.helpers import run
@@ -56,10 +57,61 @@ def test_list_gpus_enumerates():
     ]
 
 
+def _detect_with(kfd, nvidia):
+    """detect_gpu_vendor with /dev/kfd + /dev/nvidia* existence stubbed."""
+    orig_exists, orig_glob = gpus.os.path.exists, gpus.glob.glob
+    try:
+        gpus.os.path.exists = lambda p: kfd if p == "/dev/kfd" else orig_exists(p)
+        gpus.glob.glob = lambda pat: (["/dev/nvidia0"] if nvidia and "nvidia" in pat else [])
+        return gpus.detect_gpu_vendor()
+    finally:
+        gpus.os.path.exists, gpus.glob.glob = orig_exists, orig_glob
+
+
+def test_detect_gpu_vendor():
+    assert _detect_with(kfd=True, nvidia=False) == "amd"
+    assert _detect_with(kfd=False, nvidia=True) == "nvidia"
+    assert _detect_with(kfd=True, nvidia=True) == "both"
+    assert _detect_with(kfd=False, nvidia=False) is None
+
+
+def _torch_build_with(hip, cuda):
+    """installed_torch_build with a stubbed torch exposing version.hip/cuda."""
+    orig = sys.modules.get("torch")
+    try:
+        m = types.ModuleType("torch")
+        m.version = types.SimpleNamespace(hip=hip, cuda=cuda)
+        sys.modules["torch"] = m
+        return gpus.installed_torch_build()
+    finally:
+        if orig is not None:
+            sys.modules["torch"] = orig
+        else:
+            sys.modules.pop("torch", None)
+
+
+def test_installed_torch_build():
+    assert _torch_build_with(hip="6.2", cuda=None) == "rocm"
+    assert _torch_build_with(hip=None, cuda="12.4") == "cuda"
+    assert _torch_build_with(hip=None, cuda=None) == "cpu"
+    # no torch installed -> None
+    orig = sys.modules.get("torch")
+    try:
+        sys.modules["torch"] = None   # `import torch` raises -> None
+        assert gpus.installed_torch_build() is None
+    finally:
+        if orig is not None:
+            sys.modules["torch"] = orig
+        else:
+            sys.modules.pop("torch", None)
+
+
 TESTS = [
     test_list_gpus_no_torch,
     test_list_gpus_no_gpu,
     test_list_gpus_enumerates,
+    test_detect_gpu_vendor,
+    test_installed_torch_build,
 ]
 
 if __name__ == "__main__":

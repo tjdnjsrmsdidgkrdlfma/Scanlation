@@ -21,7 +21,7 @@ from scanlation_sdk.context import LANGUAGES
 from ..cache import cache
 from ..catalog import catalog
 from ..engine_meta import class_meta, safe_is_installed, serialize_schema
-from ..gpus import list_gpus
+from ..gpus import detect_gpu_vendor, installed_torch_build, list_gpus
 from ..plugins_install import installing_names
 from ..prompts import BUILTIN_PROMPTS
 from ..registry import ROLE_NAMES, registry
@@ -92,9 +92,14 @@ def get_settings() -> dict:
             "min_image_dim": sel.min_image_dim,
             "verbose_log": sel.verbose_log,
             "translate_concurrency": sel.translate_concurrency,
+            "torch_backend": sel.torch_backend,
+            "torch_vendor": sel.torch_vendor,
+            "torch_index": sel.torch_index,
         },
         "languages": LANGUAGES,
         "gpus": list_gpus(),                # [{index, name}] for the per-engine device picker
+        "gpu_vendor": detect_gpu_vendor(),  # amd/nvidia/both/None from device nodes (torch backend auto-pick)
+        "torch_build": installed_torch_build(),  # cpu/cuda/rocm/None — for the backend-mismatch warning
         "engines": {role: _engine_entries(role) for role in ROLE_NAMES},
         "installing": installing_names(),   # plugins whose install is running now
 
@@ -169,12 +174,17 @@ def set_client_config(req: SetClientConfigRequest) -> dict:
     state.set_client_config(
         min_image_dim=req.min_image_dim, verbose_log=req.verbose_log,
         translate_concurrency=req.translate_concurrency,
+        torch_backend=req.torch_backend, torch_vendor=req.torch_vendor,
+        torch_index=req.torch_index,
     )
     return {
         "status": "success",
         "min_image_dim": state.selection.min_image_dim,
         "verbose_log": state.selection.verbose_log,
         "translate_concurrency": state.selection.translate_concurrency,
+        "torch_backend": state.selection.torch_backend,
+        "torch_vendor": state.selection.torch_vendor,
+        "torch_index": state.selection.torch_index,
     }
 
 

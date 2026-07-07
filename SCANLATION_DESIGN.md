@@ -256,6 +256,8 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 
 **결론: 예, Docker — 단 배포/ROCm 용으로만.** 일상 개발과 Claude 테스트는 속도를 위해 컨테이너 없이 로컬 CPU로. 컨테이너는 재현 가능한 ROCm 배포 타깃.
 
+> ⚠ **채택안 divergence.** Dockerfile `rocm` 빌드 타깃 대신 **런타임 방식**으로 갔다: 이미지엔 torch를 안 굽고(코어만), torch 빌드(CPU/CUDA/ROCm)는 **/admin 동작 탭 "연산 백엔드"**(state.json)가 플러그인 설치 시점의 pip 인덱스를 정한다 — GPU면 패스스루된 장치 노드(`/dev/kfd` vs `/dev/nvidia*`)로 **벤더 자동 판별**(`app.gpus.detect_gpu_vendor`). 패스스루만 compose 오버라이드(`docker-compose.rocm.yml`/`.cuda.yml`)로 남고, ollama는 여전히 별 서비스. `--target /plugins` 재설치가 이미지에 구운 torch를 덮어써서 빌드 타깃이 무의미했기 때문.
+
 ---
 
 ## 7. Claude 직접 테스트 — 사용자 질문 답변: "개발 중 Claude가 직접 테스트하면 좋겠다"

@@ -70,3 +70,6 @@ class SetClientConfigRequest(BaseModel):
     min_image_dim: Optional[int] = None   # extension image filter (shorter-side px)
     verbose_log: Optional[bool] = None    # DEBUG logging toggle (per-detection/translation detail)
     translate_concurrency: Optional[int] = None  # max images translating at once (swaps translate_sem)
+    torch_backend: Optional[str] = None   # "cpu"/"gpu" — GPU torch build for plugin installs
+    torch_vendor: Optional[str] = None    # ""/amd/nvidia — force vendor when both GPUs present
+    torch_index: Optional[str] = None     # optional pip index URL override (ROCm version)

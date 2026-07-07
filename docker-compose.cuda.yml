@@ -1,0 +1,21 @@
+# CUDA (NVIDIA GPU) override — layer over the CPU-clean base:
+#   docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d --build
+#
+# Requires the nvidia-container-toolkit installed + configured on the HOST. Makes
+# the container GPU-capable for the torch engines; the CUDA torch build installs
+# at /admin plugin-install time — pick 백엔드=GPU in the /admin 동작 tab (vendor
+# auto-detects NVIDIA from /dev/nvidia*) BEFORE installing engines.
+services:
+  server:
+    # Modern compose GPU reservation (needs nvidia-container-toolkit). If your
+    # setup predates this, use `runtime: nvidia` instead of the deploy block.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility

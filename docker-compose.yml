@@ -24,10 +24,12 @@ services:
       - plugins:/plugins   # runtime-installed engine packages (survive recreation)
       - data:/data         # state.json, sqlite cache, model weights, HF cache
     environment:
-      # Compute device (CPU/GPU) is chosen per-engine in /admin (engine options),
-      # each engine having a code default (PaddleOCR-VL-For-Manga=GPU, others=CPU) — not an
-      # env here. A GPU-capable torch is a host-level install; this image ships CPU
-      # torch by default.
+      # The image bakes NO torch — engines (+ their torch) are pip-installed at
+      # /admin plugin-install time into the /plugins volume. The torch build
+      # (CPU/CUDA/ROCm) is chosen in /admin 동작 tab (백엔드: CPU default; GPU
+      # auto-detects the vendor). GPU also needs device passthrough — layer on
+      # docker-compose.rocm.yml (AMD) or docker-compose.cuda.yml (NVIDIA). Which
+      # GPU each engine uses is a separate per-engine setting in /admin.
       # Public deploy: require the X-Auth-Token header on the API + admin. Put the
       # secret in a gitignored .env next to this file (SCANLATION_AUTH_TOKEN=...);
       # empty/absent = no auth. Enter the same value in the extension popup + /admin.

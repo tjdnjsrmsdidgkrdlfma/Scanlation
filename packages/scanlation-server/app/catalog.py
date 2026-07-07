@@ -21,28 +21,24 @@ _CATALOG: dict[str, dict] = {
         "display_name": "comic-text-and-bubble-detector",
         "roles": ["detector"],
         "description": "RT-DETRv2 (ogkalu/comic-text-and-bubble-detector) comic/manga text & bubble detector. Runs on CPU. 172MB.",
-        # steer torch to the CPU wheel by default (like manga-ocr) so a Docker
-        # one-click install doesn't pull a giant CUDA wheel; a GPU torch build is
-        # a host-level install.
-        "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
+        # torch: the pip index is chosen at install time from the /admin backend
+        # setting (CPU wheel by default; GPU auto-picks CUDA/ROCm by vendor). See
+        # catalog() + plugins_install._torch_pip_args.
+        "torch": True,
     },
     "manga-ocr": {
         "package": "scanlation-manga-ocr",
         "display_name": "Manga OCR",
         "roles": ["recognizer"],
         "description": "ViT-encoder/BERT-decoder Japanese OCR. Fast, solid accuracy. Runs on CPU. 400MB.",
-        # steer torch to the CPU index (its +cpu local version outranks the plain
-        # PyPI CUDA wheel, so pip prefers it).
-        "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
+        "torch": True,   # torch index chosen at install time (see catalog / _torch_pip_args)
     },
     "PaddleOCR-VL-For-Manga": {
         "package": "scanlation-paddleocr-vl-for-manga",
         "display_name": "PaddleOCR-VL-For-Manga",
         "roles": ["recognizer"],
         "description": "PaddleOCR-VL manga fine-tune (0.9B VLM). Best accuracy. Needs a GPU. 1.8GB.",
-        # CPU wheel by default like the other torch plugins; a GPU/ROCm torch build
-        # is a host-level install (the model needs a GPU to be practical).
-        "pip_args": ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
+        "torch": True,   # torch index chosen at install time (see catalog / _torch_pip_args)
     },
     "Ollama": {
         "package": "scanlation-ollama",
@@ -69,6 +65,7 @@ class CatalogEntry:
     description: str = ""
     roles: list[str] = field(default_factory=list)
     pip_args: list[str] = field(default_factory=list)
+    torch: bool = False             # depends on torch -> install splices the backend's torch index
 
 
 def catalog() -> dict[str, CatalogEntry]:
@@ -80,7 +77,8 @@ def catalog() -> dict[str, CatalogEntry]:
             display_name=spec.get("display_name") or name,
             description=spec["description"],
             roles=list(spec["roles"]),
-            pip_args=list(spec["pip_args"]),
+            pip_args=list(spec.get("pip_args", [])),
+            torch=spec.get("torch", False),
         )
         for name, spec in _CATALOG.items()
     }

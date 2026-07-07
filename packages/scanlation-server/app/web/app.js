@@ -84,6 +84,14 @@ const I18N = {
     "behavior.verbose.desc": "켜면 탐지 영역·bounds·OCR/번역 결과를 로그에 남깁니다(진단용, 재시작 없이 즉시 적용). 끄면 개수·시간 요약만.",
     "behavior.concurrency.label": "동시 번역 이미지 수",
     "behavior.concurrency.desc": "GPU 락 밖에서 한 번에 번역할 이미지 수(재시작 없이 즉시 적용). ollama의 OLLAMA_NUM_PARALLEL과 맞추세요 — 둘 중 낮은 값이 실제 병렬도이고, 이 값만 높이면 요청이 큐에 밀려 타임아웃·폴백이 납니다.",
+    "behavior.backend.label": "연산 백엔드 (torch)",
+    "behavior.backend.desc": "torch 엔진(탐지·인식)을 CPU로 돌릴지 GPU로 돌릴지. GPU면 패스스루된 장치로 벤더(AMD ROCm / NVIDIA CUDA)를 자동 판별해 맞는 torch를 깝니다. 설치 전에 정하세요 — 바꾸면 엔진 재설치(또는 /plugins 리셋 후 재설치)해야 적용됩니다. GPU 패스스루는 docker-compose 오버라이드로 따로 설정.",
+    "behavior.vendor.label": "GPU 벤더 (AMD/NVIDIA 둘 다 감지됨)",
+    "behavior.torchIndex.label": "torch index URL (선택 — ROCm 버전 튜닝)",
+    "behavior.backend.detected": "감지된 GPU: {v}",
+    "behavior.backend.both": "AMD와 NVIDIA가 둘 다 감지됨 — 벤더를 골라주세요(torch는 한 벤더만).",
+    "behavior.backend.nodev": "GPU 장치가 안 보입니다 — docker-compose 패스스루를 확인하세요(없으면 CPU로 폴백).",
+    "behavior.backend.mismatch": "⚠ 설정과 설치된 torch({build})가 다릅니다 — 엔진을 재설치하세요.",
     "toast.behaviorSaved": "동작 설정 저장됨",
     "field.default": "(기본값)",
     "field.defaultPrefix": "기본",
@@ -167,6 +175,14 @@ const I18N = {
     "behavior.verbose.desc": "Logs each detection's bounds, OCR text and translation (for diagnosis; applied instantly, no restart). Off = counts/timing summary only.",
     "behavior.concurrency.label": "Concurrent translations",
     "behavior.concurrency.desc": "How many images translate at once off the GPU lock (applied instantly, no restart). Match the ollama daemon's OLLAMA_NUM_PARALLEL — the lower of the two is the real parallelism; setting only this higher just queues requests into timeouts/fallback.",
+    "behavior.backend.label": "Compute backend (torch)",
+    "behavior.backend.desc": "Run the torch engines (detect/recognize) on CPU or GPU. On GPU the vendor (AMD ROCm / NVIDIA CUDA) is auto-detected from the passed-through device and the matching torch is installed. Set this BEFORE installing — changing it needs an engine reinstall (or a /plugins reset + reinstall) to apply. GPU passthrough is set separately via a docker-compose override.",
+    "behavior.vendor.label": "GPU vendor (both AMD & NVIDIA detected)",
+    "behavior.torchIndex.label": "torch index URL (optional — ROCm version)",
+    "behavior.backend.detected": "Detected GPU: {v}",
+    "behavior.backend.both": "Both AMD and NVIDIA detected — pick a vendor (torch is one vendor only).",
+    "behavior.backend.nodev": "No GPU device visible — check the docker-compose passthrough (falls back to CPU).",
+    "behavior.backend.mismatch": "⚠ Selected backend differs from the installed torch ({build}) — reinstall the engines.",
     "toast.behaviorSaved": "Behavior settings saved",
     "field.default": "(default)",
     "field.defaultPrefix": "default",
@@ -583,6 +599,36 @@ function renderBehavior() {
   $("min-image-dim").value = DATA.selection.min_image_dim;
   $("verbose-log").checked = !!DATA.selection.verbose_log;
   $("translate-concurrency").value = DATA.selection.translate_concurrency;
+  renderTorchBackend();
+}
+
+// GPU/torch backend (동작 tab): CPU/GPU; vendor auto-detected from device nodes,
+// only surfaced (as a sub-choice) when BOTH AMD+NVIDIA are present.
+function renderTorchBackend() {
+  const sel = DATA.selection;
+  $("torch-backend").value = sel.torch_backend || "cpu";
+  $("torch-vendor").value = sel.torch_vendor || "amd";
+  $("torch-index").value = sel.torch_index || "";
+  syncTorchRows();
+}
+
+// Show/hide the vendor+index rows and render the detected-vendor / mismatch note.
+function syncTorchRows() {
+  const isGpu = $("torch-backend").value === "gpu";
+  const vendor = DATA.gpu_vendor;   // "amd" | "nvidia" | "both" | null (from device nodes)
+  $("torch-vendor-row").hidden = !(isGpu && vendor === "both");
+  $("torch-index-row").hidden = !isGpu;
+  const parts = [];
+  if (isGpu) {
+    if (vendor === "both") parts.push(t("behavior.backend.both"));
+    else if (vendor) parts.push(t("behavior.backend.detected", { v: vendor.toUpperCase() }));
+    else parts.push(t("behavior.backend.nodev"));
+  }
+  const build = DATA.torch_build;   // "cpu" | "cuda" | "rocm" | null (installed torch)
+  if (build && isGpu !== (build === "cuda" || build === "rocm")) {
+    parts.push(t("behavior.backend.mismatch", { build }));
+  }
+  $("torch-note").textContent = parts.join("  ");
 }
 
 // --- actions --------------------------------------------------------------
@@ -869,6 +915,9 @@ async function saveBehavior() {
       min_image_dim: Number.isFinite(n) ? n : 0,
       verbose_log: $("verbose-log").checked,
       translate_concurrency: Number.isFinite(c) ? Math.max(1, c) : 1,
+      torch_backend: $("torch-backend").value,
+      torch_vendor: $("torch-vendor-row").hidden ? "" : $("torch-vendor").value,
+      torch_index: $("torch-index").value.trim(),
     });
     toast(t("toast.behaviorSaved"), "ok");
     await load();
@@ -916,6 +965,7 @@ $("plugins").addEventListener("click", (ev) => {
 });
 $("clear-cache").addEventListener("click", clearCache);
 $("save-behavior").addEventListener("click", saveBehavior);
+$("torch-backend").addEventListener("change", syncTorchRows);
 // Custom −/+ number steppers (native spinners are hidden in CSS). Each .stepper
 // wraps a −button, a number input, and a +button; a button's data-step is the
 // signed increment. Clamps to the input's min; no max.

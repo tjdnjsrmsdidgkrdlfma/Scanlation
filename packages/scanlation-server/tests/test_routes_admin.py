@@ -9,6 +9,9 @@ def test_get_settings_shape():
     d = client().get("/get_settings/").json()
     assert set(d) >= {"version", "selection", "languages", "engines", "prompts"}
     assert "gpus" in d and isinstance(d["gpus"], list)      # host GPU inventory ([] on CPU-only)
+    assert d["selection"]["torch_backend"] in ("cpu", "gpu")  # GPU/torch backend for installs
+    assert "gpu_vendor" in d                                # amd/nvidia/both/None (device nodes)
+    assert "torch_build" in d                               # cpu/cuda/rocm/None (installed torch)
     assert set(d["engines"]) == {"detector", "recognizer", "translator"}
     assert "default" in d["prompts"]["builtin"]            # default always present
     # engines carry their OPTION_SCHEMA so the admin can render option fields

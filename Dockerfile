@@ -15,7 +15,7 @@ FROM python:3.11-slim
 # libgomp1/libglib2.0-0 — generic C runtime libs the engine backends
 #   (onnxruntime/torch/opencv) dlopen; the core (opencv-headless deskew) needs them too.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git libgomp1 libglib2.0-0 \
+ && apt-get install -y --no-install-recommends git libgomp1 libglib2.0-0 libnuma1 \
  && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \

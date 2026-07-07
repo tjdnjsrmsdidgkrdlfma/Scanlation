@@ -94,6 +94,29 @@ def _install_sources(entry: CatalogEntry) -> list[str]:
     ]
 
 
+def _torch_pip_args() -> list[str]:
+    """pip index args for the torch-using engines, resolved at install time from the
+    /admin backend setting + the auto-detected GPU vendor. CPU wheel by default; GPU
+    picks the CUDA (plain PyPI) or ROCm wheel by vendor. An ambiguous ('both' with no
+    torch_vendor) or absent GPU falls back to CPU. torch is one build = one vendor, so
+    this is a single global choice, applied on the next install."""
+    from .gpus import detect_gpu_vendor
+    from .state import state
+
+    sel = state.selection
+    cpu = ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
+    if sel.torch_backend != "gpu":
+        return cpu
+    vendor = sel.torch_vendor or detect_gpu_vendor()
+    if vendor == "nvidia":
+        # plain PyPI torch is already the CUDA build; an index override pins a cuXX wheel.
+        return ["--index-url", sel.torch_index] if sel.torch_index else []
+    if vendor == "amd":
+        idx = sel.torch_index or "https://download.pytorch.org/whl/rocm6.2"
+        return ["--index-url", idx, "--extra-index-url", "https://pypi.org/simple"]
+    return cpu  # 'both' (unresolved) or None -> can't pick a vendor -> CPU
+
+
 def _pip_cmd(entry: CatalogEntry) -> list[str]:
     """The ``pip install --upgrade --target=<vol> …`` argv for a plugin. Shared by
     the blocking ``install_package`` and the streaming ``_stream_pip`` so the
@@ -102,11 +125,15 @@ def _pip_cmd(entry: CatalogEntry) -> list[str]:
     ``--upgrade`` is load-bearing for the co-installed sdk: without it, pip skips
     a package already present in the target dir, so a plugin bringing a newer sdk
     (new module/API) would keep running against the stale sdk on the /plugins
-    volume and ImportError. With it, sdk is always reinstalled to match."""
+    volume and ImportError. With it, sdk is always reinstalled to match.
+
+    torch-using engines get the backend's torch index spliced in (CPU/CUDA/ROCm)."""
+    torch_args = _torch_pip_args() if entry.torch else []
     return [
         sys.executable, "-m", "pip", "install", "--upgrade",
         "--target", str(plugins_dir()),
         *entry.pip_args,
+        *torch_args,
         *_install_sources(entry),
     ]
 

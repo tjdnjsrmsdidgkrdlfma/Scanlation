@@ -49,6 +49,16 @@ class Selection:
     # GENERATION is opt-in: raise this AND OLLAMA_NUM_PARALLEL together (the lower of
     # the two = real parallelism; ollama can't be queried, so keeping them in sync is manual).
     translate_concurrency: int = 1
+    # GPU/torch build for plugin installs (the /admin 동작 tab). "cpu" (default) or
+    # "gpu"; on "gpu" the vendor is auto-detected from device nodes at install time
+    # (app.gpus.detect_gpu_vendor). torch is ONE build = ONE vendor, so this decides
+    # which torch wheel a plugin install pulls — applied on the NEXT install.
+    torch_backend: str = "cpu"
+    # Force the vendor when BOTH AMD+NVIDIA are detected ("" = auto). "amd" | "nvidia".
+    torch_vendor: str = ""
+    # Optional pip index URL override (blank = vendor default) — e.g. a specific
+    # ROCm version whose prebuilt wheel matches the host (rocm6.2 vs 6.1, RDNA4…).
+    torch_index: str = ""
 
 
 class AppState:
@@ -116,11 +126,14 @@ class AppState:
     def set_client_config(
         self, *, min_image_dim: int | None = None, verbose_log: bool | None = None,
         translate_concurrency: int | None = None,
+        torch_backend: str | None = None, torch_vendor: str | None = None,
+        torch_index: str | None = None,
     ) -> None:
         """Persist behavior settings (the /admin 동작 tab): the extension image
-        filter, the verbose-log toggle, and the concurrent-translation limit. Verbose
-        re-applies to the live logger and translate_concurrency swaps translate_sem —
-        both take effect at runtime without a restart."""
+        filter, the verbose-log toggle, the concurrent-translation limit, and the
+        GPU/torch backend for plugin installs. Verbose re-applies to the live logger
+        and translate_concurrency swaps translate_sem (runtime, no restart); the torch
+        backend takes effect on the NEXT plugin install."""
         if min_image_dim is not None:
             self.selection.min_image_dim = max(0, int(min_image_dim))
         if verbose_log is not None:
@@ -132,6 +145,12 @@ class AppState:
             # New Semaphore instance: in-flight translates finish on the old one, new
             # requests use the new limit (run_page reads state.translate_sem each call).
             self.translate_sem = asyncio.Semaphore(self.selection.translate_concurrency)
+        if torch_backend is not None:
+            self.selection.torch_backend = torch_backend if torch_backend in ("cpu", "gpu") else "cpu"
+        if torch_vendor is not None:
+            self.selection.torch_vendor = torch_vendor if torch_vendor in ("", "amd", "nvidia") else ""
+        if torch_index is not None:
+            self.selection.torch_index = torch_index.strip()
         self.save()
 
     def set_options(self, engine_name: str, options: dict[str, Any]) -> None:
