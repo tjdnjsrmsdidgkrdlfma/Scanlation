@@ -1,0 +1,5 @@
+# Shell scripts + Docker entrypoints must stay LF: CRLF breaks them inside Linux
+# containers (sh chokes on the trailing \r). Force LF on checkout on every OS.
+*.sh            text eol=lf
+docker-entrypoint.sh text eol=lf
+Dockerfile      text eol=lf
