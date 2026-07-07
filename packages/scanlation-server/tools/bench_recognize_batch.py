@@ -132,6 +132,8 @@ def _sec_per_call(call, reps: int) -> float:
 def bench_manga(crops, batch_sizes, items: int, fixed_len: int, rows: list) -> None:
     """manga-ocr batch scaling on CPU: encoder-only, fixed-length, natural."""
     import torch
+    from transformers.utils import logging as hf_logging
+    hf_logging.set_verbosity_error()  # silence per-call max_length/max_new_tokens warnings
     from manga_ocr import MangaOcr
     from manga_ocr.ocr import post_process
 
@@ -240,6 +242,8 @@ def bench_manga(crops, batch_sizes, items: int, fixed_len: int, rows: list) -> N
 def bench_paddle(crops, batch_sizes, device: str, items: int, probe_cap: int, rows: list) -> None:
     """PaddleOCR-VL per-crop baseline + a batch correctness/scaling PROBE."""
     import torch
+    from transformers.utils import logging as hf_logging
+    hf_logging.set_verbosity_error()  # silence per-call generation warnings
     from scanlation_sdk.contracts import Region
     from scanlation_paddleocr_vl_for_manga.plugin import PaddleOcrVLForMangaRecognizer
 
