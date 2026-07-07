@@ -12,6 +12,7 @@ read without instantiating, so the handshake/options routes stay light.
 """
 from __future__ import annotations
 
+import threading
 from importlib.metadata import entry_points
 from typing import Any
 
@@ -30,6 +31,11 @@ class Registry:
     def __init__(self) -> None:
         self._classes: dict[str, dict[str, type]] = {r: {} for r in ROLES}
         self._instances: dict[tuple[str, str], Any] = {}
+        # Serializes instance create+load so a key loads exactly once, even when
+        # callers no longer hold an external lock. get() runs on a threadpool
+        # worker (run_in_threadpool), so this is a threading.Lock, not asyncio.
+        # Never hold it across anything that re-enters registry.get (non-reentrant).
+        self._lock = threading.Lock()
         self._discover()
 
     def _discover(self) -> None:
@@ -67,26 +73,32 @@ class Registry:
     # --- lazy instance (loads weights on first use) ---
     def get(self, role: str, name: str, device: str | None = None) -> Any:
         key = (role, name)
-        if key not in self._instances:
-            inst = self._classes[role][name]()
-            if device is not None:
-                # Per-engine override; honored by LocalModelEngineBase.load(),
-                # ignored by engines that don't load onto a device (translators).
-                inst._device_override = device
-            inst.load()
-            self._instances[key] = inst
-        return self._instances[key]
+        inst = self._instances.get(key)  # lock-free fast path (atomic dict.get under the GIL)
+        if inst is not None:
+            return inst
+        with self._lock:  # miss: serialize create+load so two threads don't double-load a key
+            inst = self._instances.get(key)  # re-check: another thread may have loaded it
+            if inst is None:
+                inst = self._classes[role][name]()
+                if device is not None:
+                    # Per-engine override; honored by LocalModelEngineBase.load(),
+                    # ignored by engines that don't load onto a device (translators).
+                    inst._device_override = device
+                inst.load()  # heavy + GIL-releasing; held under the lock on purpose (loads once)
+                self._instances[key] = inst  # publish only after a successful load
+            return inst
 
     def unload_one(self, role: str, name: str) -> None:
         """Unload + forget a single cached instance so its next get() reloads it
         (e.g. after its per-engine device override changed). No-op if not loaded.
         Call under the GPU lock so no inference is mid-flight on it."""
-        inst = self._instances.pop((role, name), None)
-        if inst is not None:
-            try:
-                inst.unload()
-            except Exception:  # noqa: BLE001 - a broken unload must not block the switch
-                pass
+        with self._lock:  # symmetric with get(): no concurrent re-create mid-unload
+            inst = self._instances.pop((role, name), None)
+            if inst is not None:
+                try:
+                    inst.unload()
+                except Exception:  # noqa: BLE001 - a broken unload must not block the switch
+                    pass
 
 
 ensure_on_path()  # volume-installed engine packages are importable before discovery
