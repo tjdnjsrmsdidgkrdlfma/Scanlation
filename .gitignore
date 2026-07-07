@@ -14,6 +14,10 @@ env/
 # Local secrets (compose reads .env for ${SCANLATION_AUTH_TOKEN} etc.)
 .env
 
+# Per-host GPU passthrough: on the deploy host, cp docker-compose.rocm.yml (AMD)
+# or docker-compose.cuda.yml (NVIDIA) -> this name and compose auto-merges it.
+docker-compose.override.yml
+
 # Test / tooling caches
 .pytest_cache/
 .mypy_cache/
