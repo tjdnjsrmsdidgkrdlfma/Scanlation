@@ -224,6 +224,7 @@ def bench_manga(crops, batch_sizes, items: int, fixed_len: int, rows: list) -> N
     with torch.no_grad():
         sample_out = model.generate(pv(min(4, len(gray))), max_length=300)
     sample = [post_process(t) for t in tok.batch_decode(sample_out, skip_special_tokens=True)]
+    print(f"  batch-path decode sanity: {sample!r}")
 
     rows += [
         "### manga-ocr (CPU) -- natural generate (real straggler)", "",
@@ -298,8 +299,11 @@ def bench_paddle(crops, batch_sizes, device: str, items: int, probe_cap: int, ro
             ran, mtxt = "yes", f"{matches}/{b}"
             print(f"{b:>6} {ran:>5} {mtxt:>7} {rate:>10.2f} {speed:>7.2f}x")
             probe_rows.append(f"| {b} | yes | {matches}/{b} | {rate:.2f} | {speed:.2f}x |")
-            if matches < b:  # first mismatch: batching is not output-preserving here
-                probe_rows.append(f"| | | want[0]={want[0]!r} got[0]={got[0]!r} | | |")
+            if matches < b:  # mismatch: batching is not output-preserving here -> show what differs
+                for j, (w, g) in enumerate(zip(want, got)):
+                    if w != g:
+                        print(f"         mismatch #{j}: want={w!r} got={g!r}")
+                        probe_rows.append(f"| | | want[{j}]={w!r} got[{j}]={g!r} | | |")
         except Exception as exc:  # noqa: BLE001 - "processor can't batch multi-image" is a valid finding
             print(f"{b:>6} {'no':>5}   {type(exc).__name__}: {exc}")
             probe_rows.append(f"| {b} | no | {type(exc).__name__}: {exc} | | |")
@@ -308,6 +312,11 @@ def bench_paddle(crops, batch_sizes, device: str, items: int, probe_cap: int, ro
 
 
 def main() -> int:
+    # Line-buffer stdout so progress shows live even when it's a Docker pipe
+    # (non-TTY defaults to block buffering -> output would only appear at the end).
+    with contextlib.suppress(Exception):
+        sys.stdout.reconfigure(line_buffering=True)
+
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("data", nargs="?", default=os.getenv("BENCH_DATA"),
@@ -363,15 +372,22 @@ def main() -> int:
                 print(f"\nPaddleOCR-VL failed: {type(exc).__name__}: {exc}")
                 rows += [f"_PaddleOCR-VL failed: {type(exc).__name__}: {exc}_", ""]
 
+    # Always dump the full markdown report to the terminal -- under Docker the cwd
+    # and /tmp are often unwritable, so stdout is the only guaranteed sink. The
+    # file below is a best-effort convenience on top, never the sole copy.
     name = f"bench_report_batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
     body = "\n".join(rows) + "\n"
+    print("\n" + "=" * 72 + "\nFULL REPORT (copy from here if the file below didn't write)\n" + "=" * 72)
+    print(body)
+
     for target in (Path.cwd() / name, Path(tempfile.gettempdir()) / name):
         try:
             target.write_text(body, encoding="utf-8")
-            print(f"\nreport written: {target}")
+            print(f"report written: {target}")
             return 0
         except OSError as e:  # noqa: PERF203
             print(f"(could not write {target}: {e})")
+    print("(report file not written -- use the FULL REPORT block above)")
     return 0
 
 
