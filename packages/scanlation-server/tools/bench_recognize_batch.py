@@ -210,7 +210,8 @@ def bench_manga(crops, batch_sizes, items: int, fixed_len: int, rows: list) -> N
             f"p90={p(0.9)} max={lengths[-1]}")
     print("  " + dist)
 
-    nat = []
+    print(f"{'batch':>6} {'crops/sec':>10} {'speedup':>8}")
+    nat, base = [], None
     for b in batch_sizes:
         batches = [gray[i:i + b] for i in range(0, len(gray), b)]
         def call(batches=batches):
@@ -219,8 +220,10 @@ def bench_manga(crops, batch_sizes, items: int, fixed_len: int, rows: list) -> N
                     model.generate(proc(grp, return_tensors="pt").pixel_values, max_length=300)
         sec = _sec_per_call(call, 1)
         rate = len(gray) / sec
-        nat.append((b, rate))
-        print(f"  batch={b:>2}  {rate:>7.2f} crops/sec")
+        if base is None:
+            base = rate
+        nat.append((b, rate, rate / base))  # speedup vs B=1 -- the real batching gain
+        print(f"{b:>6} {rate:>10.2f} {rate / base:>7.2f}x")
 
     # sanity: show that the batch path decodes to real text (grayscale+post_process)
     with torch.no_grad():
@@ -230,9 +233,10 @@ def bench_manga(crops, batch_sizes, items: int, fixed_len: int, rows: list) -> N
 
     rows += [
         "### manga-ocr (CPU) -- natural generate (real straggler)", "",
-        f"- {dist}",
-        "- crops/sec over the real crop set (straggler included): "
-        + ", ".join(f"B={b}:{r:.2f}" for b, r in nat),
+        f"- {dist}", "",
+        "| batch | crops/sec | speedup |", "|---|---|---|",
+        *[f"| {b} | {r:.2f} | {s:.2f}x |" for b, r, s in nat],
+        "",
         f"- batch-path decode sanity (should read as text): {sample!r}",
         "",
     ]
