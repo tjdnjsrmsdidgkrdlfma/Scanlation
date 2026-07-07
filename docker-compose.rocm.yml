@@ -4,22 +4,16 @@
 # Makes the container GPU-capable for the torch engines (detect / manga-ocr /
 # PaddleOCR-VL) by passing the AMD GPU devices through. torch is still installed
 # at /admin plugin-install time — pick 백엔드=GPU in the /admin 동작 tab (vendor
-# auto-detects AMD from /dev/kfd) BEFORE installing engines. Real values go in a
-# gitignored .env next to this file.
+# auto-detects AMD from /dev/kfd) BEFORE installing engines.
+#
+# No group_add / GID here: the image's docker-entrypoint.sh detects the device
+# nodes' owning group at startup and adds the app user to it automatically, so
+# this file works on any host with no per-host value.
 services:
   server:
     devices:
       - "/dev/kfd:/dev/kfd"     # ROCm compute node (its presence = "AMD" to detect_gpu_vendor)
       - "/dev/dri:/dev/dri"     # render nodes (cardN / renderDN)
-    # The app user (uid 10001) must be in the host group that OWNS /dev/kfd (the
-    # ROCm compute node). Use the numeric GID, not a name: 'render' often isn't in
-    # the slim image's /etc/group, and the GID must be the HOST's. Find yours:
-    #   stat -c '%g' /dev/kfd     (or: getent group render)
-    # Set SCANLATION_RENDER_GID in .env. If /dev/dri/card* needs a *different* group
-    # (video), add its GID as a second line — but only when it differs (compose
-    # rejects duplicate group_add entries; on many hosts render == video).
-    group_add:
-      - "${SCANLATION_RENDER_GID:-105}"
     security_opt:
       - seccomp:unconfined      # some ROCm/HIP stacks need the default seccomp profile relaxed
     environment:

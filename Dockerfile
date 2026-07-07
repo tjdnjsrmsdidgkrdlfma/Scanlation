@@ -15,7 +15,7 @@ FROM python:3.11-slim
 # libgomp1/libglib2.0-0 — generic C runtime libs the engine backends
 #   (onnxruntime/torch/opencv) dlopen; the core (opencv-headless deskew) needs them too.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git libgomp1 libglib2.0-0 libnuma1 \
+ && apt-get install -y --no-install-recommends git libgomp1 libglib2.0-0 libnuma1 util-linux \
  && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
@@ -41,7 +41,11 @@ RUN pip install /tmp/build/scanlation-sdk /tmp/build/scanlation-server \
 RUN useradd -m -u 10001 app \
  && mkdir -p /data /plugins \
  && chown -R app:app /data /plugins
-USER app
+# Start as root so the entrypoint can add `app` to the GPU device nodes' owning
+# group (the GID varies per host — see docker-entrypoint.sh), then it drops to
+# `app` via setpriv. CPU-only containers just drop privileges. (No `USER app`.)
+COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 EXPOSE 4000
+ENTRYPOINT ["sh", "/docker-entrypoint.sh"]
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4000"]
