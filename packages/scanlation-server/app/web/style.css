@@ -136,6 +136,7 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .row { display: flex; align-items: flex-end; gap: 12px; margin-top: 14px; }
+.row[hidden] { display: none; }  /* .row sets display:flex; keep `hidden` working (torch vendor/index rows) */
 .grow { flex: 1; }
 .langs { flex: 1; }
 
