@@ -289,6 +289,12 @@ cd packages/scanlation-server
 - **검출 옵션(RT-DETR)** — 튜닝 가능한 float 3개: `conf`(신뢰도 하한, 기본 0.6),
   `nms_iou`(중복 IoU 임계, 0.6), `contain_thresh`(포함 IoS 임계, 0.85). `/admin` 엔진 옵션에서 조절.
 - 오버레이 **세로쓰기**는 현재 가로 렌더(P8 예정).
+- **SFX 무한반복 → 배치 JSON 깨짐 (미해결)**: ollama(gemma4-26b)가 늘어진 SFX/의성어(「びゅうううう」 등)에서
+  같은 토큰을 무한반복 → 배치 `format`(JSON schema) 문자열이 안 닫혀 `JSONDecodeError` → per-text 폴백도
+  같은 모델·입력이라 같은 루프. **샘플러로는 못 잡는다**: near-greedy(정확도용 저온)에선 `frequency_penalty`가
+  무력, 온도를 올리면 루프는 깨지나 번역 정확도가 손상, `repeat_penalty`는 강한 루프의 argmax를 못 뒤집음.
+  남은 선택지 — (1) SFX를 덜 무는 모델 교체, (2) `pipeline.py`에서 온도 무관 반복붕괴 후처리(입력·출력 run
+  collapse). 진단: `/admin` 동작탭 verbose 로그 + `docker compose logs` + `tools/run_image.py`(force, all-at-once).
 
 ---
 
