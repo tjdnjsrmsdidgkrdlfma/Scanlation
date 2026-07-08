@@ -129,6 +129,10 @@ async def _run_deduped(id_, compute):
     except Exception as exc:  # noqa: BLE001 - hand the same failure to any waiters, then re-raise
         if not fut.done():
             fut.set_exception(exc)
+            # Mark it read. We re-raise below, and any waiter awaiting `fut` still gets
+            # the exception -- but with no waiter nobody would ever read it, and asyncio
+            # dumps "Future exception was never retrieved" when it finalizes the future.
+            fut.exception()
         raise
     finally:
         state.inflight.pop(id_, None)
