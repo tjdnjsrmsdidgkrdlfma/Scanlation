@@ -196,7 +196,7 @@ for region in regions:
 2. **`_torch_pip_args`(plugins_install.py) 2단계 설치** — 지금 amd 경로가 `--index-url rocm --extra-index-url pypi`를 함께 줘서, pip 버전 우선순위 때문에 torch가 **PyPI의 CUDA 빌드로 샌다**(rocm6.2를 줘도 `torch 2.12.1+cu130`이 깔림). torch를 rocm 인덱스에서만 받도록 선설치로 분리해야 한다.
 3. **기본 rocm `rocm6.2` → `rocm7.0`** — rocm6.2 인덱스는 torch 2.5.1까지라 현 스택(torch 2.12.1 + torchvision 0.27.1)과 어긋난다. 호스트 ROCm 7.1엔 `rocm7.0` wheel이 맞았다.
 4. **`docker-entrypoint.sh`에서 `HOME`을 app 홈으로** — `setpriv`가 uid만 바꾸고 `HOME`은 `/root`로 두는 탓에 app 유저가 MIOpen/git 캐시를 못 써 `Permission denied`. 실사용 GPU recognize도 여기서 깨진다.
-5. **`docker-compose.rocm.yml`에 env 추가** — `MIOPEN_USER_DB_PATH`/`MIOPEN_CUSTOM_CACHE_DIR`(영속 볼륨: 커널 캐시 warm 시 4.4x) + `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention — **recognize 속도 3.7x, 최우선 load-bearing**. 위 후속 참조).
+5. **`docker-compose.rocm.yml`에 env 추가** — `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention, recognize 속도 **3.7x**)는 **반영 완료.** `MIOPEN_USER_DB_PATH`/`MIOPEN_CUSTOM_CACHE_DIR`(영속 볼륨: 커널 캐시 warm 시 4.4x)는 app 유저가 쓸 수 있는 디렉터리가 전제라 4번(entrypoint `HOME`)과 함께 남았다.
 
 부수 발견: `_torch_pip_args` 기본이 `torch_backend="cpu"`라 **GPU 호스트에서도 CPU wheel을 받는다** — device-node 자동 감지(`detect_gpu_vendor`) 기반 "auto" 기본값으로 개선 여지가 있다(별도).
 

@@ -20,6 +20,11 @@ services:
       # Expose ONLY the discrete GPU to torch, hiding an integrated iGPU so
       # list_gpus()/the device picker aren't confused. Verify the index with `rocminfo`.
       HIP_VISIBLE_DEVICES: ${HIP_VISIBLE_DEVICES:-0}
+      # Let torch's SDPA reach the ROCm flash / mem-efficient attention kernels. Without
+      # it SDPA falls back to the math path, which is quadratic in the vision-token count
+      # — the dominant cost of a VLM recognizer on large crops. Measurement:
+      # packages/scanlation-server/tools/recognize-gpu-speed.md
+      TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: "1"
       # Optional: spoof a supported ISA when no prebuilt rocm wheel exists for your GPU
       # (e.g. RDNA4 gfx1200). Pass-through — set in .env only if needed (e.g. 11.0.0).
       HSA_OVERRIDE_GFX_VERSION:

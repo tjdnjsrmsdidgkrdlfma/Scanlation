@@ -6,7 +6,7 @@
 
 | 레버 | 이득 | 대가 | 판정 |
 |---|---|---|---|
-| **AOTriton flash attention** (env 한 줄) | **3.7x** | 없음 | **채택 — 최우선, 아직 compose 미반영** |
+| **AOTriton flash attention** (env 한 줄) | **3.7x** | 없음 | **채택 — `docker-compose.rocm.yml`에 반영됨** |
 | 해상도 캡 (150k px) | 1.66x | 다운스케일된 crop 대부분의 출력이 바뀜 | 보류 — 변경이 코스메틱인지 확인 중 |
 | 멀티워커 (W=4) | 1.31x | VRAM 4배, per-crop 지연 3.4배 | 지금은 안 넣음 (천장에 구조적 이유) |
 
@@ -109,7 +109,7 @@ crop을 픽셀 상한으로 다운스케일해 vision 토큰을 줄인다(`--max
 
 ## 실투입
 
-1. **`docker-compose.rocm.yml`에 `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` 추가 — 3.7x, 최우선, 아직 미반영.** 순수 env라 파일시스템 의존 없음(`HIP_VISIBLE_DEVICES` 옆자리).
+1. ~~`docker-compose.rocm.yml`에 `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` 추가~~ — **반영 완료**(3.7x). 순수 env라 파일시스템 의존이 없다. MIOPEN 커널 캐시 env는 app 유저가 쓸 수 있는 영속 디렉터리가 전제라 2번(entrypoint `HOME`)과 묶는다.
 2. **§셋업 부채 나머지**([crop-batching](recognize-crop-batching.md))가 실제 배포 블로커다 — 지금까지 전부 벤치가 수동 env로 우회한 상태의 측정이고, `/admin`에서 GPU로 설치하면 아직 **로드조차 안 된다**(`accelerate` 누락, torch가 CUDA 빌드로 샘, rocm6.2 기본, entrypoint `HOME=/root`). MIOPEN 캐시 env를 compose에 넣는 것도 이 entrypoint 수정이 전제다.
 3. **해상도 캡** — `ref`/`got` 확인 후 채택/보류 확정. 넣게 되면 하드코딩 금지 규칙대로 env 기본값 + `state.json` + `/admin` 노출, 위치는 detect 다음·recognize 전([pipeline.py `detect_and_recognize`](../app/pipeline.py) 또는 [PaddleOCR-VL plugin](../../scanlation-paddleocr-vl-for-manga/scanlation_paddleocr_vl_for_manga/plugin.py)의 `recognize` 입력 전).
 4. **멀티워커** — 안 넣음(위 재고 조건).
