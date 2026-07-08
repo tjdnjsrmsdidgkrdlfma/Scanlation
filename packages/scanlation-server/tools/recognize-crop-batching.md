@@ -174,7 +174,19 @@ for region in regions:
 2. **⚠️ B≥8에서 correctness가 깨진다.** B=2·4는 per-crop과 완전 일치인데 B=8·16에서 crop #5만 갈린다: want=`ん...っ♥♥\n♥おっ♥` vs got=`ん...コ♥♥\n✓おっく`. [§ragged](#어려운-건-dynamic-res의-ragged-vision-토큰)가 예언한 "position_ids/padding이 조용히 틀림(silently wrong)"이 실측됐다 — 하필 ♥ 반복 SFX형 crop(폭주 성향)이 left-pad가 많아지는 큰 배치에서 취약하다. **배치가 무조건 output-preserving은 아니다.**
 3. **절대속도가 manga-ocr CPU에 못 미친다.** warm B=2가 0.70 crops/sec(≈1.4s/crop)인데 manga-ocr CPU는 natural ~6 crops/sec(≈0.17s) — **manga-ocr CPU가 8배 빠르다.** PaddleOCR-VL은 정확도(88%) 프리미엄이지만 GPU에 배치를 얹어도 그 격차는 안 메워지고, dynamic-res 커널 JIT의 롱테일(캐시 미스 시 ~7s)까지 남는다.
 
+**단, "B=2·4 완전 일치"를 안전으로 읽으면 안 된다** — 벤치가 크롭을 고정 순서로 배치해([bench](bench_recognize_batch.py) `crops[i % len]`) 깨지는 crop #5는 B≥8에서야 배치에 들어간다. B=2·4는 그 크롭을 안 넣은 더 쉬운 부분집합을 잰 것이라, 작은 배치가 correctness를 보존한다는 증거가 아니라 **미측정**이다. 근본 원인은 배치 "크기"가 아니라 배치 내 **길이 편차**(ragged vision 토큰 → left-pad → position_ids 오프셋 오류)라, B=2라도 [짧은 크롭 + 긴 SFX]를 묶으면 똑같이 깨질 수 있다. 안전 조건은 "작은 배치"가 아니라 "배치 내 길이 균일"(길이 버킷팅)이다.
+
 **결론: PaddleOCR-VL 배치는 실패다.** B=2~4에서만 2x인데 그마저 절대속도가 manga-ocr CPU의 1/8이고, B≥8은 느려지고 틀린다.
+
+### 후속 — attention 백엔드·커널 캐시는 레버가 아니다 (2026-07-08)
+
+4070 Ti Super(~1s/crop) 대 서버 9060 XT(2.9s/crop)의 ~3배 차가 셋업 탓인지 보려고 세 레버를 걸어 재측정 — **셋 다 무효, warm B=1=0.34 crops/sec가 바이트 단위로 그대로**다.
+
+- **`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention) — 무효.** 결과가 이전과 완전 동일 → SDPA 경로를 애초에 안 탄다.
+- **`attn_implementation="sdpa"` — 지원되나 무효.** 모델이 sdpa를 받긴 한다(`ValueError` 없이 로드; [BENCH_ATTN 노브](bench_recognize_batch.py), 커밋 b896376). 그런데도 수치 불변 → 이 크롭 크기에선 attention 백엔드가 병목이 아니다.
+- **`PYTORCH_KERNEL_CACHE_PATH` — 경고만 옮겼다.** torch JIT 커널 캐시(MIOpen과 별개)가 `/root/.cache`→`/data/torchkernels` 어디서도 "could not be created"로 꺼진다(app 유저가 볼륨에 못 씀 = §부채 4번과 같은 권한 뿌리). 단 per-crop 수엔 무영향 — 한 프로세스 안에선 컴파일 커널이 메모리에 남아 반복 shape는 1회만 컴파일, 디스크 캐시는 새 프로세스 cold start만 돕는다.
+
+**2.9s/crop은 이 카드+스택의 정직한 steady-state다.** ~3배 차는 오설정이 아니라 하드웨어 — 체급 + 대역폭 ~2배(4070 Ti Super 672 vs 9060 XT ~320 GB/s). attention·캐시 env를 이 숫자 겨냥해 다시 시도하지 말 것.
 
 ### GPU recognize 실투입 셋업 부채 (벤치는 수동 env로 우회, 코드 미반영)
 
@@ -184,14 +196,14 @@ for region in regions:
 2. **`_torch_pip_args`(plugins_install.py) 2단계 설치** — 지금 amd 경로가 `--index-url rocm --extra-index-url pypi`를 함께 줘서, pip 버전 우선순위 때문에 torch가 **PyPI의 CUDA 빌드로 샌다**(rocm6.2를 줘도 `torch 2.12.1+cu130`이 깔림). torch를 rocm 인덱스에서만 받도록 선설치로 분리해야 한다.
 3. **기본 rocm `rocm6.2` → `rocm7.0`** — rocm6.2 인덱스는 torch 2.5.1까지라 현 스택(torch 2.12.1 + torchvision 0.27.1)과 어긋난다. 호스트 ROCm 7.1엔 `rocm7.0` wheel이 맞았다.
 4. **`docker-entrypoint.sh`에서 `HOME`을 app 홈으로** — `setpriv`가 uid만 바꾸고 `HOME`은 `/root`로 두는 탓에 app 유저가 MIOpen/git 캐시를 못 써 `Permission denied`. 실사용 GPU recognize도 여기서 깨진다.
-5. **`docker-compose.rocm.yml`에 env 추가** — `MIOPEN_USER_DB_PATH`/`MIOPEN_CUSTOM_CACHE_DIR`(영속 볼륨: 커널 캐시 warm 시 4.4x) + `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention).
+5. **`docker-compose.rocm.yml`에 env 추가** — `MIOPEN_USER_DB_PATH`/`MIOPEN_CUSTOM_CACHE_DIR`(영속 볼륨: 커널 캐시 warm 시 4.4x) + `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention — 단 위 후속에서 recognize 속도엔 무효로 측정됨, MIOPEN 캐시 env만 load-bearing).
 
 부수 발견: `_torch_pip_args` 기본이 `torch_backend="cpu"`라 **GPU 호스트에서도 CPU wheel을 받는다** — device-node 자동 감지(`detect_gpu_vendor`) 기반 "auto" 기본값으로 개선 여지가 있다(별도).
 
 ## 판단 (실측 반영)
 
 - **manga-ocr `recognize_batch` — 보류 쪽으로 기움.** 실이득 1.27x(B=8)로 작고 멀티워커(1.8x)보다 못하다. 저위험 국소 변경이라 값이 0은 아니나, **translate-bound면 end-to-end엔 안 드러난다** → 구현 전 recognize의 end-to-end 비중부터 로그로 확인(§다음).
-- **기각 — PaddleOCR-VL 배치.** GPU(ROCm)로 측정 완료(§PaddleOCR-VL GPU 배치): B=2 2.04x가 최대고 절대속도가 manga-ocr CPU의 1/8, B≥8은 후퇴 + correctness 깨짐. ragged/position_ids 우려가 실측으로 확인됐다.
+- **기각 — PaddleOCR-VL 배치.** GPU(ROCm)로 측정 완료(§PaddleOCR-VL GPU 배치): B=2 2.04x가 최대고 절대속도가 manga-ocr CPU의 1/8, B≥8은 후퇴 + correctness 깨짐. ragged/position_ids 우려가 실측으로 확인됐다. 후속(2026-07-08): sdpa·AOTriton·커널캐시 다 무효라 2.9s/crop은 하드웨어값이고, 작은 배치의 correctness도 측정 착시라 미보장.
 - **완료 — registry 안전성을 `gpu_lock`에서 분리.** 커밋 2c7e38e; 자체 lock으로 `gpu_lock`과 무관하게 thread-safe. (§gpu_lock 1번이 요구한 전제.)
 - **CPU recognize를 정말 빠르게 할 거면 배치보다 멀티워커(동시성)가 우선** — 1.8x > 1.27x 실측. 단 `gpu_lock`→semaphore 필요하고, 역시 recognize 비중 확인이 선행. translate-bound면 둘 다 가려진다.
 - **방향 전환 — 처리량은 배치가 아니라 동시성/분산이다.** 세 recognize 경로 다 배치가 신통찮다(manga-ocr 1.27x, PaddleOCR-VL 기각). 레버는 동시성: manga-ocr은 CPU 멀티워커(1.8x), GPU 엔진은 GPU를 나눠 쓴다. 하드웨어 확장(9060 XT + MI50) 시 **GPU별 역할 분리** — 한 GPU는 recognize(PaddleOCR-VL), 다른 GPU는 translate(Gemma) — 로 `gpu_lock` 경합을 물리적으로 없애고, KV 캐시 여유 안에서 GPU당 동시 요청을 키우는 게 다음 설계 후보다(이 문서 범위 밖, 별도 검토).
@@ -208,7 +220,3 @@ for region in regions:
 - 스레드 배치(intra-op vs 멀티워커) 실측은 [recognize-cpu-threads.md](recognize-cpu-threads.md). 이 문서는 그 "대안 후보(crop 배치)"를 이어받은 것.
 - 동시성·`gpu_lock`·translate 배치의 그림은 아티팩트 [동시성과 번역 배치](https://claude.ai/code/artifact/543ff4c0-d2be-4d4f-9d70-fc35fac17c1f).
 - 통합 지점: [pipeline.py `detect_and_recognize`](../app/pipeline.py) · [orchestrator.py `run_page`](../app/orchestrator.py) · 엔진 [manga-ocr plugin](../../scanlation-manga-ocr/scanlation_manga_ocr/plugin.py) / [PaddleOCR-VL plugin](../../scanlation-paddleocr-vl-for-manga/scanlation_paddleocr_vl_for_manga/plugin.py).
-순서	작업	위험	값어치
-0	registry 안전성 분리	낮음	동시성 전제 + 하이진
-1	동시성 ~4-way (lock→Semaphore)	중(torch 스레드 결정)	K=8 목표 해결
-2	crop-batching	낮음	단일-페이지 지연(선택)
