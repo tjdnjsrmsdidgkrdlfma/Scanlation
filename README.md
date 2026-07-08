@@ -93,6 +93,7 @@ extension/
   src/content.js (md5+파이프라인+오버레이)  background.js  popup.js
 Dockerfile  docker-compose.yml  deploy/nginx.conf.example   Docker 배포(core-only 이미지 + 런타임 플러그인)
 SCANLATION_DESIGN.md   전체 설계 / 핸드오프
+REFACTORING.md         리팩토링 백로그 (중복·하드코딩·어휘 부채 + 알려진 버그)
 ```
 
 > 코어는 엔진을 전혀 모르고 **`entry_points`로만 발견**합니다. 각 엔진 패키지는 `scanlation-sdk`만
