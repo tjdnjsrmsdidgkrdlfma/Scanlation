@@ -210,23 +210,53 @@ def bench_decode_profile(crops, device: str, cap: int, attn, n_crops: int, rows)
     rows += [""]
 
 
-def _cap_pixels(crops, max_px: int):
-    """Downscale crops whose area exceeds max_px (aspect preserved) so the dynamic-res
-    processor emits fewer vision tokens -- the workaround for eager O(n^2) attention
-    when flash isn't available. Returns (new_crops, n_resized)."""
+GRID = 28  # PaddleOCR-VL vision patch grid: patch14 x merge2
+
+
+def _downscale_one(c, cap: int, mode: str = "area"):
+    """Shrink one crop to <= `cap` pixels (aspect preserved). The modes differ only in
+    HOW, which is the open question -- an arbitrary-ratio windowed-sinc resize rings on
+    thin strokes (Japanese small kana, the dots of `・・・`), and a size that isn't a
+    multiple of the processor's 28px patch grid gets resampled a SECOND time inside it.
+
+    Factorial over the two suspects -- `area` vs `box` is the same target size so it
+    isolates the FILTER; `grid28` keeps LANCZOS so it isolates the ALIGNMENT; `boxgrid`
+    fixes both. `pow2` is neither: integer halving overshoots well under the cap and its
+    result isn't grid-aligned either, so a win there is confounded with a smaller image.
+
+      area     scale = sqrt(cap/area), LANCZOS           (current default; can ring)
+      box      same target size, BOX                     (area average -- no ringing)
+      grid28   `area`, snapped to a multiple of 28       (no second resize; still LANCZOS)
+      boxgrid  snapped to 28 AND BOX                     (both fixes)
+      pow2     halve with Image.reduce(2) until <= cap   (exact 2x2 blocks; lands under cap)
+    """
     from PIL import Image
+    w, h = c.width, c.height
+    if not cap or w * h <= cap:
+        return c
+    if mode == "pow2":
+        while c.width * c.height > cap and c.width >= 2 and c.height >= 2:
+            c = c.reduce(2)
+        return c
+    scale = (cap / (w * h)) ** 0.5
+    tw, th = max(1, int(w * scale)), max(1, int(h * scale))
+    if mode in ("grid28", "boxgrid"):
+        tw, th = max(GRID, tw - tw % GRID), max(GRID, th - th % GRID)
+    return c.resize((tw, th), Image.BOX if mode in ("box", "boxgrid") else Image.LANCZOS)
+
+
+def _cap_pixels(crops, max_px: int, mode: str = "area"):
+    """Downscale crops above `max_px` so the dynamic-res processor emits fewer vision
+    tokens. Returns (new_crops, n_resized)."""
     out, n = [], 0
     for c in crops:
-        if max_px and c.width * c.height > max_px:
-            scale = (max_px / (c.width * c.height)) ** 0.5
-            out.append(c.resize((max(1, int(c.width * scale)), max(1, int(c.height * scale))), Image.LANCZOS))
-            n += 1
-        else:
-            out.append(c)
+        d = _downscale_one(c, max_px, mode)
+        n += d is not c
+        out.append(d)
     return out, n
 
 
-def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int, rows) -> None:
+def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int, rows, mode: str = "area") -> None:
     """Sweep max-pixels caps on the same crops -- the accuracy-vs-speed knee for
     choosing a production downscale cap. crops/sec is whole-sample throughput; exact /
     char-sim are scored over the DOWNSCALED crops only (crops a cap doesn't shrink read
@@ -296,7 +326,7 @@ def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int,
                 ms.append(ref_ms[i])
             else:
                 affected.append(i)
-                cc = _cap_pixels([c], px)[0][0]
+                cc = _downscale_one(c, px, mode)
                 t0 = time.perf_counter()
                 got.append(rec.recognize(cc, region, opts))
                 ms.append((time.perf_counter() - t0) * 1000)
@@ -355,6 +385,75 @@ def bench_diag(crops, device: str, out_cap: int, attn, items: int, rows) -> None
     rows += [f"### diag: {rate:.3f} crops/sec single-process, {len(crops)} crops detected", ""]
 
 
+def bench_mode_sweep(crops, device: str, out_cap: int, attn, cap: int, modes, items: int, rows) -> None:
+    """Fix the pixel cap, vary HOW we downscale. Because the cap is fixed, the set of
+    crops that gets downscaled is IDENTICAL for every mode -- so the accuracy columns
+    compare directly, with no cohort trick needed. Answers whether the damage a cap does
+    is the resolution itself or the resampling (ringing / a second resize inside the
+    processor's 28px grid)."""
+    import difflib
+    from scanlation_sdk.contracts import Region
+
+    rec = _load_rec(device, attn)
+    region = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
+    opts = {"max_new_tokens": out_cap}
+    sample = crops[:max(1, items)]
+    with _silenced():
+        rec.recognize(sample[0], region, opts)  # warmup: absorb first-forward JIT
+
+    ref_text, ref_ms = [], []  # uncapped reference: read once, reused by every mode
+    for c in sample:
+        t0 = time.perf_counter()
+        ref_text.append(rec.recognize(c, region, opts))
+        ref_ms.append((time.perf_counter() - t0) * 1000)
+
+    affected = [i for i, c in enumerate(sample) if c.width * c.height > cap]
+    if not affected:
+        print(f"\n-- no crop exceeds {cap}px; nothing to compare")
+        return
+
+    def _emit(label, got, ms, px):
+        rate = len(sample) / (sum(ms) / 1000)
+        ex = sum(got[i] == ref_text[i] for i in affected)
+        sim = sum(difflib.SequenceMatcher(None, ref_text[i], got[i]).ratio() for i in affected) / len(affected)
+        chars = sum(len(got[i]) for i in affected) / len(affected)
+        mpx = (sum(px) / len(px) / 1000) if px else 0.0
+        print(f"{label:>9} {rate:>10.2f} {f'{len(affected) - ex}/{len(sample)}':>7} "
+              f"{f'{ex}/{len(affected)}':>8} {sim:>7.3f} {chars:>7.1f} {mpx:>8.0f}k")
+        rows.append(f"| {label} | {rate:.2f} | {len(affected) - ex}/{len(sample)} | "
+                    f"{ex}/{len(affected)} | {sim:.3f} | {chars:.1f} | {mpx:.0f}k |")
+
+    print(f"\n-- downscale-mode sweep @ cap {cap}px, device {device}, out-cap {out_cap}, {len(sample)} crops")
+    print(f"   {len(affected)} crops downscaled -- the SAME set for every mode, so these columns compare directly")
+    print(f"{'mode':>9} {'crops/sec':>10} {'chg':>7} {'exact':>8} {'sim':>7} {'chars':>7} {'mean-px':>9}")
+    rows += [f"### PaddleOCR-VL -- downscale-mode sweep @ {cap}px", "",
+             f"The cap is fixed, so the same {len(affected)} crops are downscaled by every mode "
+             "and the accuracy columns compare directly. `chars` is their mean output length -- "
+             "a drop means the model is dropping text (truncation). `mean-px` is their mean area "
+             "after resize: `pow2` lands well under the cap (integer steps), so a win there is "
+             "partly a smaller image, not only a cleaner filter.", "",
+             "| mode | crops/sec | changed | exact | sim | chars | mean-px |",
+             "|---|---|---|---|---|---|---|"]
+
+    _emit("uncapped", ref_text, ref_ms, [sample[i].width * sample[i].height for i in affected])
+    for mode in modes:
+        got, ms, px = list(ref_text), list(ref_ms), []
+        for i in affected:
+            d = _downscale_one(sample[i], cap, mode)
+            px.append(d.width * d.height)
+            t0 = time.perf_counter()
+            got[i] = rec.recognize(d, region, opts)
+            ms[i] = (time.perf_counter() - t0) * 1000
+        _emit(mode, got, ms, px)
+        for i in affected:
+            if got[i] != ref_text[i]:
+                c = sample[i]
+                print(f"      #{i} {c.width}x{c.height} ({c.width * c.height // 1000}k px)")
+                print(f"        ref {ref_text[i]!r}")
+                print(f"        got {got[i]!r}")
+    rows += [""]
+
+
 def main() -> int:
     sys.stdout.reconfigure(line_buffering=True)  # live progress under a Docker pipe
 
@@ -379,6 +478,12 @@ def main() -> int:
                     help='accuracy-vs-speed: sweep max-pixels caps vs the uncapped read, e.g. "0,250000,150000,100000"')
     ap.add_argument("--diag", action="store_true",
                     help="diagnose per-crop rate drift: crop md5 inventory + single-process baseline")
+    ap.add_argument("--downscale-mode", default="area",
+                    choices=["area", "box", "grid28", "boxgrid", "pow2"],
+                    help="HOW to shrink: area (arbitrary ratio + LANCZOS), box (area average), "
+                         "grid28 (snap to the 28px patch grid), boxgrid (both), pow2 (integer halving)")
+    ap.add_argument("--sweep-modes", default="",
+                    help='fix --max-pixels and sweep the downscale METHOD, e.g. "area,box,grid28,boxgrid,pow2"')
     args = ap.parse_args()
 
     if not args.data:
@@ -389,9 +494,9 @@ def main() -> int:
         sys.exit(f"PaddleOCR-VL concurrency needs a GPU: {reason}")
 
     crops, src = _load_crops(args.data, args.detect)
-    if args.max_pixels and not args.sweep_pixels:  # sweep controls its own capping
-        crops, n_capped = _cap_pixels(crops, args.max_pixels)
-        src += f", {n_capped} downscaled to <={args.max_pixels}px"
+    if args.max_pixels and not (args.sweep_pixels or args.sweep_modes):  # sweeps cap their own copies
+        crops, n_capped = _cap_pixels(crops, args.max_pixels, args.downscale_mode)
+        src += f", {n_capped} downscaled to <={args.max_pixels}px ({args.downscale_mode})"
     worker_counts = [int(x) for x in args.workers.split(",") if x.strip()]
     attn = os.getenv("BENCH_ATTN")
 
@@ -401,11 +506,16 @@ def main() -> int:
             f"- device: {device}" + (f", attn={attn}" if attn else ""),
             f"- worker sweep: {worker_counts}, items/point: {args.items}", ""]
 
-    if args.diag:
+    if args.sweep_modes:
+        if not args.max_pixels:
+            sys.exit("--sweep-modes needs --max-pixels: the fixed cap to compare methods at")
+        modes = [m.strip() for m in args.sweep_modes.split(",") if m.strip()]
+        bench_mode_sweep(crops, device, args.probe_cap, attn, args.max_pixels, modes, args.items, rows)
+    elif args.diag:
         bench_diag(crops, device, args.probe_cap, attn, args.items, rows)
     elif args.sweep_pixels:
         sweep = [int(x) for x in args.sweep_pixels.split(",") if x.strip()]
-        bench_pixel_sweep(crops, device, args.probe_cap, attn, sweep, args.items, rows)
+        bench_pixel_sweep(crops, device, args.probe_cap, attn, sweep, args.items, rows, args.downscale_mode)
     elif args.profile_decode:
         bench_decode_profile(crops, device, args.probe_cap, attn, args.profile_n, rows)
     else:
