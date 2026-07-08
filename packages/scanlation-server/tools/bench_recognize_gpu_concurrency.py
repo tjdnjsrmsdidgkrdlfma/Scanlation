@@ -82,17 +82,17 @@ def _worker_init(crops, device: str, attn: str | None, probe_cap: int) -> None:
         _REC.recognize(_CROPS[0], _REGION, _OPTS)  # warmup (JIT/kernel cache)
 
 
-def _worker_task(i: int) -> tuple[float, int]:
-    """One B=1 recognize; returns (this recognize's wall ms, this process's peak
-    torch VRAM). The per-crop ms exposes whether time is a warmup tail (first few
-    slow, rest fast = kernel JIT) or uniformly slow (never warms = cache/GPU path).
-    Peak VRAM is torch-allocator only -- add HIP context + MIOpen, so a lower bound."""
+def _worker_task(i: int) -> tuple[float, int, str]:
+    """One B=1 recognize; returns (wall ms, peak torch VRAM, recognized text).
+    The text is the tie-breaker: a slow crop whose output is one token/phrase
+    repeated to the cap is runaway generation; varied long text is genuine. Peak
+    VRAM is torch-allocator only -- add HIP context + MIOpen, so a lower bound."""
     import torch
     t0 = time.perf_counter()
-    _REC.recognize(_CROPS[i % len(_CROPS)], _REGION, _OPTS)
+    text = _REC.recognize(_CROPS[i % len(_CROPS)], _REGION, _OPTS)
     ms = (time.perf_counter() - t0) * 1000
     peak = torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
-    return ms, peak
+    return ms, peak, text
 
 
 def bench_concurrency(crops, worker_counts, device, items, attn, probe_cap, rows) -> None:
@@ -121,18 +121,24 @@ def bench_concurrency(crops, worker_counts, device, items, attn, probe_cap, rows
                 dt = time.perf_counter() - t0
             percrop = [r[0] for r in out]        # per-recognize wall ms (in-worker)
             peaks = [r[1] for r in out]
+            texts = [r[2] for r in out]
             rate = items / dt
             if base_rate is None:
                 base_rate = rate
             speed = rate / base_rate
             vram = (max(peaks) / 1e9) if peaks else 0.0
             print(f"{w:>7} {'yes':>5} {rate:>10.2f} {speed:>7.2f}x {vram:>7.2f}GB")
-            first = " ".join(f"{x:.0f}" for x in percrop[:6])
             print(f"        per-crop ms: min {min(percrop):.0f} / med {statistics.median(percrop):.0f}"
-                  f" / max {max(percrop):.0f}  ·  first: {first}")
+                  f" / max {max(percrop):.0f}")
+            # slowest first, each with its output text: repeated token/phrase to the
+            # cap = runaway; varied text = genuinely long. chars = len(decoded string).
+            print("        ms · chars · text  (slowest first):")
+            for ms_i, txt in sorted(zip(percrop, texts), key=lambda r: -r[0]):
+                snippet = txt if len(txt) <= 70 else txt[:70] + "…"
+                print(f"          {ms_i:>7.0f} · {len(txt):>4} · {snippet!r}")
             rows.append(f"| {w} | {rate:.2f} | {speed:.2f}x | ~{vram * w:.1f}GB ({vram:.1f}×{w}) |")
-            rows.append(f"| | per-crop ms: min {min(percrop):.0f} / med {statistics.median(percrop):.0f}"
-                        f" / max {max(percrop):.0f} | | |")
+            rows.append(f"| | per-crop ms min {min(percrop):.0f}/med {statistics.median(percrop):.0f}"
+                        f"/max {max(percrop):.0f}, chars max {max(len(t) for t in texts)} | | |")
         except Exception as exc:  # noqa: BLE001 - OOM / driver limit at high W is a valid finding
             print(f"{w:>7} {'no':>5}   {type(exc).__name__}: {exc}")
             rows.append(f"| {w} | no | {type(exc).__name__}: {exc} | |")
