@@ -250,21 +250,45 @@ def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int,
         ref_text.append(rec.recognize(c, region, opts))
         ref_ms.append((time.perf_counter() - t0) * 1000)
 
+    caps = [p for p in sweep if p]  # 0 / uncapped is the reference row
+    # A cap's affected sets are nested (bigger cap -> subset), so the crops above the
+    # LARGEST cap are downscaled by every cap. Only those are comparable across caps:
+    # the per-cap "affected" set grows as the cap shrinks, and the crops it gains are
+    # barely downscaled, so they score near-1.0 and pull that average up.
+    cohort = [i for i, c in enumerate(sample) if caps and c.width * c.height > max(caps)]
+
+    def _score(idxs, got):
+        """(exact, char-sim, mean output chars) over `idxs`, against the uncapped read."""
+        ex = sum(got[i] == ref_text[i] for i in idxs)
+        sim = sum(difflib.SequenceMatcher(None, ref_text[i], got[i]).ratio() for i in idxs) / len(idxs)
+        chars = sum(len(got[i]) for i in idxs) / len(idxs)
+        return ex, sim, chars
+
     print(f"\n-- max-pixels sweep (accuracy vs speed), device {device}, out-cap {out_cap}, {len(sample)} crops")
-    print(f"{'pixels':>10} {'crops/sec':>10} {'downscaled':>11} {'exact':>8} {'char-sim':>9}")
+    print(f"   cohort = {len(cohort)} crops > {max(caps) if caps else 0}px, downscaled by EVERY cap")
+    print(f"   cross-cap comparable: chg (fixed sample) and coh-* (fixed cohort).  aff-sim* is NOT.")
+    print(f"{'pixels':>9} {'crops/sec':>10} {'down':>5} {'chg':>7} {'aff-exact':>10} {'aff-sim*':>9}   "
+          f"{'coh-exact':>10} {'coh-sim':>8} {'coh-chars':>10}")
     rows += ["### PaddleOCR-VL -- max-pixels sweep (accuracy vs speed)", "",
-             "crops/sec is whole-sample throughput. exact / char-sim are over the "
-             "DOWNSCALED crops ONLY -- crops a cap doesn't shrink read identically, so "
-             "scoring them would dilute the metric. char-sim = SequenceMatcher ratio vs "
-             "the uncapped read (itself OCR, so change-from-full-res, not ground truth). "
-             "Knee = highest crops/sec whose char-sim on the affected crops is still ok.", "",
-             "| pixels | crops/sec | downscaled | exact | char-sim |", "|---|---|---|---|---|"]
+             "crops/sec is whole-sample throughput. `chg` = crops whose output changed, over the "
+             "FIXED whole sample -- the valid cross-cap COUNT. `aff-*` score only the crops each "
+             "cap downscales, and that SET CHANGES per cap (a smaller cap gains barely-shrunk "
+             "crops scoring near 1.0), so `aff-sim*` is NOT comparable across caps -- it is kept "
+             f"for within-cap context. `coh-*` score a fixed cohort ({len(cohort)} crops above the "
+             "largest cap, downscaled by every cap) -- the valid cross-cap SEVERITY. `coh-chars` "
+             "is mean output length: it grows when a cap wrecks legibility enough that the model "
+             "rambles, which costs decode time.", "",
+             "| pixels | crops/sec | downscaled | changed | aff-exact | aff-sim* | coh-exact | coh-sim | coh-chars |",
+             "|---|---|---|---|---|---|---|---|---|"]
+
     base_rate = len(sample) / (sum(ref_ms) / 1000)
-    print(f"{'uncapped':>10} {base_rate:>10.2f} {'0':>11} {'—':>8} {'—':>9}")
-    rows.append(f"| uncapped | {base_rate:.2f} | 0 | — | — |")
-    for px in sweep:
-        if not px:
-            continue  # uncapped is the reference row above
+    cex, csim, cch = _score(cohort, ref_text) if cohort else (0, 1.0, 0.0)
+    print(f"{'uncapped':>9} {base_rate:>10.2f} {'0':>5} {f'0/{len(sample)}':>7} {'—':>10} {'—':>9}   "
+          f"{f'{cex}/{len(cohort)}':>10} {csim:>8.3f} {cch:>10.1f}")
+    rows.append(f"| uncapped | {base_rate:.2f} | 0 | 0/{len(sample)} | — | — | "
+                f"{cex}/{len(cohort)} | {csim:.3f} | {cch:.1f} |")
+
+    for px in caps:
         got, ms, affected = [], [], []
         for i, c in enumerate(sample):
             if c.width * c.height <= px:            # cap doesn't shrink this crop -> reuse reference
@@ -277,21 +301,22 @@ def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int,
                 got.append(rec.recognize(cc, region, opts))
                 ms.append((time.perf_counter() - t0) * 1000)
         rate = len(sample) / (sum(ms) / 1000)
-        if affected:
-            exact = sum(got[i] == ref_text[i] for i in affected)
-            sim = sum(difflib.SequenceMatcher(None, ref_text[i], got[i]).ratio() for i in affected) / len(affected)
-            print(f"{px:>10} {rate:>10.2f} {len(affected):>11} {f'{exact}/{len(affected)}':>8} {sim:>9.3f}")
-            rows.append(f"| {px} | {rate:.2f} | {len(affected)} | {exact}/{len(affected)} | {sim:.3f} |")
-            # Show what actually changed on the downscaled crops -- a char-sim number
-            # can't tell "♥ count / ellipsis" (harmless for translate) from a wrong kana.
-            for i in (j for j in affected if got[j] != ref_text[j]):
-                c = sample[i]
-                print(f"      #{i} {c.width}x{c.height} ({c.width * c.height // 1000}k px)")
-                print(f"        ref {ref_text[i]!r}")
-                print(f"        got {got[i]!r}")
-        else:
-            print(f"{px:>10} {rate:>10.2f} {'0':>11} {'—':>8} {'—':>9}")
-            rows.append(f"| {px} | {rate:.2f} | 0 | — | — |")
+        aex, asim, _ = _score(affected, got) if affected else (0, 1.0, 0.0)
+        cex, csim, cch = _score(cohort, got) if cohort else (0, 1.0, 0.0)
+        changed = len(affected) - aex          # over the fixed whole sample -> cross-cap comparable
+        a = f"{aex}/{len(affected)}" if affected else "—"
+        s = f"{asim:.3f}" if affected else "—"
+        print(f"{px:>9} {rate:>10.2f} {len(affected):>5} {f'{changed}/{len(sample)}':>7} {a:>10} {s:>9}   "
+              f"{f'{cex}/{len(cohort)}':>10} {csim:>8.3f} {cch:>10.1f}")
+        rows.append(f"| {px} | {rate:.2f} | {len(affected)} | {changed}/{len(sample)} | {a} | {s} | "
+                    f"{cex}/{len(cohort)} | {csim:.3f} | {cch:.1f} |")
+        # Show what actually changed on the downscaled crops -- a char-sim number
+        # can't tell "♥ count / ellipsis" (harmless for translate) from a wrong kana.
+        for i in (j for j in affected if got[j] != ref_text[j]):
+            c = sample[i]
+            print(f"      #{i} {c.width}x{c.height} ({c.width * c.height // 1000}k px)")
+            print(f"        ref {ref_text[i]!r}")
+            print(f"        got {got[i]!r}")
     rows += [""]
 
 
