@@ -178,15 +178,15 @@ for region in regions:
 
 **결론: PaddleOCR-VL 배치는 실패다.** B=2~4에서만 2x인데 그마저 절대속도가 manga-ocr CPU의 1/8이고, B≥8은 느려지고 틀린다.
 
-### 후속 — attention 백엔드·커널 캐시는 레버가 아니다 (2026-07-08)
+### 후속 — 세 레버 재측정, 그리고 AOTriton 오판 정정 (2026-07-08)
 
-4070 Ti Super(~1s/crop) 대 서버 9060 XT(2.9s/crop)의 ~3배 차가 셋업 탓인지 보려고 세 레버를 걸어 재측정 — **셋 다 무효, warm B=1=0.34 crops/sec가 바이트 단위로 그대로**다.
+4070 Ti Super(~1s/crop) 대 서버 9060 XT(2.9s/crop)의 ~3배 차가 셋업 탓인지 보려고 세 레버를 걸어 재측정했는데, **당시 AOTriton 판정이 틀렸다**(경위·정정은 [recognize-gpu-speed.md](recognize-gpu-speed.md)).
 
-- **`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention) — 무효.** 결과가 이전과 완전 동일 → SDPA 경로를 애초에 안 탄다.
-- **`attn_implementation="sdpa"` — 지원되나 무효.** 모델이 sdpa를 받긴 한다(`ValueError` 없이 로드; [BENCH_ATTN 노브](bench_recognize_batch.py), 커밋 b896376). 그런데도 수치 불변 → 이 크롭 크기에선 attention 백엔드가 병목이 아니다.
+- **`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention) — 실은 3.7x 레버다.** "무효"라 판정한 근거가 **플래그를 켠 채 두 번 돌려 같은 값이 나온 것**이었다(비교 기준이던 이전 baseline도 켜진 값). OFF 기준선을 한 번도 안 쟀던 것. 뒤에 같은 스크립트로 A/B: **OFF 0.094 / ON 0.345 crops/sec.** → §부채 5번은 실투입 필수.
+- **`attn_implementation="sdpa"` — 명시해도 변화 없음.** 모델이 **이미 sdpa를 기본으로** 쓰기 때문(`ValueError` 없이 로드; [BENCH_ATTN 노브](bench_recognize_batch.py), 커밋 b896376). AOTriton은 그 sdpa가 느린 math 폴백 대신 **flash 커널**을 타게 하는 스위치다.
 - **`PYTORCH_KERNEL_CACHE_PATH` — 경고만 옮겼다.** torch JIT 커널 캐시(MIOpen과 별개)가 `/root/.cache`→`/data/torchkernels` 어디서도 "could not be created"로 꺼진다(app 유저가 볼륨에 못 씀 = §부채 4번과 같은 권한 뿌리). 단 per-crop 수엔 무영향 — 한 프로세스 안에선 컴파일 커널이 메모리에 남아 반복 shape는 1회만 컴파일, 디스크 캐시는 새 프로세스 cold start만 돕는다.
 
-**2.9s/crop은 고정 steady-state가 아니었다** — 후속 조사([recognize-gpu-speed.md](recognize-gpu-speed.md))에서 per-crop은 crop 크기×출력 길이에 따라 ~0.5s(작은 SFX)~40s(큰 대사)로 벌어지는 분포이고, 지배 원인은 하드웨어 체급이 아니라 **거대 crop의 flash 없는 eager O(n²) attention**임이 드러났다(대역폭 차도 요인이나 부차적). attention·캐시 env는 전부 무효 확인 — 이 숫자 겨냥해 다시 시도하지 말 것. 레버는 해상도 캡이다.
+**따라서 warm B=1 = 0.34 crops/sec(≈2.9s/crop)는 flash-ON의 정상값이다.** 4070 Ti Super 대비 ~3배 차는 하드웨어 체급 + 대역폭(672 vs ~320 GB/s)으로 설명되는 범위다. flash를 끄면 같은 crop이 0.094 crops/sec로 떨어진다 — 병목은 vision attention이고, AOTriton이 그 스위치다.
 
 ### GPU recognize 실투입 셋업 부채 (벤치는 수동 env로 우회, 코드 미반영)
 
@@ -196,14 +196,14 @@ for region in regions:
 2. **`_torch_pip_args`(plugins_install.py) 2단계 설치** — 지금 amd 경로가 `--index-url rocm --extra-index-url pypi`를 함께 줘서, pip 버전 우선순위 때문에 torch가 **PyPI의 CUDA 빌드로 샌다**(rocm6.2를 줘도 `torch 2.12.1+cu130`이 깔림). torch를 rocm 인덱스에서만 받도록 선설치로 분리해야 한다.
 3. **기본 rocm `rocm6.2` → `rocm7.0`** — rocm6.2 인덱스는 torch 2.5.1까지라 현 스택(torch 2.12.1 + torchvision 0.27.1)과 어긋난다. 호스트 ROCm 7.1엔 `rocm7.0` wheel이 맞았다.
 4. **`docker-entrypoint.sh`에서 `HOME`을 app 홈으로** — `setpriv`가 uid만 바꾸고 `HOME`은 `/root`로 두는 탓에 app 유저가 MIOpen/git 캐시를 못 써 `Permission denied`. 실사용 GPU recognize도 여기서 깨진다.
-5. **`docker-compose.rocm.yml`에 env 추가** — `MIOPEN_USER_DB_PATH`/`MIOPEN_CUSTOM_CACHE_DIR`(영속 볼륨: 커널 캐시 warm 시 4.4x) + `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention — 단 위 후속에서 recognize 속도엔 무효로 측정됨, MIOPEN 캐시 env만 load-bearing).
+5. **`docker-compose.rocm.yml`에 env 추가** — `MIOPEN_USER_DB_PATH`/`MIOPEN_CUSTOM_CACHE_DIR`(영속 볼륨: 커널 캐시 warm 시 4.4x) + `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention — **recognize 속도 3.7x, 최우선 load-bearing**. 위 후속 참조).
 
 부수 발견: `_torch_pip_args` 기본이 `torch_backend="cpu"`라 **GPU 호스트에서도 CPU wheel을 받는다** — device-node 자동 감지(`detect_gpu_vendor`) 기반 "auto" 기본값으로 개선 여지가 있다(별도).
 
 ## 판단 (실측 반영)
 
 - **manga-ocr `recognize_batch` — 보류 쪽으로 기움.** 실이득 1.27x(B=8)로 작고 멀티워커(1.8x)보다 못하다. 저위험 국소 변경이라 값이 0은 아니나, **translate-bound면 end-to-end엔 안 드러난다** → 구현 전 recognize의 end-to-end 비중부터 로그로 확인(§다음).
-- **기각 — PaddleOCR-VL 배치.** GPU(ROCm)로 측정 완료(§PaddleOCR-VL GPU 배치): B=2 2.04x가 최대고 절대속도가 manga-ocr CPU의 1/8, B≥8은 후퇴 + correctness 깨짐. ragged/position_ids 우려가 실측으로 확인됐다. 후속(2026-07-08): sdpa·AOTriton·커널캐시 다 무효라 2.9s/crop은 하드웨어값이고, 작은 배치의 correctness도 측정 착시라 미보장.
+- **기각 — PaddleOCR-VL 배치.** GPU(ROCm)로 측정 완료(§PaddleOCR-VL GPU 배치): B=2 2.04x가 최대고 절대속도가 manga-ocr CPU의 1/8, B≥8은 후퇴 + correctness 깨짐. ragged/position_ids 우려가 실측으로 확인됐다. 후속(2026-07-08): **AOTriton flash는 3.7x 레버**(당시 "무효" 판정은 오류 — §후속), 2.9s/crop은 그 flash-ON 값이다. 작은 배치의 correctness는 측정 착시라 여전히 미보장.
 - **완료 — registry 안전성을 `gpu_lock`에서 분리.** 커밋 2c7e38e; 자체 lock으로 `gpu_lock`과 무관하게 thread-safe. (§gpu_lock 1번이 요구한 전제.)
 - **CPU recognize를 정말 빠르게 할 거면 배치보다 멀티워커(동시성)가 우선** — 1.8x > 1.27x 실측. 단 `gpu_lock`→semaphore 필요하고, 역시 recognize 비중 확인이 선행. translate-bound면 둘 다 가려진다.
 - **방향 전환 — 처리량은 배치가 아니라 동시성/분산이다.** 세 recognize 경로 다 배치가 신통찮다(manga-ocr 1.27x, PaddleOCR-VL 기각). 레버는 동시성: manga-ocr은 CPU 멀티워커(1.8x), GPU 엔진은 GPU를 나눠 쓴다. 하드웨어 확장(9060 XT + MI50) 시 **GPU별 역할 분리** — 한 GPU는 recognize(PaddleOCR-VL), 다른 GPU는 translate(Gemma) — 로 `gpu_lock` 경합을 물리적으로 없애고, KV 캐시 여유 안에서 GPU당 동시 요청을 키우는 게 다음 설계 후보다(이 문서 범위 밖, 별도 검토).
