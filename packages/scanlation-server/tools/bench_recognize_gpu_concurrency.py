@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Benchmark: PaddleOCR-VL GPU multi-worker concurrency -- does running several
+B=1 recognizes at once fill the idle GPU that a single request leaves, and by
+how much, without the ragged-padding correctness break that killed crop batching?
+
+Batching (bench_recognize_batch.py) stacks a page's crops into one forward: it
+found ~2x of idle-GPU headroom at B=2 but regressed at B>=8 and, worse, went
+silently wrong (dynamic-res ragged vision tokens -> left-pad -> position_ids
+corruption). Concurrency is the other way to spend that same idle GPU: N workers
+each doing a clean B=1 forward. No padding -> no correctness break; the only
+question is how much the one GPU actually overlaps concurrent work, and where
+VRAM (one model copy per worker) caps the worker count.
+
+    python tools/bench_recognize_gpu_concurrency.py PAGES_DIR --detect
+
+(or a folder / single image of pre-cut crops without --detect; $BENCH_DATA sets
+the path.) It sweeps worker counts (default 1,2,4), keeps the total timed crop
+count fixed, and reports aggregate crops/sec vs the 1-worker baseline plus the
+per-process VRAM peak (so W x peak estimates the total pressure). A worker count
+that OOMs is caught and reported -- that ceiling is itself the finding.
+
+Workers are separate processes (spawn), not threads: the autoregressive decode
+loop holds the GIL between kernel launches, so threads would serialise on Python
+and understate the gain. Processes give the GIL-free, deployment-realistic answer
+(the pipeline scales manga-ocr with process workers too), at the cost of one
+model copy each -- which is exactly the VRAM limit we want to measure.
+
+Set BENCH_ATTN=sdpa to force an attention backend into each worker's load (same
+knob as the batch bench). Needs the engine's weights installed + a GPU, so run it
+where the models live.
+"""
+from __future__ import annotations
+
+import _bootstrap  # noqa: F401 - makes `scanlation_*`/`app` importable + UTF-8 stdio
+
+import argparse
+import multiprocessing as mp
+import os
+import sys
+import tempfile
+import time
+from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime
+from pathlib import Path
+
+# Reuse the batch bench's crop cutting + GPU detection + fd silencer (importing it
+# does NOT run its main -- that's guarded by __name__ == "__main__").
+from bench_recognize_batch import _load_crops, _paddle_device, _silenced
+
+# --- per-worker process globals (set once by the pool initializer) -----------
+_REC = None
+_CROPS = None
+_REGION = None
+_OPTS = None
+
+
+def _worker_init(crops, device: str, attn: str | None, probe_cap: int) -> None:
+    """Runs once in each freshly spawned worker: load the model (one copy per
+    process -> the VRAM cost), optionally override the attention backend, then
+    warm the kernel JIT on the first crop so the timed run is steady-state."""
+    global _REC, _CROPS, _REGION, _OPTS
+    from transformers.utils import logging as hf_logging
+    hf_logging.set_verbosity_error()
+    from scanlation_sdk.contracts import Region
+    from scanlation_paddleocr_vl_for_manga.plugin import PaddleOcrVLForMangaRecognizer
+
+    rec = PaddleOcrVLForMangaRecognizer()
+    rec._device_override = device
+    with _silenced():
+        rec.load()
+        if attn:  # match the batch bench's BENCH_ATTN probe
+            from transformers import AutoModelForImageTextToText
+            rec._model = AutoModelForImageTextToText.from_pretrained(
+                rec._repo(), torch_dtype="auto", device_map=device,
+                local_files_only=True, attn_implementation=attn).eval()
+    _REC = rec
+    _CROPS = crops
+    _REGION = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
+    _OPTS = {"max_new_tokens": probe_cap}
+    with _silenced():
+        _REC.recognize(_CROPS[0], _REGION, _OPTS)  # warmup (JIT/kernel cache)
+
+
+def _worker_task(i: int) -> int:
+    """One B=1 recognize; returns this process's peak torch VRAM so the parent can
+    estimate total pressure (W x peak). Peak is torch-allocator only -- add the
+    HIP context + MIOpen workspace, so treat it as a lower bound (confirm w/ rocm-smi)."""
+    import torch
+    _REC.recognize(_CROPS[i % len(_CROPS)], _REGION, _OPTS)
+    return torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
+
+
+def bench_concurrency(crops, worker_counts, device, items, attn, probe_cap, rows) -> None:
+    ctx = mp.get_context("spawn")  # fork + CUDA/HIP is unsafe
+    base_rate = None
+
+    print(f"\n-- PaddleOCR-VL {device}: multi-worker concurrency (each worker B=1)")
+    print(f"{'workers':>7} {'ran':>5} {'crops/sec':>10} {'speedup':>8} {'VRAM/proc':>10}")
+    rows += ["### PaddleOCR-VL -- GPU multi-worker concurrency", "",
+             "Each worker is a separate process running B=1 recognizes (no batching, "
+             "no padding). crops/sec = aggregate over `items` timed recognizes split "
+             "across the workers; speedup vs 1 worker. est VRAM = per-process torch "
+             "peak x W (lower bound; add HIP context + MIOpen).", "",
+             "| workers | crops/sec | speedup | est VRAM (peak x W) |",
+             "|---|---|---|---|"]
+
+    for w in worker_counts:
+        try:
+            with ProcessPoolExecutor(max_workers=w, mp_context=ctx, initializer=_worker_init,
+                                     initargs=(crops, device, attn, probe_cap)) as ex:
+                # Prime: force all W workers to spin up + load + warm before timing.
+                # (2*W tasks reliably reaches every worker; they persist afterwards.)
+                list(ex.map(_worker_task, range(max(2 * w, 4))))
+                t0 = time.perf_counter()
+                peaks = list(ex.map(_worker_task, range(items)))
+                dt = time.perf_counter() - t0
+            rate = items / dt
+            if base_rate is None:
+                base_rate = rate
+            speed = rate / base_rate
+            vram = (max(peaks) / 1e9) if peaks else 0.0
+            print(f"{w:>7} {'yes':>5} {rate:>10.2f} {speed:>7.2f}x {vram:>7.2f}GB")
+            rows.append(f"| {w} | {rate:.2f} | {speed:.2f}x | ~{vram * w:.1f}GB ({vram:.1f}×{w}) |")
+        except Exception as exc:  # noqa: BLE001 - OOM / driver limit at high W is a valid finding
+            print(f"{w:>7} {'no':>5}   {type(exc).__name__}: {exc}")
+            rows.append(f"| {w} | no | {type(exc).__name__}: {exc} | |")
+            break  # a higher worker count won't fare better
+    rows += [""]
+
+
+def main() -> int:
+    sys.stdout.reconfigure(line_buffering=True)  # live progress under a Docker pipe
+
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("data", nargs="?", default=os.getenv("BENCH_DATA"),
+                    help="folder of pages OR a single image (with --detect), or pre-cut crops; or $BENCH_DATA")
+    ap.add_argument("--detect", action="store_true",
+                    help="treat the folder as pages: detect + deskew real bubble crops")
+    ap.add_argument("--workers", default="1,2,4", help='worker-count sweep, e.g. "1,2,4,6"')
+    ap.add_argument("--items", type=int, default=24,
+                    help="total timed recognizes per sweep point (split across workers)")
+    ap.add_argument("--probe-cap", type=int, default=256, help="max_new_tokens per recognize")
+    ap.add_argument("--paddle-cpu", action="store_true",
+                    help="run on CPU anyway (smoke test only; ~60s/crop)")
+    args = ap.parse_args()
+
+    if not args.data:
+        sys.exit("no data path: pass a folder/image or set $BENCH_DATA")
+
+    device, reason = _paddle_device(args.paddle_cpu)
+    if device is None:
+        sys.exit(f"PaddleOCR-VL concurrency needs a GPU: {reason}")
+
+    crops, src = _load_crops(args.data, args.detect)
+    worker_counts = [int(x) for x in args.workers.split(",") if x.strip()]
+    attn = os.getenv("BENCH_ATTN")
+
+    rows = ["# recognize GPU concurrency benchmark", "",
+            f"- when: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"- crops: {len(crops)} ({src})",
+            f"- device: {device}" + (f", attn={attn}" if attn else ""),
+            f"- worker sweep: {worker_counts}, items/point: {args.items}", ""]
+
+    bench_concurrency(crops, worker_counts, device, args.items, attn, args.probe_cap, rows)
+
+    # stdout is the only guaranteed sink under Docker (cwd/tmp often unwritable).
+    name = f"bench_report_gpuconc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    body = "\n".join(rows) + "\n"
+    print("\n" + "=" * 72 + "\nFULL REPORT (copy from here if the file below didn't write)\n" + "=" * 72)
+    print(body)
+    for target in (Path.cwd() / name, Path(tempfile.gettempdir()) / name):
+        try:
+            target.write_text(body, encoding="utf-8")
+            print(f"report written: {target}")
+            return 0
+        except OSError as e:  # noqa: PERF203
+            print(f"(could not write {target}: {e})")
+    print("(report file not written -- use the FULL REPORT block above)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
