@@ -17,9 +17,16 @@ from __future__ import annotations
 
 import logging.config
 
+# The level ``configure_logging`` opened ``scanlation.*`` to. ``apply_verbose(False)``
+# returns here rather than to a hardcoded INFO, so turning the 동작-tab toggle off
+# doesn't quietly override SCANLATION_LOG_LEVEL.
+_base_level = "INFO"
+
 
 def configure_logging(level: str = "INFO") -> None:
+    global _base_level
     lvl = level.upper()
+    _base_level = lvl
     logging.config.dictConfig({
         "version": 1,
         "disable_existing_loggers": False,
@@ -51,6 +58,7 @@ def configure_logging(level: str = "INFO") -> None:
 
 def apply_verbose(on: bool) -> None:
     """Flip the app's own logger (scanlation.*) to DEBUG for the verbose
-    per-detection/translation detail, or back to INFO — at runtime, no reconfigure.
-    Called by the /admin 동작 toggle and once at startup from the persisted state."""
-    logging.getLogger("scanlation").setLevel(logging.DEBUG if on else logging.INFO)
+    per-detection/translation detail, or back to the level ``configure_logging``
+    opened it to — at runtime, no reconfigure. Called by the /admin 동작 toggle and
+    once at startup from the persisted state, right after configure_logging."""
+    logging.getLogger("scanlation").setLevel(logging.DEBUG if on else _base_level)
