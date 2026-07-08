@@ -92,11 +92,133 @@ def test_install_plugins():
     assert r2.status_code == 502
 
 
+# --- streaming install ------------------------------------------------------
+def test_line_tee_splits_progress_from_log():
+    """\\r-terminated segments are `progress` (a bar the UI overwrites), \\n ones are
+    `log`. Blank segments are dropped; a trailing partial line comes out on flush."""
+    from app.plugins_install import _LineTee
+
+    seen: list[tuple] = []
+    tee = _LineTee(seen.append)
+    assert tee.isatty()                       # keeps tqdm/hf_hub bars enabled
+    assert tee.write("done\n") == 5           # write() returns chars consumed
+    tee.write("  50%\r  60%\r")               # bars, stripped
+    tee.write("\n\n")                         # blank segments -> nothing
+    tee.write("trailing, no delimiter")
+    assert seen == [("log", "done"), ("progress", "50%"), ("progress", "60%")]
+    tee.flush()
+    assert seen[-1] == ("log", "trailing, no delimiter")
+
+
+def test_begin_install_claims_a_name_once():
+    """A second click while an install runs must not start a duplicate pip into the
+    same --target (that corrupts it), and /get_settings/ must see what's running."""
+    from app import plugins_install as pi
+
+    assert pi._begin_install("zz-probe") is True
+    try:
+        assert pi._begin_install("zz-probe") is False   # already claimed
+        assert "zz-probe" in pi.installing_names()
+    finally:
+        with pi._installing_lock:
+            pi._installing.discard("zz-probe")
+    assert "zz-probe" not in pi.installing_names()
+
+
+class _FakePopen:
+    """Stands in for pip: yields the given lines, then exits with `code`."""
+
+    def __init__(self, lines, code):
+        self.stdout = iter(lines)
+        self._code = code
+        self.returncode = None
+
+    def wait(self):
+        self.returncode = self._code
+
+
+def _with_fake_popen(lines, code, fn):
+    from app import plugins_install as pi
+
+    orig = pi.subprocess.Popen
+    pi.subprocess.Popen = lambda cmd, **kw: _FakePopen(lines, code)
+    try:
+        return fn()
+    finally:
+        pi.subprocess.Popen = orig
+
+
+def test_stream_pip_forwards_every_line():
+    from app import plugins_install as pi
+    from app.catalog import catalog
+
+    entry = catalog()["Ollama"]  # torch=False -> no state/gpu lookup in the pip cmd
+    seen: list[tuple] = []
+    _with_fake_popen(["Collecting x\n", "\n", "Successfully installed\n"], 0,
+                     lambda: pi._stream_pip(entry, seen.append))
+    assert seen == [("log", "Collecting x"), ("log", "Successfully installed")]  # blanks dropped
+
+
+def test_stream_pip_raises_with_the_failure_tail():
+    from app import plugins_install as pi
+    from app.catalog import catalog
+
+    entry = catalog()["Ollama"]
+    lines = [f"line {i}\n" for i in range(20)] + ["ERROR: boom\n"]
+    try:
+        _with_fake_popen(lines, 1, lambda: pi._stream_pip(entry, lambda _: None))
+    except RuntimeError as exc:
+        msg = str(exc)
+        assert "pip install scanlation-ollama failed" in msg
+        assert "ERROR: boom" in msg and "line 15" in msg  # last 6 lines survive
+        assert "line 5" not in msg                        # earlier ones are dropped
+    else:
+        raise AssertionError("a non-zero pip exit must raise")
+
+
+def test_install_plugin_events_present_engine_yields_done():
+    """dummy is already discoverable and has no weights -> package present, no pip,
+    no weights phase, one `done` event carrying the same dict install_plugin returns."""
+    from app import plugins_install as pi
+
+    client()  # registers the fakes into the live registry
+    events = list(pi.install_plugin_events("dummy"))
+    assert events == [{"event": "done", "result": {"package": "present", "weights": "installed"}}]
+    assert pi.installing_names() == []  # the claim is released in `finally`
+
+
+def test_install_plugin_events_unknown_engine_yields_error():
+    from app import plugins_install as pi
+
+    events = list(pi.install_plugin_events("nope"))
+    assert events == [{"event": "error", "message": "unknown engine: nope"}]
+    assert pi.installing_names() == []
+
+
+def test_install_plugin_stream_route_emits_ndjson():
+    import json
+
+    c = client()
+    r = c.post("/install_plugin_stream/", json={"name": "dummy"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/x-ndjson")
+    events = [json.loads(line) for line in r.text.splitlines() if line]
+    assert events[-1]["event"] == "done"
+    assert events[-1]["result"]["package"] == "present"
+
+
 TESTS = [
     test_catalog_lists_engines,
     test_install_package_builds_pip_git_command,
     test_torch_pip_args_by_backend_and_vendor,
     test_install_plugins,
+    test_line_tee_splits_progress_from_log,
+    test_begin_install_claims_a_name_once,
+    test_stream_pip_forwards_every_line,
+    test_stream_pip_raises_with_the_failure_tail,
+    test_install_plugin_events_present_engine_yields_done,
+    test_install_plugin_events_unknown_engine_yields_error,
+    test_install_plugin_stream_route_emits_ndjson,
 ]
 
 if __name__ == "__main__":
