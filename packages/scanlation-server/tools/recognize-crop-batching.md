@@ -186,7 +186,7 @@ for region in regions:
 - **`attn_implementation="sdpa"` — 지원되나 무효.** 모델이 sdpa를 받긴 한다(`ValueError` 없이 로드; [BENCH_ATTN 노브](bench_recognize_batch.py), 커밋 b896376). 그런데도 수치 불변 → 이 크롭 크기에선 attention 백엔드가 병목이 아니다.
 - **`PYTORCH_KERNEL_CACHE_PATH` — 경고만 옮겼다.** torch JIT 커널 캐시(MIOpen과 별개)가 `/root/.cache`→`/data/torchkernels` 어디서도 "could not be created"로 꺼진다(app 유저가 볼륨에 못 씀 = §부채 4번과 같은 권한 뿌리). 단 per-crop 수엔 무영향 — 한 프로세스 안에선 컴파일 커널이 메모리에 남아 반복 shape는 1회만 컴파일, 디스크 캐시는 새 프로세스 cold start만 돕는다.
 
-**2.9s/crop은 이 카드+스택의 정직한 steady-state다.** ~3배 차는 오설정이 아니라 하드웨어 — 체급 + 대역폭 ~2배(4070 Ti Super 672 vs 9060 XT ~320 GB/s). attention·캐시 env를 이 숫자 겨냥해 다시 시도하지 말 것.
+**2.9s/crop은 고정 steady-state가 아니었다** — 후속 조사([recognize-gpu-speed.md](recognize-gpu-speed.md))에서 per-crop은 crop 크기×출력 길이에 따라 ~0.5s(작은 SFX)~40s(큰 대사)로 벌어지는 분포이고, 지배 원인은 하드웨어 체급이 아니라 **거대 crop의 flash 없는 eager O(n²) attention**임이 드러났다(대역폭 차도 요인이나 부차적). attention·캐시 env는 전부 무효 확인 — 이 숫자 겨냥해 다시 시도하지 말 것. 레버는 해상도 캡이다.
 
 ### GPU recognize 실투입 셋업 부채 (벤치는 수동 env로 우회, 코드 미반영)
 
