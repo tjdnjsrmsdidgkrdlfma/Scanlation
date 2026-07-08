@@ -62,7 +62,7 @@ def detect_and_recognize(
         t_crop = time.perf_counter()
         text = recognizer.recognize(crop, region, opt_recognize).strip()
         # One line per region (verbose/DEBUG): what was detected, where, its class,
-        # per-crop recognize time, and what OCR read — logged even when empty
+        # per-crop recognize time, and what the recognizer read — logged even when empty
         # ("detected but recognized nothing" is itself a signal). See /admin 동작.
         logger.debug(
             "  #%d %s bbox=%s%s score=%.2f %.0fms -> %r",

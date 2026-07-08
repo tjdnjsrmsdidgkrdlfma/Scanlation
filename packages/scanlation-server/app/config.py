@@ -24,7 +24,7 @@ class Settings:
     host: str = field(default_factory=lambda: _env("SCANLATION_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(_env("SCANLATION_PORT", "4000")))
 
-    # First-run default engine selection (role -> plugin name) + languages; the
+    # First-run default engine selection (role -> engine name) + languages; the
     # admin page overrides these into state.json afterwards. detector defaults to
     # comic-text-and-bubble-detector (the chosen default detector); recognizer/
     # translator stay empty until installed and picked (running a role with none

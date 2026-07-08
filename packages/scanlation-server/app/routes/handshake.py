@@ -1,7 +1,7 @@
 """GET / — handshake. Lightweight: lists languages/engines, loads no models.
 
-Engine roles use the same names end-to-end (detector/recognizer/translator);
-the old ocr_extension BOX/OCR/TSL wire vocabulary was dropped.
+The role names and result-item keys it speaks are the wire vocabulary defined in
+``app.schemas``.
 """
 from __future__ import annotations
 

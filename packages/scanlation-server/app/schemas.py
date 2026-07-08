@@ -1,9 +1,8 @@
 """Pydantic wire models shared by the server and the bundled MV2 extension.
 
-Engine roles are named detector/recognizer/translator end-to-end (the old
-ocr_extension BOX/OCR/TSL vocabulary was dropped). Per-result item keys are
-``{bounds, source, destination}`` — data fields, not roles. Only request bodies
-are modeled — responses are plain dicts (the wire shapes live in the routes).
+Engine roles are named detector/recognizer/translator end-to-end. Per-result item
+keys are ``{bounds, source, destination}`` — data fields, not roles. Only request
+bodies are modeled — responses are plain dicts (the wire shapes live in the routes).
 """
 from __future__ import annotations
 

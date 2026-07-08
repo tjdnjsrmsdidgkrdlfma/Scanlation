@@ -2,7 +2,7 @@
 the geometry is unit-testable with plain data.
 
 RT-DETR gives one detection per query as an axis-aligned xyxy box with a class
-(bubble / text_bubble / text_free). For OCR we: keep only the text classes (drop
+(bubble / text_bubble / text_free). For recognition we: keep only the text classes (drop
 the whole-bubble container), dedup the overlapping/nested boxes RT-DETR leaves
 behind (it's NMS-free, so duplicates survive), and map the survivors to Regions.
 

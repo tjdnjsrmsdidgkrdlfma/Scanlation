@@ -176,7 +176,7 @@ def install_plugin(name: str) -> dict:
     if cls is None:  # package not installed yet -> pip install from the catalog
         entry = catalog().get(name)
         if entry is None:
-            raise ValueError(f"unknown plugin: {name}")
+            raise ValueError(f"unknown engine: {name}")
         install_package(entry)
         refresh_registry()
         cls = find_class(name)
@@ -303,7 +303,7 @@ def install_plugin_events(name: str) -> Iterator[dict]:
             if cls is None:  # package missing -> pip install from the catalog
                 entry = catalog().get(name)
                 if entry is None:
-                    raise ValueError(f"unknown plugin: {name}")
+                    raise ValueError(f"unknown engine: {name}")
                 q.put(("phase", "package"))
                 _stream_pip(entry, q.put)
                 refresh_registry()

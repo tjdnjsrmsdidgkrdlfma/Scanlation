@@ -87,7 +87,7 @@ def test_install_plugins():
     # dummy has no assets -> install is a no-op success
     r = c.post("/install_plugins/", json={"plugins": {"dummy": True}})
     assert r.status_code == 200 and r.json()["status"] == "success"
-    # unknown plugin -> 502
+    # unknown engine -> 502
     r2 = c.post("/install_plugins/", json={"plugins": {"nope": True}})
     assert r2.status_code == 502
 

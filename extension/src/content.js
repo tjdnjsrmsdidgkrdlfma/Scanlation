@@ -148,7 +148,7 @@
   }
 
   // ------------------------------------------------------------- server ----
-  async function runOcr(md5hash, base64, options) {
+  async function runPipeline(md5hash, base64, options) {
     const base = cfg.endpoint.replace(/\/$/, "");
     const headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["X-Auth-Token"] = cfg.token;
@@ -308,7 +308,7 @@
     img.classList.add("scanlation-loading"); // faint blur so an in-flight request is visible
     try {
       const base64 = await imageToBase64(img);
-      const result = await runOcr(md5(base64), base64, {});
+      const result = await runPipeline(md5(base64), base64, {});
       if (!enabled) return; // disabled mid-flight -> drop the late result (finally clears the blur)
       applyResult(img, result.result || []);
       processed.add(img);

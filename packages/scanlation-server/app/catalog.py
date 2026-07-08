@@ -1,7 +1,7 @@
-"""The catalog of *installable* engines — a small static manifest.
+"""The catalog of *installable* plugins, keyed by engine name — a small static manifest.
 
 It can't come from entry_points (those only list *installed* engines) nor from
-the source (the core image ships none), so the set of engines /admin can offer
+the source (the core image ships none), so the set of plugins /admin can offer
 to install is hardcoded here. Installed engines are still discovered purely via
 entry_points in the registry; this manifest only drives the install UI.
 

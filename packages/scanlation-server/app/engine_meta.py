@@ -7,8 +7,6 @@ This is the one place that knows how, so a change to the wire shape lands once.
 """
 from __future__ import annotations
 
-from .registry import registry  # noqa: F401 (kept for callers importing from here)
-
 
 def serialize_schema(cls) -> dict:
     """``OPTION_SCHEMA`` with each ``type`` object rendered as its name

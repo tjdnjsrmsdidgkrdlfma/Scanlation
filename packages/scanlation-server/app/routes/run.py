@@ -1,4 +1,4 @@
-"""OCR+translate endpoints: /run_pipeline/ and /run_lookup/.
+"""Pipeline endpoints (detect+recognize+translate): /run_pipeline/ and /run_lookup/.
 
   * /run_lookup/  : client POSTs {md5, options} -> cache hit returns result,
                     miss = 200 {result: null} (a probe, not a 404 control signal)

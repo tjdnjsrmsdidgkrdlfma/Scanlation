@@ -81,7 +81,7 @@ class HttpTranslatorBase(EngineBase):
 
     def translate(self, text: str, src: str, dst: str, options: dict[str, Any]) -> str:
         text = text.strip()
-        if not text:  # blank OCR: nothing to translate
+        if not text:  # blank source: nothing to translate
             return text
 
         options = self.resolve_options(options)
