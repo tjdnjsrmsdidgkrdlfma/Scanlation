@@ -55,14 +55,11 @@ _REGION = None
 _OPTS = None
 
 
-def _worker_init(crops, device: str, attn: str | None, probe_cap: int) -> None:
-    """Runs once in each freshly spawned worker: load the model (one copy per
-    process -> the VRAM cost), optionally override the attention backend, then
-    warm the kernel JIT on the first crop so the timed run is steady-state."""
-    global _REC, _CROPS, _REGION, _OPTS
+def _load_rec(device: str, attn: str | None):
+    """Load the PaddleOCR-VL recognizer (one model copy), optionally forcing an
+    attention backend. Shared by the pool workers and the in-process decode profile."""
     from transformers.utils import logging as hf_logging
     hf_logging.set_verbosity_error()
-    from scanlation_sdk.contracts import Region
     from scanlation_paddleocr_vl_for_manga.plugin import PaddleOcrVLForMangaRecognizer
 
     rec = PaddleOcrVLForMangaRecognizer()
@@ -74,7 +71,17 @@ def _worker_init(crops, device: str, attn: str | None, probe_cap: int) -> None:
             rec._model = AutoModelForImageTextToText.from_pretrained(
                 rec._repo(), torch_dtype="auto", device_map=device,
                 local_files_only=True, attn_implementation=attn).eval()
-    _REC = rec
+    return rec
+
+
+def _worker_init(crops, device: str, attn: str | None, probe_cap: int) -> None:
+    """Runs once in each freshly spawned worker: load the model (one copy per
+    process -> the VRAM cost), then warm the kernel JIT on the first crop so the
+    timed run is steady-state."""
+    global _REC, _CROPS, _REGION, _OPTS
+    from scanlation_sdk.contracts import Region
+
+    _REC = _load_rec(device, attn)
     _CROPS = crops
     _REGION = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
     _OPTS = {"max_new_tokens": probe_cap}
@@ -146,6 +153,63 @@ def bench_concurrency(crops, worker_counts, device, items, attn, probe_cap, rows
     rows += [""]
 
 
+def bench_decode_profile(crops, device: str, cap: int, attn, n_crops: int, rows) -> None:
+    """Time each generation STEP on the biggest crops (+ the smallest for contrast).
+    Flat per-token = every step re-does the same work (vision/prefill recomputed ->
+    no effective KV reuse). Growing per-token = O(n) attention over a lengthening
+    sequence. The first step also carries prefill. Runs in-process (no pool)."""
+    import torch
+    from transformers import StoppingCriteria, StoppingCriteriaList
+
+    rec = _load_rec(device, attn)
+    proc, model = rec._proc, rec._model
+
+    class _StepTimer(StoppingCriteria):  # records a timestamp after each decoded token
+        def __init__(self):
+            self.t = []
+
+        def __call__(self, input_ids, scores, **kw):
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()  # the step's GPU work is done before we stamp
+            self.t.append(time.perf_counter())
+            return False  # never stop early
+
+    by_area = sorted(range(len(crops)), key=lambda i: crops[i].width * crops[i].height, reverse=True)
+    picks = by_area[:n_crops] + by_area[-1:]  # biggest N + the smallest, for contrast
+
+    print(f"\n-- decode profile (per-step ms), device {device}, cap {cap}")
+    rows += ["### PaddleOCR-VL -- decode profile (per-step ms)", "",
+             "Wall time of each generation step on the biggest crops (+ smallest). "
+             "Flat steady/token = each step re-does the same work (vision/prefill "
+             "recomputed, no KV reuse). Growing = O(n) attention. First step carries "
+             "prefill.", "",
+             "| crop px | tokens | prefill+t1 ms | steady/token ms | first steps ms |",
+             "|---|---|---|---|---|"]
+    for idx in picks:
+        crop = crops[idx].convert("RGB") if crops[idx].mode != "RGB" else crops[idx]
+        messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": rec.PROMPT}]}]
+        text = proc.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+        inputs = proc(text=[text], images=[crop], return_tensors="pt").to(model.device)
+        timer = _StepTimer()
+        t0 = time.perf_counter()
+        with torch.no_grad(), _silenced():
+            model.generate(**inputs, max_new_tokens=cap, do_sample=False,
+                           stopping_criteria=StoppingCriteriaList([timer]))
+        ts = timer.t
+        if not ts:
+            continue
+        deltas = [(ts[0] - t0) * 1000] + [(ts[i] - ts[i - 1]) * 1000 for i in range(1, len(ts))]
+        steady = statistics.median(deltas[1:]) if len(deltas) > 1 else float("nan")
+        px = crop.width * crop.height
+        firsts = " ".join(f"{d:.0f}" for d in deltas[:8])
+        print(f"  {crop.width}x{crop.height} ({px // 1000}k px), {len(deltas)} tok: "
+              f"prefill+t1={deltas[0]:.0f}ms  steady/token med={steady:.0f}ms")
+        print(f"    first steps ms: {firsts}")
+        rows.append(f"| {crop.width}x{crop.height} ({px // 1000}k) | {len(deltas)} | "
+                    f"{deltas[0]:.0f} | {steady:.0f} | {firsts} |")
+    rows += [""]
+
+
 def main() -> int:
     sys.stdout.reconfigure(line_buffering=True)  # live progress under a Docker pipe
 
@@ -161,6 +225,9 @@ def main() -> int:
     ap.add_argument("--probe-cap", type=int, default=256, help="max_new_tokens per recognize")
     ap.add_argument("--paddle-cpu", action="store_true",
                     help="run on CPU anyway (smoke test only; ~60s/crop)")
+    ap.add_argument("--profile-decode", action="store_true",
+                    help="skip the worker sweep; profile per-step decode time on the biggest crops")
+    ap.add_argument("--profile-n", type=int, default=3, help="how many of the biggest crops to profile")
     args = ap.parse_args()
 
     if not args.data:
@@ -180,7 +247,10 @@ def main() -> int:
             f"- device: {device}" + (f", attn={attn}" if attn else ""),
             f"- worker sweep: {worker_counts}, items/point: {args.items}", ""]
 
-    bench_concurrency(crops, worker_counts, device, args.items, attn, args.probe_cap, rows)
+    if args.profile_decode:
+        bench_decode_profile(crops, device, args.probe_cap, attn, args.profile_n, rows)
+    else:
+        bench_concurrency(crops, worker_counts, device, args.items, attn, args.probe_cap, rows)
 
     # stdout is the only guaranteed sink under Docker (cwd/tmp often unwritable).
     name = f"bench_report_gpuconc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
