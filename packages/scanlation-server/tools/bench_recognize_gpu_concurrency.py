@@ -288,6 +288,41 @@ def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int,
     rows += [""]
 
 
+def bench_diag(crops, device: str, out_cap: int, attn, items: int, rows) -> None:
+    """Diagnose why the per-crop baseline drifts run-to-run (0.34 vs 0.09 vs 0.06 on
+    the same code + images). Prints (1) a crop inventory -- idx, WxH, content md5 --
+    so two runs can be diffed to confirm the detector is deterministic (same crops),
+    and (2) a warmed single-process per-crop baseline (idx, WxH, ms) so the rate and
+    the slow crops are visible. Run it 2-3x: same md5s + drifting rate = runtime
+    variance (GPU state/sharing/thermal); different md5s = detector nondeterminism."""
+    import hashlib
+    from scanlation_sdk.contracts import Region
+
+    print(f"\n-- crop inventory: {len(crops)} crops  (idx | WxH | k-px | md5-8)")
+    for i, c in enumerate(crops):
+        h = hashlib.md5(c.tobytes()).hexdigest()[:8]
+        print(f"  {i:>3} {c.width:>5}x{c.height:<5} {c.width * c.height // 1000:>5}k  {h}")
+
+    rec = _load_rec(device, attn)
+    region = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
+    opts = {"max_new_tokens": out_cap}
+    sample = crops[:max(1, items)]
+    with _silenced():
+        rec.recognize(sample[0], region, opts)  # warmup: absorb first-forward JIT
+
+    print(f"\n-- single-process baseline: {len(sample)} crops, out-cap {out_cap}  (idx | WxH | ms | text)")
+    total = 0.0
+    for i, c in enumerate(sample):
+        t0 = time.perf_counter()
+        txt = rec.recognize(c, region, opts)
+        ms = (time.perf_counter() - t0) * 1000
+        total += ms
+        print(f"  {i:>3} {c.width:>5}x{c.height:<5} {ms:>7.0f}  {txt[:28]!r}")
+    rate = len(sample) / (total / 1000)
+    print(f"  => {rate:.3f} crops/sec  ({total / len(sample):.0f} ms/crop over {len(sample)})")
+    rows += [f"### diag: {rate:.3f} crops/sec single-process, {len(crops)} crops detected", ""]
+
+
 def main() -> int:
     sys.stdout.reconfigure(line_buffering=True)  # live progress under a Docker pipe
 
@@ -310,6 +345,8 @@ def main() -> int:
                     help="downscale crops above this pixel area before recognize (0 = off)")
     ap.add_argument("--sweep-pixels", default="",
                     help='accuracy-vs-speed: sweep max-pixels caps vs the uncapped read, e.g. "0,250000,150000,100000"')
+    ap.add_argument("--diag", action="store_true",
+                    help="diagnose per-crop rate drift: crop md5 inventory + single-process baseline")
     args = ap.parse_args()
 
     if not args.data:
@@ -332,7 +369,9 @@ def main() -> int:
             f"- device: {device}" + (f", attn={attn}" if attn else ""),
             f"- worker sweep: {worker_counts}, items/point: {args.items}", ""]
 
-    if args.sweep_pixels:
+    if args.diag:
+        bench_diag(crops, device, args.probe_cap, attn, args.items, rows)
+    elif args.sweep_pixels:
         sweep = [int(x) for x in args.sweep_pixels.split(",") if x.strip()]
         bench_pixel_sweep(crops, device, args.probe_cap, attn, sweep, args.items, rows)
     elif args.profile_decode:
