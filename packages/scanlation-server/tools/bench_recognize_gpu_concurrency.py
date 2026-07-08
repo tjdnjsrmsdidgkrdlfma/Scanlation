@@ -38,40 +38,17 @@ import multiprocessing as mp
 import os
 import statistics
 import sys
-import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
-from pathlib import Path
 
-# Reuse the batch bench's crop cutting + GPU detection + fd silencer (importing it
-# does NOT run its main -- that's guarded by __name__ == "__main__").
-from bench_recognize_batch import _load_crops, _paddle_device, _silenced
+from _bench_common import load_crops, load_paddle, paddle_device, silenced, write_report
 
 # --- per-worker process globals (set once by the pool initializer) -----------
 _REC = None
 _CROPS = None
 _REGION = None
 _OPTS = None
-
-
-def _load_rec(device: str, attn: str | None):
-    """Load the PaddleOCR-VL recognizer (one model copy), optionally forcing an
-    attention backend. Shared by the pool workers and the in-process decode profile."""
-    from transformers.utils import logging as hf_logging
-    hf_logging.set_verbosity_error()
-    from scanlation_paddleocr_vl_for_manga.plugin import PaddleOcrVLForMangaRecognizer
-
-    rec = PaddleOcrVLForMangaRecognizer()
-    rec._device_override = device
-    with _silenced():
-        rec.load()
-        if attn:  # match the batch bench's BENCH_ATTN probe
-            from transformers import AutoModelForImageTextToText
-            rec._model = AutoModelForImageTextToText.from_pretrained(
-                rec._repo(), torch_dtype="auto", device_map=device,
-                local_files_only=True, attn_implementation=attn).eval()
-    return rec
 
 
 def _worker_init(crops, device: str, attn: str | None, probe_cap: int) -> None:
@@ -81,11 +58,11 @@ def _worker_init(crops, device: str, attn: str | None, probe_cap: int) -> None:
     global _REC, _CROPS, _REGION, _OPTS
     from scanlation_sdk.contracts import Region
 
-    _REC = _load_rec(device, attn)
+    _REC = load_paddle(device, attn)
     _CROPS = crops
     _REGION = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
     _OPTS = {"max_new_tokens": probe_cap}
-    with _silenced():
+    with silenced():
         _REC.recognize(_CROPS[0], _REGION, _OPTS)  # warmup (JIT/kernel cache)
 
 
@@ -161,7 +138,7 @@ def bench_decode_profile(crops, device: str, cap: int, attn, n_crops: int, rows)
     import torch
     from transformers import StoppingCriteria, StoppingCriteriaList
 
-    rec = _load_rec(device, attn)
+    rec = load_paddle(device, attn)
     proc, model = rec._proc, rec._model
 
     class _StepTimer(StoppingCriteria):  # records a timestamp after each decoded token
@@ -192,7 +169,7 @@ def bench_decode_profile(crops, device: str, cap: int, attn, n_crops: int, rows)
         inputs = proc(text=[text], images=[crop], return_tensors="pt").to(model.device)
         timer = _StepTimer()
         t0 = time.perf_counter()
-        with torch.no_grad(), _silenced():
+        with torch.no_grad(), silenced():
             model.generate(**inputs, max_new_tokens=cap, do_sample=False,
                            stopping_criteria=StoppingCriteriaList([timer]))
         ts = timer.t
@@ -267,11 +244,11 @@ def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int,
     import difflib
     from scanlation_sdk.contracts import Region
 
-    rec = _load_rec(device, attn)
+    rec = load_paddle(device, attn)
     region = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
     opts = {"max_new_tokens": out_cap}
     sample = crops[:max(1, items)]
-    with _silenced():
+    with silenced():
         rec.recognize(sample[0], region, opts)  # warmup: absorb first-forward JIT
 
     ref_text, ref_ms = [], []  # uncapped reference: text + per-crop ms (reused by caps below)
@@ -365,11 +342,11 @@ def bench_diag(crops, device: str, out_cap: int, attn, items: int, rows) -> None
         h = hashlib.md5(c.tobytes()).hexdigest()[:8]
         print(f"  {i:>3} {c.width:>5}x{c.height:<5} {c.width * c.height // 1000:>5}k  {h}")
 
-    rec = _load_rec(device, attn)
+    rec = load_paddle(device, attn)
     region = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
     opts = {"max_new_tokens": out_cap}
     sample = crops[:max(1, items)]
-    with _silenced():
+    with silenced():
         rec.recognize(sample[0], region, opts)  # warmup: absorb first-forward JIT
 
     print(f"\n-- single-process baseline: {len(sample)} crops, out-cap {out_cap}  (idx | WxH | ms | text)")
@@ -394,11 +371,11 @@ def bench_mode_sweep(crops, device: str, out_cap: int, attn, cap: int, modes, it
     import difflib
     from scanlation_sdk.contracts import Region
 
-    rec = _load_rec(device, attn)
+    rec = load_paddle(device, attn)
     region = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
     opts = {"max_new_tokens": out_cap}
     sample = crops[:max(1, items)]
-    with _silenced():
+    with silenced():
         rec.recognize(sample[0], region, opts)  # warmup: absorb first-forward JIT
 
     ref_text, ref_ms = [], []  # uncapped reference: read once, reused by every mode
@@ -489,11 +466,11 @@ def main() -> int:
     if not args.data:
         sys.exit("no data path: pass a folder/image or set $BENCH_DATA")
 
-    device, reason = _paddle_device(args.paddle_cpu)
+    device, reason = paddle_device(args.paddle_cpu)
     if device is None:
         sys.exit(f"PaddleOCR-VL concurrency needs a GPU: {reason}")
 
-    crops, src = _load_crops(args.data, args.detect)
+    crops, src = load_crops(args.data, args.detect)
     if args.max_pixels and not (args.sweep_pixels or args.sweep_modes):  # sweeps cap their own copies
         crops, n_capped = _cap_pixels(crops, args.max_pixels, args.downscale_mode)
         src += f", {n_capped} downscaled to <={args.max_pixels}px ({args.downscale_mode})"
@@ -521,20 +498,7 @@ def main() -> int:
     else:
         bench_concurrency(crops, worker_counts, device, args.items, attn, args.probe_cap, rows)
 
-    # stdout is the only guaranteed sink under Docker (cwd/tmp often unwritable).
-    name = f"bench_report_gpuconc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-    body = "\n".join(rows) + "\n"
-    print("\n" + "=" * 72 + "\nFULL REPORT (copy from here if the file below didn't write)\n" + "=" * 72)
-    print(body)
-    for target in (Path.cwd() / name, Path(tempfile.gettempdir()) / name):
-        try:
-            target.write_text(body, encoding="utf-8")
-            print(f"report written: {target}")
-            return 0
-        except OSError as e:  # noqa: PERF203
-            print(f"(could not write {target}: {e})")
-    print("(report file not written -- use the FULL REPORT block above)")
-    return 0
+    return write_report(rows, "bench_report_gpuconc")
 
 
 if __name__ == "__main__":

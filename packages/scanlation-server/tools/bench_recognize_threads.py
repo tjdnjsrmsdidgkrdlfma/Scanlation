@@ -27,7 +27,6 @@ spawn stays happy.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import os
 import sys
 import tempfile
@@ -36,29 +35,13 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
+# _bench_common imports nothing heavy at module scope, so this stays compatible with
+# the "no torch in the parent" rule above (and with the pool workers re-importing us).
+from _bench_common import IMAGE_EXTS, silenced, write_report
+
 # --- per-process worker state (one set per pool process) ---
 _MODEL = None
 _CACHE: dict = {}
-
-
-@contextlib.contextmanager
-def _silenced():
-    """Send this process's stdout+stderr to devnull at the fd level for the block,
-    then restore. Model loaders (loguru 'Using CPU', tqdm 'Loading weights', the HF
-    hub warning) write to those fds; workers/childs return data over pipes, not
-    stdout, so nothing useful is lost -- only the chatter. Restored on exit so a
-    genuine error afterwards is still visible."""
-    save1, save2 = os.dup(1), os.dup(2)
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    try:
-        os.dup2(devnull, 1)
-        os.dup2(devnull, 2)
-        yield
-    finally:
-        os.dup2(save1, 1)
-        os.dup2(save2, 2)
-        for fd in (devnull, save1, save2):
-            os.close(fd)
 
 
 def _init(threads: int, force_cpu: bool, idx_q, order) -> None:
@@ -82,7 +65,7 @@ def _init(threads: int, force_cpu: bool, idx_q, order) -> None:
         except Exception:  # noqa: BLE001 - pinning is a nicety, never fatal
             pass
 
-    with _silenced():  # the model loaders are the noisy part
+    with silenced():  # the model loaders are the noisy part
         import torch
         torch.set_num_threads(threads)
         from manga_ocr import MangaOcr  # lazy: torch + transformers
@@ -169,8 +152,13 @@ def _synthetic_crops(n: int) -> list[str]:
     return paths
 
 
-def _detected_crops(files: list[Path]) -> list[str]:
-    """Run the detector once and save each bbox crop to a temp dir (realistic)."""
+def _raw_bbox_crop_files(files: list[Path]) -> list[str]:
+    """Run the detector once and save each PLAIN BBOX crop to a temp dir, returning
+    the paths (the pool workers open them by path, one decode cached per process).
+
+    NOT the same crops as _bench_common.deskewed_crops, which the batch/gpuconc
+    benches use: those are deskewed the way the pipeline deskews them. Numbers from
+    the two crop sets are therefore not directly comparable -- see REFACTORING.md B5."""
     from PIL import Image
     from scanlation_comic_text_and_bubble_detector.plugin import ComicTextAndBubbleDetector
     tmp = Path(tempfile.mkdtemp(prefix="bench_detect_"))
@@ -198,8 +186,8 @@ def _detect_child(files, q) -> None:
     """Run detection and hand the crop paths back over `q`. Runs in a throwaway
     subprocess (see _detect_isolated) so torch stays out of the parent."""
     try:
-        with _silenced():  # detector load + transformers chatter
-            crops = _detected_crops(files)
+        with silenced():  # detector load + transformers chatter
+            crops = _raw_bbox_crop_files(files)
         q.put(("ok", crops))
     except BaseException as e:  # noqa: BLE001 - ship any failure across the boundary
         q.put(("err", f"{type(e).__name__}: {e}"))
@@ -229,8 +217,7 @@ def _build_crops(data, use_detect: bool) -> tuple[list[str], str]:
     """Return (crop paths, human source label). No --data -> synthetic."""
     if data is None:
         return _synthetic_crops(24), "synthetic"
-    exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-    files = sorted(p for p in Path(data).rglob("*") if p.suffix.lower() in exts)
+    files = sorted(p for p in Path(data).rglob("*") if p.suffix.lower() in IMAGE_EXTS)
     if not files:
         sys.exit(f"no images found under {data}")
     if use_detect:
@@ -367,19 +354,10 @@ def main() -> int:
         "  not at the core count.",
     ]
 
-    name = f"bench_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-    body = "\n".join(rows) + "\n"
-    # cwd first (nice on a normal checkout); fall back to the temp dir so a
-    # read-only cwd (e.g. `/` inside the container as a non-root user) can't throw
-    # away a finished run.
-    for target in (Path.cwd() / name, Path(tempfile.gettempdir()) / name):
-        try:
-            target.write_text(body, encoding="utf-8")
-            print(f"\nreport written: {target}")
-            return 0
-        except OSError as e:  # noqa: PERF203
-            print(f"(could not write {target}: {e})")
-    return 0
+    print()  # blank line between the table and the report path
+    # dump=False: this bench's table is already on stdout, so it never needed the
+    # FULL REPORT block the Docker-run benches print.
+    return write_report(rows, "bench_report", dump=False)
 
 
 if __name__ == "__main__":

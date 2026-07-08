@@ -54,72 +54,10 @@ import contextlib
 import os
 import statistics
 import sys
-import tempfile
 import time
 from datetime import datetime
-from pathlib import Path
 
-
-@contextlib.contextmanager
-def _silenced():
-    """Send this process's stdout+stderr to devnull at the fd level for the block,
-    then restore. Model loaders (loguru, tqdm 'Loading weights', HF hub warnings)
-    write to those fds; nothing useful is lost -- only the chatter. Restored on
-    exit so a genuine error afterwards is still visible."""
-    save1, save2 = os.dup(1), os.dup(2)
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    try:
-        os.dup2(devnull, 1)
-        os.dup2(devnull, 2)
-        yield
-    finally:
-        os.dup2(save1, 1)
-        os.dup2(save2, 2)
-        for fd in (devnull, save1, save2):
-            os.close(fd)
-
-
-# --- crop sources ------------------------------------------------------------
-def _detected_crops(files):
-    """Detect + deskew each region on the pages -> the exact upright crops the
-    recognizer sees in production (app.pipeline.detect_and_recognize does the
-    same detect -> deskew_crop), so the straggler/probe numbers are real."""
-    from PIL import Image
-    from app.geometry import deskew_crop
-    from scanlation_comic_text_and_bubble_detector.plugin import ComicTextAndBubbleDetector
-    det = ComicTextAndBubbleDetector()
-    with _silenced():
-        det.load()
-    crops = []
-    try:
-        for page in files:
-            img = Image.open(page).convert("RGB")
-            for r in det.detect(img, {}):
-                x0, y0, x1, y1 = (int(v) for v in r.bbox)
-                if x1 - x0 < 4 or y1 - y0 < 4:
-                    continue
-                crops.append(deskew_crop(img, r))
-    finally:
-        det.unload()
-    if not crops:
-        sys.exit("detector produced no crops")
-    return crops
-
-
-def _load_crops(data, use_detect: bool):
-    """Return (list[PIL.Image], human source label) from a pages/crops folder, or a
-    single image file (handy for a quick one-page probe when the data dir is
-    read-only and a throwaway one-image folder isn't an option)."""
-    from PIL import Image
-    exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-    root = Path(data)
-    files = [root] if root.is_file() else sorted(
-        f for f in root.rglob("*") if f.suffix.lower() in exts)
-    if not files:
-        sys.exit(f"no images found under {data}")
-    if use_detect:
-        return _detected_crops(files), f"detected from {len(files)} pages"
-    return [Image.open(f).convert("RGB") for f in files], f"{len(files)} image files"
+from _bench_common import load_crops, load_paddle, paddle_device, silenced, write_report
 
 
 # --- timing helper -----------------------------------------------------------
@@ -141,7 +79,7 @@ def bench_manga(crops, batch_sizes, items: int, fixed_len: int, rows: list) -> N
     from manga_ocr import MangaOcr
     from manga_ocr.ocr import post_process
 
-    with _silenced():
+    with silenced():
         m = MangaOcr(force_cpu=True)
     model, proc, tok = m.model, m.processor, m.tokenizer
     model.eval()  # manga-ocr runs on CPU with torch's default thread count
@@ -250,28 +188,16 @@ def bench_manga(crops, batch_sizes, items: int, fixed_len: int, rows: list) -> N
 def bench_paddle(crops, batch_sizes, device: str, items: int, probe_cap: int, rows: list) -> None:
     """PaddleOCR-VL per-crop baseline + a batch correctness/scaling PROBE."""
     import torch
-    from transformers.utils import logging as hf_logging
-    hf_logging.set_verbosity_error()  # silence per-call generation warnings
     from scanlation_sdk.contracts import Region
-    from scanlation_paddleocr_vl_for_manga.plugin import PaddleOcrVLForMangaRecognizer
 
-    rec = PaddleOcrVLForMangaRecognizer()
-    rec._device_override = device
-    with _silenced():
-        rec.load()
     # Dev probe: force an attention backend (e.g. BENCH_ATTN=sdpa) to see if the
-    # ROCm flash/mem-efficient SDPA kernels move the per-crop number. Reloads the
-    # already-loaded model with the override so the installed plugin needn't change;
-    # a remote-code model without sdpa support raises ValueError here -> that's the
-    # finding. Leave BENCH_ATTN unset for the plugin's default (eager for this model).
+    # ROCm flash/mem-efficient SDPA kernels move the per-crop number. Leave BENCH_ATTN
+    # unset for the plugin's default (eager for this model).
     attn = os.getenv("BENCH_ATTN")
     if attn:
-        from transformers import AutoModelForImageTextToText
         print(f"\n[BENCH_ATTN] reloading model with attn_implementation={attn!r}")
-        with _silenced():
-            rec._model = AutoModelForImageTextToText.from_pretrained(
-                rec._repo(), torch_dtype="auto", device_map=device,
-                local_files_only=True, attn_implementation=attn).eval()
+    rec = load_paddle(device, attn)
+    if attn:
         rows += [f"- attn_implementation forced to `{attn}` (BENCH_ATTN)", ""]
     region = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
     opts = {"max_new_tokens": probe_cap}  # cap both ref + batch the same -> apples to apples
@@ -337,37 +263,6 @@ def bench_paddle(crops, batch_sizes, device: str, items: int, probe_cap: int, ro
     rows += probe_rows + [""]
 
 
-def _paddle_device(force_cpu: bool) -> tuple[str | None, str]:
-    """Pick the device for the PaddleOCR-VL half and, on a skip, say WHY in a way
-    that's actionable on this project's boxes. Returns (device, reason): device is
-    None -> skip (reason explains it); else the torch device to run on.
-
-    The old message just said 'no CUDA GPU', a dead end on an AMD host -- it didn't
-    distinguish a CPU-only torch (reinstall with 백엔드=GPU so the ROCm wheel is
-    pulled) from a GPU-capable build that still sees no device (passthrough / gfx
-    override). A ROCm torch reports as cuda (see sdk device.py)."""
-    if force_cpu:
-        return "cpu", ""
-    try:
-        import torch
-    except Exception as exc:  # noqa: BLE001 - no torch -> no engine installed yet
-        return None, f"torch not importable ({exc}); install an engine first"
-    if torch.cuda.is_available():
-        return "cuda", ""  # a ROCm build reports True here too -> AMD GPU
-    hip, cuda = torch.version.hip, torch.version.cuda
-    if hip:
-        reason = (f"torch is a ROCm build (hip {hip}) but no GPU is visible -- check device "
-                  "passthrough (docker-compose.rocm.yml: /dev/kfd, /dev/dri) and, for "
-                  "RDNA4/gfx1200, set HSA_OVERRIDE_GFX_VERSION")
-    elif cuda:
-        reason = (f"torch is a CUDA build (cuda {cuda}) but no GPU is visible -- check the "
-                  "NVIDIA container runtime / device passthrough")
-    else:
-        reason = ("torch is a CPU-only build -- reinstall PaddleOCR-VL with 백엔드=GPU in "
-                  "/admin so the ROCm/CUDA torch wheel is pulled")
-    return None, reason
-
-
 def main() -> int:
     # Line-buffer stdout so progress shows live even when it's a Docker pipe
     # (non-TTY defaults to block buffering -> output would only appear at the end).
@@ -393,7 +288,7 @@ def main() -> int:
         ap.error("a folder of manga pages is required (add --detect to cut crops), or set $BENCH_DATA")
 
     batch_sizes = [int(x) for x in args.batch.split(",") if x.strip()]
-    crops, source = _load_crops(args.data, args.detect)
+    crops, source = load_crops(args.data, args.detect)
 
     rows = [
         "# recognize crop-batching benchmark", "",
@@ -411,7 +306,7 @@ def main() -> int:
         bench_manga(crops, batch_sizes, args.items, args.fixed_len, rows)
 
     if not args.no_paddle:
-        device, reason = _paddle_device(args.paddle_cpu)
+        device, reason = paddle_device(args.paddle_cpu)
         if device is None:
             msg = f"PaddleOCR-VL skipped: {reason} (CPU is ~60s/crop; --paddle-cpu to force)."
             print(f"\n{msg}")
@@ -424,23 +319,7 @@ def main() -> int:
                 print(f"\nPaddleOCR-VL failed: {type(exc).__name__}: {exc}")
                 rows += [f"_PaddleOCR-VL failed: {type(exc).__name__}: {exc}_", ""]
 
-    # Always dump the full markdown report to the terminal -- under Docker the cwd
-    # and /tmp are often unwritable, so stdout is the only guaranteed sink. The
-    # file below is a best-effort convenience on top, never the sole copy.
-    name = f"bench_report_batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-    body = "\n".join(rows) + "\n"
-    print("\n" + "=" * 72 + "\nFULL REPORT (copy from here if the file below didn't write)\n" + "=" * 72)
-    print(body)
-
-    for target in (Path.cwd() / name, Path(tempfile.gettempdir()) / name):
-        try:
-            target.write_text(body, encoding="utf-8")
-            print(f"report written: {target}")
-            return 0
-        except OSError as e:  # noqa: PERF203
-            print(f"(could not write {target}: {e})")
-    print("(report file not written -- use the FULL REPORT block above)")
-    return 0
+    return write_report(rows, "bench_report_batch")
 
 
 if __name__ == "__main__":
