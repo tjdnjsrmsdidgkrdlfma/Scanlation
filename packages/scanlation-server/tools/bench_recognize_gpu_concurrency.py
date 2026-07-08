@@ -282,6 +282,13 @@ def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int,
             sim = sum(difflib.SequenceMatcher(None, ref_text[i], got[i]).ratio() for i in affected) / len(affected)
             print(f"{px:>10} {rate:>10.2f} {len(affected):>11} {f'{exact}/{len(affected)}':>8} {sim:>9.3f}")
             rows.append(f"| {px} | {rate:.2f} | {len(affected)} | {exact}/{len(affected)} | {sim:.3f} |")
+            # Show what actually changed on the downscaled crops -- a char-sim number
+            # can't tell "♥ count / ellipsis" (harmless for translate) from a wrong kana.
+            for i in (j for j in affected if got[j] != ref_text[j]):
+                c = sample[i]
+                print(f"      #{i} {c.width}x{c.height} ({c.width * c.height // 1000}k px)")
+                print(f"        ref {ref_text[i]!r}")
+                print(f"        got {got[i]!r}")
         else:
             print(f"{px:>10} {rate:>10.2f} {'0':>11} {'—':>8} {'—':>9}")
             rows.append(f"| {px} | {rate:.2f} | 0 | — | — |")
