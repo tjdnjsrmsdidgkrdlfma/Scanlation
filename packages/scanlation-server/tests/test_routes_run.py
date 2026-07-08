@@ -1,19 +1,22 @@
 """routes/run.py wire-protocol tests via dummy engines (zero model risk).
-Proves the md5/box/lazy contract for /run_pipeline/ and /run_lookup/.
+Proves the md5/bounds/lazy contract for /run_pipeline/ and /run_lookup/.
 """
 from __future__ import annotations
 
+from app.pipeline import ResultItem
 from tests.helpers import client, payload, run
 
 
-def test_run_pipeline_work_returns_boxes():
+def test_run_pipeline_work_returns_result_items():
     p = payload()
     r = client().post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]})
     assert r.status_code == 200
     result = r.json()["result"]
     assert len(result) == 2
     for item in result:
-        assert set(item) == {"bounds", "source", "destination"}
+        # Assert against ResultItem itself, so renaming a key there can't leave the
+        # extension reading a shape nothing declares.
+        assert set(item) == set(ResultItem.__annotations__)
         assert len(item["bounds"]) == 4
 
 
@@ -64,7 +67,7 @@ def test_run_pipeline_requires_contents():
 
 
 TESTS = [
-    test_run_pipeline_work_returns_boxes,
+    test_run_pipeline_work_returns_result_items,
     test_run_pipeline_md5_mismatch_is_400,
     test_no_engine_installed_is_400,
     test_lookup_miss_then_work_then_hit,

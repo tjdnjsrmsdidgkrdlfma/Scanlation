@@ -7,7 +7,7 @@ import types
 
 import numpy as np
 
-from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
+from scanlation_sdk.contracts import BatchTranslator, Detector, Recognizer, Region, Translator
 from scanlation_sdk.device import device_label, pick_device
 from scanlation_sdk.local_engine import LocalModelEngineBase
 from tests.fake_engines import DummyDetector, DummyRecognizer, DummyTranslator
@@ -39,6 +39,17 @@ def test_dummy_engines_satisfy_protocols():
     assert isinstance(DummyDetector(), Detector)
     assert isinstance(DummyRecognizer(), Recognizer)
     assert isinstance(DummyTranslator(), Translator)
+
+
+def test_batch_translator_narrows_translator():
+    """BatchTranslator is the optional capability pipeline._translate_all tests for:
+    a plain translator satisfies Translator but not BatchTranslator."""
+    class _Batchy:
+        def translate(self, text, src, dst, options): return text
+        def translate_batch(self, texts, src, dst, options): return list(texts)
+
+    assert not isinstance(DummyTranslator(), BatchTranslator)
+    assert isinstance(_Batchy(), Translator) and isinstance(_Batchy(), BatchTranslator)
 
 
 def test_dummy_detector_emits_rotated_region():
@@ -201,6 +212,7 @@ TESTS = [
     test_region_from_quad_bbox_is_enclosing,
     test_region_label_defaults_empty_and_passes_through,
     test_dummy_engines_satisfy_protocols,
+    test_batch_translator_narrows_translator,
     test_dummy_detector_emits_rotated_region,
     test_pick_device_cpu_is_pinned,
     test_pick_device_gpu_uses_cuda_when_available,

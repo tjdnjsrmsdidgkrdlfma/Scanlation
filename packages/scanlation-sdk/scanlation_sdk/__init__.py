@@ -4,6 +4,7 @@ facing runtime context (models_dir/device/languages), and the LLM prompt
 template. Plugins depend on this, never on the server package."""
 from scanlation_sdk.context import LANG_PLAIN, LANGUAGES, context
 from scanlation_sdk.contracts import (
+    BatchTranslator,
     Detector,
     EngineBase,
     Recognizer,
@@ -22,6 +23,7 @@ __all__ = [
     "Detector",
     "Recognizer",
     "Translator",
+    "BatchTranslator",
     "context",
     "pick_device",
     "release_cuda_cache",

@@ -1,8 +1,10 @@
 """Pydantic wire models shared by the server and the bundled MV2 extension.
 
-Engine roles are named detector/recognizer/translator end-to-end. Per-result item
-keys are ``{bounds, source, destination}`` — data fields, not roles. Only request
-bodies are modeled — responses are plain dicts (the wire shapes live in the routes).
+Engine roles are named detector/recognizer/translator end-to-end. Only request
+bodies are modeled here — responses are plain dicts assembled in the routes. The
+one response shape the extension depends on is ``app.pipeline.ResultItem``
+(``{bounds, source, destination}`` — data fields, not roles), declared where it is
+built rather than restated here.
 """
 from __future__ import annotations
 

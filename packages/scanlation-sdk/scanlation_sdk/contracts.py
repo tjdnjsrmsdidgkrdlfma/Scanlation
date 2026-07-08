@@ -129,3 +129,18 @@ class Recognizer(Protocol):
 @runtime_checkable
 class Translator(Protocol):
     def translate(self, text: str, src: str, dst: str, options: dict) -> str: ...
+
+
+@runtime_checkable
+class BatchTranslator(Translator, Protocol):
+    """A translator that can render a whole image's texts in ONE model call.
+
+    Optional: the pipeline tests for this protocol and falls back to a per-text
+    ``translate`` loop when a translator doesn't implement it. ``translate_batch``
+    returns one translation per input, aligned to the input order, and is expected
+    to fall back internally rather than raise (see ``HttpTranslatorBase``).
+    """
+
+    def translate_batch(
+        self, texts: list[str], src: str, dst: str, options: dict
+    ) -> list[str]: ...

@@ -9,14 +9,24 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, TypedDict
 
 from PIL import Image
 
-from scanlation_sdk.contracts import Detector, Recognizer, Region, Translator
+from scanlation_sdk.contracts import BatchTranslator, Detector, Recognizer, Region, Translator
 from .geometry import deskew_crop
 
 logger = logging.getLogger("scanlation.pipeline")
+
+
+class ResultItem(TypedDict):
+    """One translated region, exactly as the extension reads it (see
+    ``extension/src/content.js``). Built in ``translate_regions`` and nowhere else —
+    the routes pass the list straight through, so this is the wire item's only
+    definition on the server side."""
+    bounds: list[int]   # [x_min, y_min, x_max, y_max]; the client reads it as [l, b, r, t]
+    source: str         # what the recognizer read
+    destination: str    # what the translator produced
 
 
 def assign_reading_order(regions: list[Region], vertical_hint: bool = False) -> list[Region]:
@@ -85,7 +95,7 @@ def _translate_all(
 ) -> list[str]:
     """Translate a whole image's texts. Uses the translator's batch path when it
     has one (the LLM engines) and a per-text loop otherwise (the test dummy)."""
-    if hasattr(translator, "translate_batch"):
+    if isinstance(translator, BatchTranslator):
         return translator.translate_batch(texts, src, dst, options)
     return [translator.translate(t, src, dst, options) for t in texts]
 
@@ -97,7 +107,7 @@ def translate_regions(
     src: str,
     dst: str,
     opt_translate: dict[str, Any],
-) -> list[dict]:
+) -> list[ResultItem]:
     """Translate recognized (text, region) pairs -> the wire result list. This is
     the LLM half of the pipeline — the route runs it OUTSIDE the GPU lock."""
     if not recognized:
@@ -113,7 +123,7 @@ def translate_regions(
     for i, (src_text, dst_text) in enumerate(zip(texts, translations)):
         logger.debug("  t%d %r -> %r", i, src_text, dst_text)  # verbose: source -> translation
     return [
-        {"bounds": region.wire_box(), "source": text, "destination": translation}
+        ResultItem(bounds=region.wire_box(), source=text, destination=translation)
         for (text, region), translation in zip(recognized, translations)
     ]
 
@@ -129,7 +139,7 @@ def run_pipeline(
     opt_detect: dict[str, Any],
     opt_recognize: dict[str, Any],
     opt_translate: dict[str, Any],
-) -> list[dict]:
+) -> list[ResultItem]:
     """Detect+recognize then translate — the composed reference path (tests, and
     any single-call use). The route splits these two halves across the GPU lock."""
     recognized = detect_and_recognize(
