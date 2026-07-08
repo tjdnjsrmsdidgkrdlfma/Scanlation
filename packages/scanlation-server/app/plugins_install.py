@@ -31,7 +31,6 @@ import importlib
 import io
 import os
 import queue
-import site
 import subprocess
 import sys
 import threading
@@ -39,40 +38,19 @@ from collections import deque
 from pathlib import Path
 from typing import Callable, Iterator
 
-from scanlation_sdk.context import context
-
 from .catalog import CatalogEntry, catalog
+from .plugins_path import plugins_dir
 
 DEFAULT_REPO = "https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git"
 
 
-# --- paths / repo ---------------------------------------------------------
-def plugins_dir() -> Path:
-    """Where plugin packages are pip-installed (a mounted volume in Docker)."""
-    env = os.environ.get("SCANLATION_PLUGINS_DIR")
-    return Path(env) if env else context.base_dir / "plugins"
-
-
+# --- install source -------------------------------------------------------
 def engine_repo() -> str:
     return os.environ.get("SCANLATION_ENGINE_REPO", DEFAULT_REPO)
 
 
 def engine_ref() -> str:
     return os.environ.get("SCANLATION_ENGINE_REF", "main")
-
-
-def ensure_on_path() -> None:
-    """Put ``plugins_dir()`` on sys.path so already-installed (persisted) engine
-    packages are importable + entry_points-discoverable. Called at registry import
-    (earliest) so the first discovery already sees volume-installed engines."""
-    d = plugins_dir()
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
-    p = str(d)
-    if p not in sys.path:
-        site.addsitedir(p)  # appends to sys.path (+ processes any .pth)
 
 
 # --- install --------------------------------------------------------------
@@ -94,27 +72,36 @@ def _install_sources(entry: CatalogEntry) -> list[str]:
     ]
 
 
-def _torch_pip_args() -> list[str]:
-    """pip index args for the torch-using engines, resolved at install time from the
-    /admin backend setting + the auto-detected GPU vendor. CPU wheel by default; GPU
-    picks the CUDA (plain PyPI) or ROCm wheel by vendor. An ambiguous ('both' with no
-    torch_vendor) or absent GPU falls back to CPU. torch is one build = one vendor, so
-    this is a single global choice, applied on the next install."""
-    from .gpus import detect_gpu_vendor
+def _torch_pip_args(backend: str, vendor: str | None, index: str) -> list[str]:
+    """pip index args for the torch-using engines. CPU wheel by default; GPU picks the
+    CUDA (plain PyPI) or ROCm wheel by vendor. An ambiguous ('both') or absent vendor
+    falls back to CPU. torch is one build = one vendor, so this is a single global
+    choice, applied on the next install.
+
+    Pure: the caller resolves ``backend``/``vendor``/``index`` (the /admin settings and
+    the auto-detected GPU), so the policy is decidable without touching globals."""
+    cpu = ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
+    if backend != "gpu":
+        return cpu
+    if vendor == "nvidia":
+        # plain PyPI torch is already the CUDA build; an index override pins a cuXX wheel.
+        return ["--index-url", index] if index else []
+    if vendor == "amd":
+        return ["--index-url", index or "https://download.pytorch.org/whl/rocm6.2",
+                "--extra-index-url", "https://pypi.org/simple"]
+    return cpu  # 'both' (unresolved) or None -> can't pick a vendor -> CPU
+
+
+def _resolve_torch_pip_args() -> list[str]:
+    """``_torch_pip_args`` fed from the live /admin settings + GPU auto-detection."""
     from .state import state
 
     sel = state.selection
-    cpu = ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
-    if sel.torch_backend != "gpu":
-        return cpu
-    vendor = sel.torch_vendor or detect_gpu_vendor()
-    if vendor == "nvidia":
-        # plain PyPI torch is already the CUDA build; an index override pins a cuXX wheel.
-        return ["--index-url", sel.torch_index] if sel.torch_index else []
-    if vendor == "amd":
-        idx = sel.torch_index or "https://download.pytorch.org/whl/rocm6.2"
-        return ["--index-url", idx, "--extra-index-url", "https://pypi.org/simple"]
-    return cpu  # 'both' (unresolved) or None -> can't pick a vendor -> CPU
+    vendor = None
+    if sel.torch_backend == "gpu":  # only then does a vendor matter — and only then is it probed
+        from .gpus import detect_gpu_vendor
+        vendor = sel.torch_vendor or detect_gpu_vendor()
+    return _torch_pip_args(sel.torch_backend, vendor, sel.torch_index)
 
 
 def _pip_cmd(entry: CatalogEntry) -> list[str]:
@@ -128,7 +115,7 @@ def _pip_cmd(entry: CatalogEntry) -> list[str]:
     volume and ImportError. With it, sdk is always reinstalled to match.
 
     torch-using engines get the backend's torch index spliced in (CPU/CUDA/ROCm)."""
-    torch_args = _torch_pip_args() if entry.torch else []
+    torch_args = _resolve_torch_pip_args() if entry.torch else []
     return [
         sys.executable, "-m", "pip", "install", "--upgrade",
         "--target", str(plugins_dir()),
@@ -139,7 +126,7 @@ def _pip_cmd(entry: CatalogEntry) -> list[str]:
 
 
 def install_package(entry: CatalogEntry) -> None:
-    """pip-install the plugin's package (+ its deps) into ``plugins_dir()``.
+    """pip-install the plugin's package (+ its deps) into ``plugins_dir()``, silently.
     Raises RuntimeError with pip's stderr tail on failure."""
     plugins_dir().mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(_pip_cmd(entry), capture_output=True, text=True)
@@ -147,58 +134,6 @@ def install_package(entry: CatalogEntry) -> None:
         tail = (proc.stderr or proc.stdout or "").strip()[-800:]
         raise RuntimeError(f"pip install {entry.package} failed: {tail}")
 
-
-def refresh_registry() -> None:
-    """Make a just-installed package's entry_points visible without a restart."""
-    from .registry import registry
-
-    importlib.invalidate_caches()
-    registry.rediscover()
-
-
-def find_class(name: str):
-    """The engine class registered under ``name`` in any role, or None. Shared by
-    install_plugin and tools/install.py so the role-crossing lookup lives once."""
-    from .registry import registry
-
-    for mapping in registry.all_classes().values():
-        if name in mapping:
-            return mapping[name]
-    return None
-
-
-def install_plugin(name: str) -> dict:
-    """Install a plugin end-to-end: pip-install its package if missing (→ live
-    rediscover), then download its weights. ``name`` is the engine/registry name.
-    Returns a small status dict; raises ValueError/RuntimeError on failure."""
-    result: dict = {}
-    cls = find_class(name)
-    if cls is None:  # package not installed yet -> pip install from the catalog
-        entry = catalog().get(name)
-        if entry is None:
-            raise ValueError(f"unknown engine: {name}")
-        install_package(entry)
-        refresh_registry()
-        cls = find_class(name)
-        if cls is None:
-            raise RuntimeError(f"{name} installed but not discovered (check entry_points)")
-        result["package"] = "installed"
-    else:
-        result["package"] = "present"
-
-    inst = cls()
-    if not inst.is_installed():
-        inst.install()  # download weights (no-op for engines without assets)
-    result["weights"] = "installed" if inst.is_installed() else "n/a"
-    return result
-
-
-# --- streaming install (live progress for the /admin log view) -------------
-# `install_plugin` above is the plain, blocking one-shot (used by tools/install.py
-# and POST /install_plugins/). The machinery below is the same install with live
-# output: it runs the blocking work in a thread that pushes (kind, text) items
-# onto a queue, and yields them as NDJSON-ready event dicts so /admin can show the
-# pip log and the weights-download bars as they happen.
 
 class _LineTee(io.TextIOBase):
     """A write-through sink for ``redirect_stdout/stderr`` during a plugin's
@@ -234,9 +169,9 @@ class _LineTee(io.TextIOBase):
 
 
 def _stream_pip(entry: CatalogEntry, put: Callable[[tuple], None]) -> None:
-    """Run the plugin's pip install, forwarding each stdout/stderr line to ``put``
-    as it arrives. Raises RuntimeError with the tail on non-zero exit (non-TTY pip
-    prints plain newline-terminated lines, so no bar parsing is needed)."""
+    """Same install as ``install_package``, forwarding each stdout/stderr line to
+    ``put`` as it arrives. Raises RuntimeError with the tail on non-zero exit (non-TTY
+    pip prints plain newline-terminated lines, so no bar parsing is needed)."""
     plugins_dir().mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen(
         _pip_cmd(entry),
@@ -253,6 +188,71 @@ def _stream_pip(entry: CatalogEntry, put: Callable[[tuple], None]) -> None:
     proc.wait()
     if proc.returncode != 0:
         raise RuntimeError(f"pip install {entry.package} failed: " + " | ".join(list(tail)[-6:]))
+
+
+def refresh_registry() -> None:
+    """Make a just-installed package's entry_points visible without a restart."""
+    from .registry import registry
+
+    importlib.invalidate_caches()
+    registry.rediscover()
+
+
+def find_class(name: str):
+    """The engine class registered under ``name`` in any role, or None. Shared by
+    install_plugin and tools/install.py so the role-crossing lookup lives once."""
+    from .registry import registry
+
+    for mapping in registry.all_classes().values():
+        if name in mapping:
+            return mapping[name]
+    return None
+
+
+def _run_install(name: str, put: Callable[[tuple], None] | None) -> dict:
+    """The install algorithm, run by both the blocking and the streaming entry point.
+
+    Two layers: pip the **package** if the engine isn't discoverable yet (then
+    re-discover so it appears without a restart), and download its **weights**.
+    ``put`` is the streaming sink: when given, phase events are emitted and pip's
+    output + the weights-download bars are forwarded to it line by line; when None
+    the same steps run silently and pip's stderr tail only surfaces on failure.
+    ``name`` is the engine/registry name. Raises ValueError/RuntimeError."""
+    cls = find_class(name)
+    if cls is None:  # package not installed yet -> pip install from the catalog
+        entry = catalog().get(name)
+        if entry is None:
+            raise ValueError(f"unknown engine: {name}")
+        if put is not None:
+            put(("phase", "package"))
+            _stream_pip(entry, put)
+        else:
+            install_package(entry)
+        refresh_registry()
+        cls = find_class(name)
+        if cls is None:
+            raise RuntimeError(f"{name} installed but not discovered (check entry_points)")
+        package = "installed"
+    else:
+        package = "present"
+
+    inst = cls()
+    if not inst.is_installed():  # download weights (no-op for engines without assets)
+        if put is not None:
+            put(("phase", "weights"))
+            sink = _LineTee(put)
+            with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                inst.install()
+            sink.flush()
+        else:
+            inst.install()
+    return {"package": package, "weights": "installed" if inst.is_installed() else "n/a"}
+
+
+def install_plugin(name: str) -> dict:
+    """Install a plugin end-to-end, blocking and silent (tools/install.py, POST
+    /install_plugins/). Returns a small status dict; raises on failure."""
+    return _run_install(name, None)
 
 
 # --- in-progress tracking --------------------------------------------------
@@ -279,6 +279,15 @@ def _begin_install(name: str) -> bool:
         return True
 
 
+_EVENT: dict[str, Callable[[object], dict]] = {  # (kind, payload) -> NDJSON object
+    "log": lambda p: {"event": "log", "stream": "log", "line": p},
+    "progress": lambda p: {"event": "log", "stream": "progress", "line": p},
+    "phase": lambda p: {"event": "phase", "phase": p},
+    "done": lambda p: {"event": "done", "result": p},
+    "error": lambda p: {"event": "error", "message": p},
+}
+
+
 def install_plugin_events(name: str) -> Iterator[dict]:
     """Streaming variant of :func:`install_plugin`: yields progress events for the
     /admin live-log view. Event shapes (each a JSON object, one per line):
@@ -288,10 +297,11 @@ def install_plugin_events(name: str) -> Iterator[dict]:
       {"event": "done",  "result": {"package": …, "weights": …}}
       {"event": "error", "message": "…"}
 
-    Same two layers as ``install_plugin`` (pip package, then weights), done in one
-    call. The blocking work runs in a daemon thread feeding a queue so lines flush
-    live; this generator just drains the queue until the sentinel. Refuses (an
-    ``error`` event) if the same plugin is already installing."""
+    The same ``_run_install`` the blocking entry point runs, given a queue to push
+    (kind, payload) items onto. It runs in a daemon thread so lines flush live; this
+    generator just drains the queue until the sentinel and maps each item to its
+    event dict. Refuses (an ``error`` event) if the same plugin is already
+    installing."""
     if not _begin_install(name):
         yield {"event": "error", "message": f"{name} is already installing"}
         return
@@ -299,29 +309,7 @@ def install_plugin_events(name: str) -> Iterator[dict]:
 
     def worker() -> None:
         try:
-            cls = find_class(name)
-            if cls is None:  # package missing -> pip install from the catalog
-                entry = catalog().get(name)
-                if entry is None:
-                    raise ValueError(f"unknown engine: {name}")
-                q.put(("phase", "package"))
-                _stream_pip(entry, q.put)
-                refresh_registry()
-                cls = find_class(name)
-                if cls is None:
-                    raise RuntimeError(f"{name} installed but not discovered (check entry_points)")
-                pkg = "installed"
-            else:
-                pkg = "present"
-            inst = cls()
-            if not inst.is_installed():
-                q.put(("phase", "weights"))
-                sink = _LineTee(q.put)
-                with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-                    inst.install()  # download weights (no-op for API-only engines)
-                sink.flush()
-            weights = "installed" if inst.is_installed() else "n/a"
-            q.put(("done", {"package": pkg, "weights": weights}))
+            q.put(("done", _run_install(name, q.put)))
         except Exception as exc:  # noqa: BLE001
             q.put(("error", str(exc)))
         finally:
@@ -336,11 +324,4 @@ def install_plugin_events(name: str) -> Iterator[dict]:
         if item is None:
             break
         kind, payload = item
-        if kind in ("log", "progress"):
-            yield {"event": "log", "stream": kind, "line": payload}
-        elif kind == "phase":
-            yield {"event": "phase", "phase": payload}
-        elif kind == "done":
-            yield {"event": "done", "result": payload}
-        elif kind == "error":
-            yield {"event": "error", "message": payload}
+        yield _EVENT[kind](payload)

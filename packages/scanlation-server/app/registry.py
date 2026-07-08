@@ -16,7 +16,7 @@ import threading
 from importlib.metadata import entry_points
 from typing import Any
 
-from .plugins_install import ensure_on_path
+from .plugins_path import ensure_on_path
 
 ROLES: dict[str, str] = {
     "detector": "scanlation.detectors",

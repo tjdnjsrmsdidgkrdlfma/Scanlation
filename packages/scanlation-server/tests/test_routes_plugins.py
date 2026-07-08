@@ -53,6 +53,20 @@ def test_install_package_builds_pip_git_command():
     assert "#subdirectory=packages/scanlation-sdk" in joined     # co-installed sdk
 
 
+def test_torch_pip_args_is_a_pure_policy():
+    """The wheel-index policy, decided from (backend, vendor, index) alone."""
+    from app.plugins_install import _torch_pip_args as f
+
+    cpu = ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
+    assert f("cpu", "amd", "") == cpu                    # cpu backend wins over vendor
+    assert f("gpu", "nvidia", "") == []                  # plain PyPI torch IS the CUDA build
+    assert f("gpu", "nvidia", "https://x") == ["--index-url", "https://x"]
+    assert f("gpu", "amd", "")[:2] == ["--index-url", "https://download.pytorch.org/whl/rocm6.2"]
+    assert f("gpu", "amd", "https://y")[:2] == ["--index-url", "https://y"]
+    assert f("gpu", "both", "") == cpu                   # ambiguous -> cpu
+    assert f("gpu", None, "") == cpu                     # no GPU -> cpu
+
+
 def test_torch_pip_args_by_backend_and_vendor():
     """_pip_cmd splices the torch index by /admin backend + auto-detected vendor:
     cpu -> cpu wheel; gpu+amd -> rocm; gpu+nvidia -> plain PyPI ([]); both/none ->
@@ -78,6 +92,13 @@ def test_torch_pip_args_by_backend_and_vendor():
         assert "whl/cpu" in cmd("gpu", detect="both")                       # both unresolved -> cpu fallback
         assert "whl/rocm6.5" in cmd("gpu", detect="amd", index="https://x/whl/rocm6.5")  # index override
         assert "whl/rocm" in cmd("gpu", detect="both", vendor="amd")        # torch_vendor forces amd
+
+        # A cpu backend must not probe the GPU at all -- detection imports torch.
+        probed = []
+        sel.torch_backend, sel.torch_vendor, sel.torch_index = "cpu", "", ""
+        gpus.detect_gpu_vendor = lambda: probed.append(1) or "amd"
+        pi._pip_cmd(entry)
+        assert probed == []
     finally:
         sel.torch_backend, sel.torch_vendor, sel.torch_index, gpus.detect_gpu_vendor = saved
 
@@ -210,6 +231,7 @@ def test_install_plugin_stream_route_emits_ndjson():
 TESTS = [
     test_catalog_lists_engines,
     test_install_package_builds_pip_git_command,
+    test_torch_pip_args_is_a_pure_policy,
     test_torch_pip_args_by_backend_and_vendor,
     test_install_plugins,
     test_line_tee_splits_progress_from_log,
