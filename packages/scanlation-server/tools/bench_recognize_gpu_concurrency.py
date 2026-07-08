@@ -226,6 +226,45 @@ def _cap_pixels(crops, max_px: int):
     return out, n
 
 
+def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int, rows) -> None:
+    """Sweep max-pixels caps on the same crops, comparing each capped read to the
+    UNCAPPED read (char-level SequenceMatcher ratio) and timing it -- the accuracy-vs-
+    speed knee for choosing a production downscale cap. Single process, warmed so the
+    one-time first-forward JIT doesn't land on the first cap and skew it."""
+    import difflib
+    from scanlation_sdk.contracts import Region
+
+    rec = _load_rec(device, attn)
+    region = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
+    opts = {"max_new_tokens": out_cap}
+    sample = crops[:max(1, items)]
+    with _silenced():
+        rec.recognize(sample[0], region, opts)  # warmup: absorb first-forward JIT
+
+    refs = [rec.recognize(c, region, opts) for c in sample]  # uncapped reference reads
+
+    print(f"\n-- max-pixels sweep (accuracy vs speed), device {device}, out-cap {out_cap}, {len(sample)} crops")
+    print(f"{'pixels':>10} {'crops/sec':>10} {'exact':>9} {'char-sim':>9}")
+    rows += ["### PaddleOCR-VL -- max-pixels sweep (accuracy vs speed)", "",
+             "Each cap downscales crops above it, reads, and compares to the UNCAPPED "
+             "read (char-level SequenceMatcher ratio). The reference is itself OCR, so "
+             "this is change-from-full-res, not ground truth. Knee = highest crops/sec "
+             "whose char-sim is still acceptable.", "",
+             "| pixels | crops/sec | exact match | char-sim |", "|---|---|---|---|"]
+    for px in sweep:
+        capped = _cap_pixels(sample, px)[0] if px else sample
+        t0 = time.perf_counter()
+        got = [rec.recognize(c, region, opts) for c in capped]
+        dt = time.perf_counter() - t0
+        rate = len(sample) / dt
+        exact = sum(g == r for g, r in zip(got, refs))
+        sim = sum(difflib.SequenceMatcher(None, r, g).ratio() for r, g in zip(refs, got)) / len(refs)
+        label = "uncapped" if not px else str(px)
+        print(f"{label:>10} {rate:>10.2f} {exact:>6}/{len(refs)} {sim:>9.3f}")
+        rows.append(f"| {label} | {rate:.2f} | {exact}/{len(refs)} | {sim:.3f} |")
+    rows += [""]
+
+
 def main() -> int:
     sys.stdout.reconfigure(line_buffering=True)  # live progress under a Docker pipe
 
@@ -246,6 +285,8 @@ def main() -> int:
     ap.add_argument("--profile-n", type=int, default=3, help="how many of the biggest crops to profile")
     ap.add_argument("--max-pixels", type=int, default=0,
                     help="downscale crops above this pixel area before recognize (0 = off)")
+    ap.add_argument("--sweep-pixels", default="",
+                    help='accuracy-vs-speed: sweep max-pixels caps vs the uncapped read, e.g. "0,250000,150000,100000"')
     args = ap.parse_args()
 
     if not args.data:
@@ -256,7 +297,7 @@ def main() -> int:
         sys.exit(f"PaddleOCR-VL concurrency needs a GPU: {reason}")
 
     crops, src = _load_crops(args.data, args.detect)
-    if args.max_pixels:
+    if args.max_pixels and not args.sweep_pixels:  # sweep controls its own capping
         crops, n_capped = _cap_pixels(crops, args.max_pixels)
         src += f", {n_capped} downscaled to <={args.max_pixels}px"
     worker_counts = [int(x) for x in args.workers.split(",") if x.strip()]
@@ -268,7 +309,10 @@ def main() -> int:
             f"- device: {device}" + (f", attn={attn}" if attn else ""),
             f"- worker sweep: {worker_counts}, items/point: {args.items}", ""]
 
-    if args.profile_decode:
+    if args.sweep_pixels:
+        sweep = [int(x) for x in args.sweep_pixels.split(",") if x.strip()]
+        bench_pixel_sweep(crops, device, args.probe_cap, attn, sweep, args.items, rows)
+    elif args.profile_decode:
         bench_decode_profile(crops, device, args.probe_cap, attn, args.profile_n, rows)
     else:
         bench_concurrency(crops, worker_counts, device, args.items, attn, args.probe_cap, rows)
