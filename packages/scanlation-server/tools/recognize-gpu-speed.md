@@ -107,12 +107,43 @@ crop을 픽셀 상한으로 다운스케일해 vision 토큰을 줄인다(`--max
 
 **판정 보류.** 결정은 *무엇이* 바뀌는지에 달렸다 — `♥`/`♡` 개수, `・・・`↔`...` 표기 같은 **코스메틱**이면 1.66x는 사실상 공짜고, `ばっかり→ばつかり`처럼 **작은 가나가 바뀌면** 정확도 프리미엄(PaddleOCR-VL을 쓰는 이유)을 깎는 것이라 안 하는 게 맞다. `--sweep-pixels`가 이제 바뀐 crop마다 `ref`/`got`을 찍으니 눈으로 확정한다.
 
-## 실투입
+## 실투입 — 셋업 부채
 
-1. ~~`docker-compose.rocm.yml`에 `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` 추가~~ — **반영 완료**(3.7x). 순수 env라 파일시스템 의존이 없다. MIOPEN 커널 캐시 env는 app 유저가 쓸 수 있는 영속 디렉터리가 전제라 2번(entrypoint `HOME`)과 묶는다.
-2. **§셋업 부채 나머지**([crop-batching](recognize-crop-batching.md))가 실제 배포 블로커다 — 지금까지 전부 벤치가 수동 env로 우회한 상태의 측정이고, `/admin`에서 GPU로 설치하면 아직 **로드조차 안 된다**(`accelerate` 누락, torch가 CUDA 빌드로 샘, rocm6.2 기본, entrypoint `HOME=/root`). MIOPEN 캐시 env를 compose에 넣는 것도 이 entrypoint 수정이 전제다.
-3. **해상도 캡** — `ref`/`got` 확인 후 채택/보류 확정. 넣게 되면 하드코딩 금지 규칙대로 env 기본값 + `state.json` + `/admin` 노출, 위치는 detect 다음·recognize 전([pipeline.py `detect_and_recognize`](../app/pipeline.py) 또는 [PaddleOCR-VL plugin](../../scanlation-paddleocr-vl-for-manga/scanlation_paddleocr_vl_for_manga/plugin.py)의 `recognize` 입력 전).
-4. **멀티워커** — 안 넣음(위 재고 조건).
+이 문서의 모든 GPU 측정은 **벤치가 수동 `-e`로 우회해** 돌린 것이다. `/admin`에서 PaddleOCR-VL을 GPU로 설치하면 아직 **로드조차 안 된다.** 네 갈래이고 서로 독립적이다.
+
+> 참고: PaddleOCR-VL은 **native transformers 경로**로 로드된다(`AutoModelForImageTextToText`, `trust_remote_code` 아님 — transformers 5.x가 `transformers/models/paddleocr_vl/`로 지원). "remote-code 모델"이 아니다.
+
+### 1. `accelerate`가 의존성에 없다 — GPU 로드 하드 블로커
+- **증상**: GPU 로드가 `ValueError`로 죽는다.
+- **원인**: [plugin.py `_load`](../../scanlation-paddleocr-vl-for-manga/scanlation_paddleocr_vl_for_manga/plugin.py)가 `device_map=device`를 쓰는데 transformers의 `device_map` 경로는 `accelerate`를 요구한다. [pyproject](../../scanlation-paddleocr-vl-for-manga/pyproject.toml)의 `dependencies`엔 없다(`scanlation-sdk`, `transformers`, `torch`, `huggingface_hub`, `pillow`뿐).
+- **고칠 것**: `dependencies`에 `accelerate` 추가.
+
+### 2. AMD torch 설치가 PyPI의 CUDA 빌드로 샌다
+- **증상**: 백엔드=GPU + AMD인데 `torch 2.12.1+cu130`(CUDA 빌드)이 깔린다.
+- **원인**: [plugins_install.py `_torch_pip_args`](../app/plugins_install.py#L114-L116)의 amd 경로가 `--index-url <rocm>`과 `--extra-index-url https://pypi.org/simple`을 **함께** 준다. **pip엔 인덱스 우선순위가 없다** — `extra-index-url`은 같은 네임스페이스로 합쳐지고 pip은 **모든 인덱스를 통틀어 최고 버전**을 고른다. rocm6.2 인덱스는 torch 2.5.1까지인데 PyPI엔 2.12.x가 있으니 **PyPI(CUDA)가 이긴다.**
+- **고칠 것**: **2단계 설치.** ① torch를 **rocm 인덱스만** 줘서 먼저 설치(PyPI 없이). ② 그다음 플러그인을 평소대로 설치(torch는 이미 충족되어 안 건드리고, 나머지 의존성만 PyPI에서).
+- **주의**: 3번만 고쳐도 버전이 맞아떨어져 PEP 440 local-version 규칙(`2.12.1+rocm7.0` > `2.12.1`)으로 rocm이 우연히 이길 수 있다. 하지만 인덱스가 다시 뒤처지면 재발하므로 **2단계 분리가 근본 해법**이다.
+
+### 3. AMD 기본 torch 인덱스가 `rocm6.2`
+- **원인**: [plugins_install.py:115](../app/plugins_install.py#L115)에 `https://download.pytorch.org/whl/rocm6.2`가 기본값으로 박혀 있다. 이 인덱스는 **torch 2.5.1까지**라 현 스택과 어긋난다.
+- **고칠 것**: 기본값을 `rocm7.0`으로(호스트 ROCm 7.1에 `rocm7.0` wheel이 맞았다). 사용자 오버라이드는 이미 `state.selection.torch_index`(/admin)로 열려 있으니 **기본값만** 바꾸면 된다.
+
+### 4. `docker-entrypoint.sh`가 `HOME`을 안 바꾼다 — 캐시가 전부 `Permission denied`
+- **증상**: torch JIT 커널 캐시(`$HOME/.cache/torch/kernels`), MIOpen DB, HF 캐시가 `Permission denied`로 꺼진다.
+- **원인**: [docker-entrypoint.sh:18](../../../docker-entrypoint.sh)의 `setpriv --reuid --regid --init-groups`는 **uid/gid만 바꾸고 `HOME`은 `/root` 그대로** 둔다. app 유저는 `/root`에 못 쓴다.
+- **고칠 것**: exec 전에 `HOME`을 app 유저의 홈으로 설정. 이게 풀려야 **MIOPEN 커널 캐시 env(`MIOPEN_USER_DB_PATH`/`MIOPEN_CUSTOM_CACHE_DIR`)를 compose에 넣을 수 있다**(영속 볼륨, warm 시 4.4x).
+
+### 5. ~~compose에 AOTriton env~~ — 반영 완료
+`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`([docker-compose.rocm.yml](../../../docker-compose.rocm.yml)). 3.7x.
+
+**순서 제안**: 1(한 줄, 하드 블로커) → 4(캐시 뿌리, MIOPEN env를 풀어줌) → 3(기본값) → 2(설치 분리). 1·4는 독립적이고, 2·3은 함께 검증하는 게 낫다.
+
+**부수 발견**: `_torch_pip_args`의 기본이 `torch_backend="cpu"`라 **GPU 호스트에서도 CPU wheel을 받는다**. device-node 자동 감지(`detect_gpu_vendor`) 기반 "auto" 기본값으로 개선 여지가 있다(별도 건).
+
+## 실투입 — 나머지 결정
+
+- **해상도 캡** — `ref`/`got` 확인 후 채택/보류 확정. 넣게 되면 하드코딩 금지 규칙대로 env 기본값 + `state.json` + `/admin` 노출, 위치는 detect 다음·recognize 전([pipeline.py `detect_and_recognize`](../app/pipeline.py) 또는 [PaddleOCR-VL plugin](../../scanlation-paddleocr-vl-for-manga/scanlation_paddleocr_vl_for_manga/plugin.py)의 `recognize` 입력 전).
+- **멀티워커** — 안 넣음(위 §동시성의 재고 조건).
 
 ## 참고 — 4070 Ti Super 대비
 

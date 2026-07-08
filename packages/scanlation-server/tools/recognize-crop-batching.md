@@ -182,23 +182,15 @@ for region in regions:
 
 4070 Ti Super(~1s/crop) 대 서버 9060 XT(2.9s/crop)의 ~3배 차가 셋업 탓인지 보려고 세 레버를 걸어 재측정했는데, **당시 AOTriton 판정이 틀렸다**(경위·정정은 [recognize-gpu-speed.md](recognize-gpu-speed.md)).
 
-- **`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention) — 실은 3.7x 레버다.** "무효"라 판정한 근거가 **플래그를 켠 채 두 번 돌려 같은 값이 나온 것**이었다(비교 기준이던 이전 baseline도 켜진 값). OFF 기준선을 한 번도 안 쟀던 것. 뒤에 같은 스크립트로 A/B: **OFF 0.094 / ON 0.345 crops/sec.** → §부채 5번은 실투입 필수.
+- **`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention) — 실은 3.7x 레버다.** "무효"라 판정한 근거가 **플래그를 켠 채 두 번 돌려 같은 값이 나온 것**이었다(비교 기준이던 이전 baseline도 켜진 값). OFF 기준선을 한 번도 안 쟀던 것. 뒤에 같은 스크립트로 A/B: **OFF 0.094 / ON 0.345 crops/sec.** → [docker-compose.rocm.yml](../../../docker-compose.rocm.yml)에 반영 완료.
 - **`attn_implementation="sdpa"` — 명시해도 변화 없음.** 모델이 **이미 sdpa를 기본으로** 쓰기 때문(`ValueError` 없이 로드; [BENCH_ATTN 노브](bench_recognize_batch.py), 커밋 b896376). AOTriton은 그 sdpa가 느린 math 폴백 대신 **flash 커널**을 타게 하는 스위치다.
 - **`PYTORCH_KERNEL_CACHE_PATH` — 경고만 옮겼다.** torch JIT 커널 캐시(MIOpen과 별개)가 `/root/.cache`→`/data/torchkernels` 어디서도 "could not be created"로 꺼진다(app 유저가 볼륨에 못 씀 = §부채 4번과 같은 권한 뿌리). 단 per-crop 수엔 무영향 — 한 프로세스 안에선 컴파일 커널이 메모리에 남아 반복 shape는 1회만 컴파일, 디스크 캐시는 새 프로세스 cold start만 돕는다.
 
 **따라서 warm B=1 = 0.34 crops/sec(≈2.9s/crop)는 flash-ON의 정상값이다.** 4070 Ti Super 대비 ~3배 차는 하드웨어 체급 + 대역폭(672 vs ~320 GB/s)으로 설명되는 범위다. flash를 끄면 같은 crop이 0.094 crops/sec로 떨어진다 — 병목은 vision attention이고, AOTriton이 그 스위치다.
 
-### GPU recognize 실투입 셋업 부채 (벤치는 수동 env로 우회, 코드 미반영)
+### GPU recognize 실투입 셋업 부채
 
-이 실측은 컨테이너에 수동 `-e`로 우회해 돌렸다. PaddleOCR-VL을 실제 파이프라인의 GPU recognizer로 붙이려면 아래가 코드/설정에 들어가야 한다(현재 전부 미반영):
-
-1. **PaddleOCR-VL pyproject에 `accelerate`** — `_load`의 `device_map` 경로가 요구(없으면 GPU 로드 자체가 `ValueError`).
-2. **`_torch_pip_args`(plugins_install.py) 2단계 설치** — 지금 amd 경로가 `--index-url rocm --extra-index-url pypi`를 함께 줘서, pip 버전 우선순위 때문에 torch가 **PyPI의 CUDA 빌드로 샌다**(rocm6.2를 줘도 `torch 2.12.1+cu130`이 깔림). torch를 rocm 인덱스에서만 받도록 선설치로 분리해야 한다.
-3. **기본 rocm `rocm6.2` → `rocm7.0`** — rocm6.2 인덱스는 torch 2.5.1까지라 현 스택(torch 2.12.1 + torchvision 0.27.1)과 어긋난다. 호스트 ROCm 7.1엔 `rocm7.0` wheel이 맞았다.
-4. **`docker-entrypoint.sh`에서 `HOME`을 app 홈으로** — `setpriv`가 uid만 바꾸고 `HOME`은 `/root`로 두는 탓에 app 유저가 MIOpen/git 캐시를 못 써 `Permission denied`. 실사용 GPU recognize도 여기서 깨진다.
-5. **`docker-compose.rocm.yml`에 env 추가** — `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`(RDNA4 flash/mem attention, recognize 속도 **3.7x**)는 **반영 완료.** `MIOPEN_USER_DB_PATH`/`MIOPEN_CUSTOM_CACHE_DIR`(영속 볼륨: 커널 캐시 warm 시 4.4x)는 app 유저가 쓸 수 있는 디렉터리가 전제라 4번(entrypoint `HOME`)과 함께 남았다.
-
-부수 발견: `_torch_pip_args` 기본이 `torch_backend="cpu"`라 **GPU 호스트에서도 CPU wheel을 받는다** — device-node 자동 감지(`detect_gpu_vendor`) 기반 "auto" 기본값으로 개선 여지가 있다(별도).
+이 문서의 GPU 실측은 컨테이너에 수동 `-e`로 우회해 돌렸다. PaddleOCR-VL을 실제 파이프라인의 GPU recognizer로 붙이려면 코드/설정 네 군데를 고쳐야 한다 — `accelerate` 의존성, AMD torch가 PyPI의 CUDA 빌드로 새는 문제, 기본 rocm 인덱스, entrypoint의 `HOME`. **증상·원인·고칠 것·진행 상태는 [recognize-gpu-speed.md](recognize-gpu-speed.md)의 §실투입 — 셋업 부채**에 있다(AOTriton env는 반영 완료).
 
 ## 판단 (실측 반영)
 
