@@ -2,7 +2,7 @@
 plugin: the engine contract (EngineBase/Region + role Protocols), the plugin-
 facing runtime context (models_dir/device/languages), and the LLM prompt
 template. Plugins depend on this, never on the server package."""
-from scanlation_sdk.context import LANG_PLAIN, LANGUAGES, context
+from scanlation_sdk.context import LANG_PLAIN, LANG_RTL, LANGUAGES, context
 from scanlation_sdk.contracts import (
     BatchTranslator,
     Detector,
@@ -29,4 +29,5 @@ __all__ = [
     "release_cuda_cache",
     "LANGUAGES",
     "LANG_PLAIN",
+    "LANG_RTL",
 ]

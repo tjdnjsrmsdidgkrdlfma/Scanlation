@@ -13,6 +13,7 @@ from typing import Any, TypedDict
 
 from PIL import Image
 
+from scanlation_sdk.context import LANG_RTL
 from scanlation_sdk.contracts import BatchTranslator, Detector, Recognizer, Region, Translator
 from .geometry import deskew_crop
 
@@ -29,20 +30,26 @@ class ResultItem(TypedDict):
     destination: str    # what the translator produced
 
 
-def assign_reading_order(regions: list[Region], vertical_hint: bool = False) -> list[Region]:
-    """Manga reading order: top-to-bottom rows, right-to-left within a row.
+def assign_reading_order(regions: list[Region], *, rtl: bool) -> list[Region]:
+    """Reading order: top-to-bottom rows, and within a row right-to-left when the
+    source language's comics read that way (``rtl``) — Japanese manga — else
+    left-to-right.
 
     Rows are banded by the median region height so slightly misaligned bubbles
     still group into the same row.
+
+    This order is what the translator receives: a page's bubbles go to the LLM as
+    one sequence, so their sequence is the context each translation is read in.
     """
     if not regions:
         return regions
     heights = sorted(r.bbox[3] - r.bbox[1] for r in regions)
     band = max(1, heights[len(heights) // 2])
+    across = -1 if rtl else 1
 
     def key(r: Region):
         x0, y0, x1, y1 = r.bbox
-        return (int(((y0 + y1) / 2) // band), -((x0 + x1) / 2))
+        return (int(((y0 + y1) / 2) // band), across * ((x0 + x1) / 2))
 
     ordered = sorted(regions, key=key)
     for i, r in enumerate(ordered):
@@ -64,7 +71,7 @@ def detect_and_recognize(
     pipeline — the route runs it under the GPU lock. assign_reading_order is
     called exactly once here (it assigns region.order)."""
     t0 = time.perf_counter()
-    regions = assign_reading_order(detector.detect(img, opt_detect), vertical_hint=(src == "ja"))
+    regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
     t_det = time.perf_counter()
     out: list[tuple[str, Region]] = []
     for region in regions:

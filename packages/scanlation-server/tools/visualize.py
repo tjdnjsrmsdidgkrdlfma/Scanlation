@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw
 from app.geometry import deskew_crop
 from app.pipeline import assign_reading_order
 from app.registry import registry
+from scanlation_sdk.context import LANG_RTL
 
 
 def _parse_opts(detector, pairs: list[str]) -> dict:
@@ -44,6 +45,8 @@ def main() -> None:
     ap.add_argument("--recognizer", default=None, help="optional: OCR each crop and print text")
     ap.add_argument("--out", default="compare_out/annotated.png")
     ap.add_argument("--crops", default="compare_out/viz_crops")
+    ap.add_argument("--src", default="ja",
+                    help="source language — decides the reading order the indices show (ja = right-to-left)")
     ap.add_argument(
         "--opt", action="append", default=[], metavar="KEY=VALUE",
         help="detector option override, coerced via its OPTION_SCHEMA "
@@ -58,7 +61,7 @@ def main() -> None:
         print(f"detector options: {opts}", file=sys.stderr)
 
     img = Image.open(args.image).convert("RGB")
-    regions = assign_reading_order(detector.detect(img, opts), vertical_hint=True)
+    regions = assign_reading_order(detector.detect(img, opts), rtl=(args.src in LANG_RTL))
 
     annotated = img.copy()
     draw = ImageDraw.Draw(annotated)
