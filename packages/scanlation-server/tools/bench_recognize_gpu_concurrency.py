@@ -227,12 +227,13 @@ def _cap_pixels(crops, max_px: int):
 
 
 def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int, rows) -> None:
-    """Sweep max-pixels caps on the same crops, comparing each capped read to the
-    UNCAPPED read (char-level SequenceMatcher ratio) and timing it -- the accuracy-vs-
-    speed knee for choosing a production downscale cap. The uncapped reference is read
-    once (per-crop timed); a cap only re-reads the crops it actually shrinks and reuses
-    the reference for the rest -- so only the one full-res pass is slow. Warmed first so
-    the one-time first-forward JIT doesn't skew it."""
+    """Sweep max-pixels caps on the same crops -- the accuracy-vs-speed knee for
+    choosing a production downscale cap. crops/sec is whole-sample throughput; exact /
+    char-sim are scored over the DOWNSCALED crops only (crops a cap doesn't shrink read
+    identically and would dilute it), vs the uncapped read. The uncapped reference is
+    read once (per-crop timed); a cap only re-reads the crops it actually shrinks and
+    reuses the reference for the rest -- so only the one full-res pass is slow. Warmed
+    first so the one-time first-forward JIT doesn't skew it."""
     import difflib
     from scanlation_sdk.contracts import Region
 
@@ -249,36 +250,41 @@ def bench_pixel_sweep(crops, device: str, out_cap: int, attn, sweep, items: int,
         ref_text.append(rec.recognize(c, region, opts))
         ref_ms.append((time.perf_counter() - t0) * 1000)
 
-    def _row(label, got, ms):
-        rate = len(sample) / (sum(ms) / 1000)
-        exact = sum(g == r for g, r in zip(got, ref_text))
-        sim = sum(difflib.SequenceMatcher(None, r, g).ratio() for r, g in zip(ref_text, got)) / len(ref_text)
-        print(f"{label:>10} {rate:>10.2f} {exact:>6}/{len(ref_text)} {sim:>9.3f}")
-        rows.append(f"| {label} | {rate:.2f} | {exact}/{len(ref_text)} | {sim:.3f} |")
-
     print(f"\n-- max-pixels sweep (accuracy vs speed), device {device}, out-cap {out_cap}, {len(sample)} crops")
-    print(f"{'pixels':>10} {'crops/sec':>10} {'exact':>9} {'char-sim':>9}")
+    print(f"{'pixels':>10} {'crops/sec':>10} {'downscaled':>11} {'exact':>8} {'char-sim':>9}")
     rows += ["### PaddleOCR-VL -- max-pixels sweep (accuracy vs speed)", "",
-             "Each cap downscales crops above it, reads, and compares to the UNCAPPED "
-             "read (char-level SequenceMatcher ratio). The reference is itself OCR, so "
-             "this is change-from-full-res, not ground truth. Knee = highest crops/sec "
-             "whose char-sim is still acceptable.", "",
-             "| pixels | crops/sec | exact match | char-sim |", "|---|---|---|---|"]
-    _row("uncapped", ref_text, ref_ms)
+             "crops/sec is whole-sample throughput. exact / char-sim are over the "
+             "DOWNSCALED crops ONLY -- crops a cap doesn't shrink read identically, so "
+             "scoring them would dilute the metric. char-sim = SequenceMatcher ratio vs "
+             "the uncapped read (itself OCR, so change-from-full-res, not ground truth). "
+             "Knee = highest crops/sec whose char-sim on the affected crops is still ok.", "",
+             "| pixels | crops/sec | downscaled | exact | char-sim |", "|---|---|---|---|---|"]
+    base_rate = len(sample) / (sum(ref_ms) / 1000)
+    print(f"{'uncapped':>10} {base_rate:>10.2f} {'0':>11} {'—':>8} {'—':>9}")
+    rows.append(f"| uncapped | {base_rate:.2f} | 0 | — | — |")
     for px in sweep:
         if not px:
             continue  # uncapped is the reference row above
-        got, ms = [], []
+        got, ms, affected = [], [], []
         for i, c in enumerate(sample):
             if c.width * c.height <= px:            # cap doesn't shrink this crop -> reuse reference
                 got.append(ref_text[i])
                 ms.append(ref_ms[i])
             else:
+                affected.append(i)
                 cc = _cap_pixels([c], px)[0][0]
                 t0 = time.perf_counter()
                 got.append(rec.recognize(cc, region, opts))
                 ms.append((time.perf_counter() - t0) * 1000)
-        _row(str(px), got, ms)
+        rate = len(sample) / (sum(ms) / 1000)
+        if affected:
+            exact = sum(got[i] == ref_text[i] for i in affected)
+            sim = sum(difflib.SequenceMatcher(None, ref_text[i], got[i]).ratio() for i in affected) / len(affected)
+            print(f"{px:>10} {rate:>10.2f} {len(affected):>11} {f'{exact}/{len(affected)}':>8} {sim:>9.3f}")
+            rows.append(f"| {px} | {rate:.2f} | {len(affected)} | {exact}/{len(affected)} | {sim:.3f} |")
+        else:
+            print(f"{px:>10} {rate:>10.2f} {'0':>11} {'—':>8} {'—':>9}")
+            rows.append(f"| {px} | {rate:.2f} | 0 | — | — |")
     rows += [""]
 
 
