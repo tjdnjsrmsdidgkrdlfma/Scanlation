@@ -210,6 +210,22 @@ def bench_decode_profile(crops, device: str, cap: int, attn, n_crops: int, rows)
     rows += [""]
 
 
+def _cap_pixels(crops, max_px: int):
+    """Downscale crops whose area exceeds max_px (aspect preserved) so the dynamic-res
+    processor emits fewer vision tokens -- the workaround for eager O(n^2) attention
+    when flash isn't available. Returns (new_crops, n_resized)."""
+    from PIL import Image
+    out, n = [], 0
+    for c in crops:
+        if max_px and c.width * c.height > max_px:
+            scale = (max_px / (c.width * c.height)) ** 0.5
+            out.append(c.resize((max(1, int(c.width * scale)), max(1, int(c.height * scale))), Image.LANCZOS))
+            n += 1
+        else:
+            out.append(c)
+    return out, n
+
+
 def main() -> int:
     sys.stdout.reconfigure(line_buffering=True)  # live progress under a Docker pipe
 
@@ -228,6 +244,8 @@ def main() -> int:
     ap.add_argument("--profile-decode", action="store_true",
                     help="skip the worker sweep; profile per-step decode time on the biggest crops")
     ap.add_argument("--profile-n", type=int, default=3, help="how many of the biggest crops to profile")
+    ap.add_argument("--max-pixels", type=int, default=0,
+                    help="downscale crops above this pixel area before recognize (0 = off)")
     args = ap.parse_args()
 
     if not args.data:
@@ -238,6 +256,9 @@ def main() -> int:
         sys.exit(f"PaddleOCR-VL concurrency needs a GPU: {reason}")
 
     crops, src = _load_crops(args.data, args.detect)
+    if args.max_pixels:
+        crops, n_capped = _cap_pixels(crops, args.max_pixels)
+        src += f", {n_capped} downscaled to <={args.max_pixels}px"
     worker_counts = [int(x) for x in args.workers.split(",") if x.strip()]
     attn = os.getenv("BENCH_ATTN")
 
