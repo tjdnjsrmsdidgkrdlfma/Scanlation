@@ -206,7 +206,7 @@ for region in regions:
 - **기각 — PaddleOCR-VL 배치.** GPU(ROCm)로 측정 완료(§PaddleOCR-VL GPU 배치): B=2 2.04x가 최대고 절대속도가 manga-ocr CPU의 1/8, B≥8은 후퇴 + correctness 깨짐. ragged/position_ids 우려가 실측으로 확인됐다. 후속(2026-07-08): **AOTriton flash는 3.7x 레버**(당시 "무효" 판정은 오류 — §후속), 2.9s/crop은 그 flash-ON 값이다. 작은 배치의 correctness는 측정 착시라 여전히 미보장.
 - **완료 — registry 안전성을 `gpu_lock`에서 분리.** 커밋 2c7e38e; 자체 lock으로 `gpu_lock`과 무관하게 thread-safe. (§gpu_lock 1번이 요구한 전제.)
 - **CPU recognize를 정말 빠르게 할 거면 배치보다 멀티워커(동시성)가 우선** — 1.8x > 1.27x 실측. 단 `gpu_lock`→semaphore 필요하고, 역시 recognize 비중 확인이 선행. translate-bound면 둘 다 가려진다.
-- **방향 전환 — 처리량은 배치가 아니라 동시성/분산이다.** 세 recognize 경로 다 배치가 신통찮다(manga-ocr 1.27x, PaddleOCR-VL 기각). 레버는 동시성: manga-ocr은 CPU 멀티워커(1.8x), GPU 엔진은 GPU를 나눠 쓴다. 하드웨어 확장(9060 XT + MI50) 시 **GPU별 역할 분리** — 한 GPU는 recognize(PaddleOCR-VL), 다른 GPU는 translate(Gemma) — 로 `gpu_lock` 경합을 물리적으로 없애고, KV 캐시 여유 안에서 GPU당 동시 요청을 키우는 게 다음 설계 후보다(이 문서 범위 밖, 별도 검토).
+- **방향 전환 — 처리량은 배치가 아니다. 단 동시성도 GPU 엔진엔 약하다.** 세 recognize 경로 다 배치가 신통찮다(manga-ocr 1.27x, PaddleOCR-VL 기각). manga-ocr은 CPU 멀티워커가 레버(1.8x)지만 **GPU 멀티워커는 실측 천장 1.31x**다 — ROCm엔 MPS가 없어 커널이 타임슬라이스되고, 벌 수 있는 건 W=1의 GPU 유휴(~24%)뿐이다([recognize-gpu-speed.md](recognize-gpu-speed.md)). **GPU 쪽 진짜 레버는 flash attention(AOTriton, 3.7x)이었다.** 하드웨어 확장(9060 XT + MI50) 시 **GPU별 역할 분리** — 한 GPU는 recognize(PaddleOCR-VL), 다른 GPU는 translate(Gemma) — 는 한 GPU를 나눠 쓰는 게 아니라 물리적 분리라 이 천장과 무관하고, `gpu_lock` 경합을 없애는 다음 설계 후보로 유효하다(별도 검토).
 
 ## 다음 — 실측 항목
 
