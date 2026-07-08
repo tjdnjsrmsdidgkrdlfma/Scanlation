@@ -259,6 +259,20 @@ def bench_paddle(crops, batch_sizes, device: str, items: int, probe_cap: int, ro
     rec._device_override = device
     with _silenced():
         rec.load()
+    # Dev probe: force an attention backend (e.g. BENCH_ATTN=sdpa) to see if the
+    # ROCm flash/mem-efficient SDPA kernels move the per-crop number. Reloads the
+    # already-loaded model with the override so the installed plugin needn't change;
+    # a remote-code model without sdpa support raises ValueError here -> that's the
+    # finding. Leave BENCH_ATTN unset for the plugin's default (eager for this model).
+    attn = os.getenv("BENCH_ATTN")
+    if attn:
+        from transformers import AutoModelForImageTextToText
+        print(f"\n[BENCH_ATTN] reloading model with attn_implementation={attn!r}")
+        with _silenced():
+            rec._model = AutoModelForImageTextToText.from_pretrained(
+                rec._repo(), torch_dtype="auto", device_map=device,
+                local_files_only=True, attn_implementation=attn).eval()
+        rows += [f"- attn_implementation forced to `{attn}` (BENCH_ATTN)", ""]
     region = Region.from_bbox(0, 0, crops[0].width, crops[0].height)  # unused by recognize
     opts = {"max_new_tokens": probe_cap}  # cap both ref + batch the same -> apples to apples
 
