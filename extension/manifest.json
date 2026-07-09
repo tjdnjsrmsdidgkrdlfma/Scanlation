@@ -19,7 +19,7 @@
     "show_matches": ["http://*/*", "https://*/*", "file:///*"]
   },
   "background": {
-    "scripts": ["src/background.js"],
+    "scripts": ["src/constants.js", "src/background.js"],
     "persistent": false
   },
   "permissions": [
@@ -29,7 +29,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content.js"],
+      "js": ["src/constants.js", "src/content.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
       "all_frames": false

@@ -88,7 +88,12 @@
   }
 
   // -------------------------------------------------------------- state ----
-  const cfg = { endpoint: "http://127.0.0.1:4010", showTranslated: true, token: "", minImageDim: 80 };
+  const cfg = {
+    endpoint: globalThis.SCAN.ENDPOINT,
+    showTranslated: globalThis.SCAN.SHOW_TRANSLATED,
+    token: "",
+    minImageDim: globalThis.SCAN.MIN_IMAGE_DIM,
+  };
   let enabled = false;
   let observer = null;
   const processed = new WeakSet();
@@ -292,7 +297,7 @@
     const wrapper = wrap(img);
     const badge = document.createElement("div");
     badge.className = "scanlation-badge scanlation-error";
-    badge.textContent = "번역 실패";
+    badge.textContent = globalThis.SCAN.MSG_FAIL;
     badge.title = msg; // cause (e.g. "server 502: ...") on hover
     wrapper.appendChild(badge);
     // boxes stays empty: the badge is a child of wrapper (removed with it) and

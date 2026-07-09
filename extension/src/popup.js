@@ -107,7 +107,7 @@ function wire() {
 
 async function init() {
   const s = await ext.storage.local.get(["endpoint", "showTranslated", "token"]);
-  $("endpoint").value = s.endpoint || "http://127.0.0.1:4010";
+  $("endpoint").value = s.endpoint || globalThis.SCAN.ENDPOINT;
   $("token").value = s.token || "";
   $("showOriginal").checked = s.showTranslated === false;   // checked = show original
   wire();
