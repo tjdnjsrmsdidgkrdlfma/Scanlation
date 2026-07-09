@@ -912,9 +912,10 @@ async function saveBehavior() {
     const n = parseInt($("min-image-dim").value, 10);
     const c = parseInt($("translate-concurrency").value, 10);
     await postJSON("/set_client_config/", {
+      // NaN guard only (empty field -> a sane default); the server clamps the range.
       min_image_dim: Number.isFinite(n) ? n : 0,
       verbose_log: $("verbose-log").checked,
-      translate_concurrency: Number.isFinite(c) ? Math.max(1, c) : 1,
+      translate_concurrency: Number.isFinite(c) ? c : 1,
       torch_backend: $("torch-backend").value,
       torch_vendor: $("torch-vendor-row").hidden ? "" : $("torch-vendor").value,
       torch_index: $("torch-index").value.trim(),

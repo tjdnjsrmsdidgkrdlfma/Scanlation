@@ -111,8 +111,9 @@ def test_client_config_min_image_dim():
         assert r.status_code == 200 and r.json()["min_image_dim"] == 120
         assert c.get("/").json()["min_image_dim"] == 120
         assert c.get("/get_settings/").json()["selection"]["min_image_dim"] == 120
-        # negative -> 400
-        assert c.post("/set_client_config/", json={"min_image_dim": -5}).status_code == 400
+        # negative -> clamped to 0 (state is the single validation authority, not a 400)
+        r = c.post("/set_client_config/", json={"min_image_dim": -5})
+        assert r.status_code == 200 and r.json()["min_image_dim"] == 0
     finally:
         c.post("/set_client_config/", json={"min_image_dim": 80})  # cleanup
 
@@ -139,8 +140,9 @@ def test_client_config_translate_concurrency():
         r = c.post("/set_client_config/", json={"translate_concurrency": 8})
         assert r.status_code == 200 and r.json()["translate_concurrency"] == 8
         assert c.get("/get_settings/").json()["selection"]["translate_concurrency"] == 8
-        # below 1 -> 400
-        assert c.post("/set_client_config/", json={"translate_concurrency": 0}).status_code == 400
+        # below 1 -> clamped to 1 (state is the single validation authority, not a 400)
+        r = c.post("/set_client_config/", json={"translate_concurrency": 0})
+        assert r.status_code == 200 and r.json()["translate_concurrency"] == 1
     finally:
         c.post("/set_client_config/", json={"translate_concurrency": 1})  # cleanup (back to default)
 

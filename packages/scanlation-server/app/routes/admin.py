@@ -166,11 +166,9 @@ def set_client_config(req: SetClientConfigRequest) -> dict:
     """Persist behavior settings (동작 tab): min_image_dim (image filter shorter-side
     px, delivered to the extension via GET /), verbose_log (DEBUG logging toggle,
     re-applied to the live logger), and translate_concurrency (concurrent-translation
-    limit, swaps translate_sem at runtime)."""
-    if req.min_image_dim is not None and req.min_image_dim < 0:
-        raise HTTPException(status_code=400, detail="min_image_dim must be >= 0")
-    if req.translate_concurrency is not None and req.translate_concurrency < 1:
-        raise HTTPException(status_code=400, detail="translate_concurrency must be >= 1")
+    limit, swaps translate_sem at runtime). Out-of-range values are clamped by
+    state.set_client_config (min_image_dim >= 0, translate_concurrency >= 1), the
+    single validation authority — so the route trusts its input."""
     state.set_client_config(
         min_image_dim=req.min_image_dim, verbose_log=req.verbose_log,
         translate_concurrency=req.translate_concurrency,
