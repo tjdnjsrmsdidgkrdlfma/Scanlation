@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "PaddleOCR-VL manga fine-tune VLM recognizer plugin for the Scanlation server."
 requires-python = ">=3.11"
 dependencies = [
-    "scanlation-sdk",
+    "scanlation-sdk>=0.1.0",
     # PaddleOCR-VL loads via the NATIVE transformers path (AutoModelForImageTextToText,
     # no trust_remote_code); that support landed in transformers 5.x — the repo's own
     # remote code is upstream-broken. So pin >=5.0, not the >=4.45 the other plugins use.

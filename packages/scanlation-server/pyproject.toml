@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Contract-based manga OCR + in-place translation server (core; engines are separate pip packages)."
 requires-python = ">=3.11"
 dependencies = [
-    "scanlation-sdk",
+    "scanlation-sdk>=0.1.0",
     "fastapi",
     "uvicorn[standard]",
     "numpy",

@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "manga-ocr (kha-white) Japanese text recognizer plugin for the Scanlation server."
 requires-python = ">=3.11"
 dependencies = [
-    "scanlation-sdk",
+    "scanlation-sdk>=0.1.0",
     "manga-ocr",
     # manga-ocr-base's tokenizer is a slow-only BertJapaneseTokenizer (MeCab word +
     # character subword, no tokenizer.json). transformers 5.13 dropped the slow

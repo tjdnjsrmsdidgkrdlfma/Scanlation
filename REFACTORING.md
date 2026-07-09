@@ -46,7 +46,7 @@
 **측정 장비가 필요한 것:** B5·B6 — 벤치 크롭 세트 불일치. GPU 호스트에서 재측정해야 `tools/*.md`의 결론을 갱신할 수 있다.
 
 **남은 리팩토링:** 없음 — R1~R9 완료로 네 축(벤치 통합·어휘 정리·대형 파일 분할·하드코딩→`/admin`)의 구조 부채는 소진.
-남은 것은 결정 대기(B3·H3·H6)·측정(B5·B6·H8)·문서(H4·H5·H7)뿐.
+남은 것은 결정 대기(B3·H3·H6)·측정(B5·B6·H8)뿐 — 문서 위생(H4·H5·H7)은 완료.
 
 ---
 
@@ -365,7 +365,7 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
 | ~~**H4**~~ ✅ | R7 분할로 문자열이 [adapters.py:254](packages/scanlation-server/tools/compare/adapters.py#L254)로 이동. `MitOcrAdapter.install_hint`가 `"weights auto-included in tools/vendored/_mit_weights/"`라 했으나 [.gitignore](.gitignore)가 그 디렉터리를 제외한다 — `available()`은 이미 `wpath.exists()`로 부재를 검사한다. install_hint를 "download weights into … (gitignored, not bundled)"로 정정 |
 | ~~**H5**~~ ✅ | [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md) §3.5 의사코드에 폐기 어휘(`opt_box`/`opt_ocr`/`opt_tsl`·`{ocr,tsl,box}`·`vertical_hint`)가 ⚠ 마커 없이 그대로 있었다 — §2.1·§3.4·§4.1이 쓰는 forward-pointing ⚠ 노트를 §3.5에도 붙여 현 시그니처(`opt_detect`/…·`{bounds,source,destination}`·`assign_reading_order(rtl=)`)를 가리킨다. **백로그가 "env 걷어내고 /admin 전용"이라 한 것은 이 문서 자체와 함께 stale이었다** — R5(`ed2f0a7`)가 `SCANLATION_TRANSLATE_CONCURRENCY`를 seed 기본값(floor 1)으로 재도입했다. 상단 노트(10줄)의 "env 걷어내고"와 §3.5의 "기본 4"를 실제 하이브리드(env seed + `/admin` 런타임 권위)로 정정. `CTD` 언급은 상단 divergence 노트(§2·§3·§4 일괄)가 이미 덮으므로 유지 |
 | **H6** | entry-point 이름 케이싱 규칙 부재: `comic-text-and-bubble-detector`, `manga-ocr`(kebab) vs `PaddleOCR-VL-For-Manga`, `Ollama`, `llama.cpp`. 이 이름은 `state.json`에 영속되고 **캐시 키의 일부**([orchestrator.py:65](packages/scanlation-server/app/orchestrator.py#L65))라 변경하면 캐시가 무효화된다 — 동작 변경이므로 별도 결정 |
-| **H7** | 5개 플러그인 pyproject 모두 `scanlation-sdk`를 버전 제약 없이 의존한다. SDK가 git ref로 배포되므로 불일치가 조용히 통과한다 |
+| ~~**H7**~~ ✅ | 플러그인 5개 + `scanlation-server`(모두 SDK 소비자)가 `scanlation-sdk`를 버전 제약 없이 의존했다 — git ref 배포라 낡은 SDK가 조용히 통과했다. 6개 pyproject 전부 `scanlation-sdk>=0.1.0`(현 버전 = 플로어)으로. 너무 낡은 SDK를 설치 시점에 거른다(백로그는 5개라 했으나 server도 같은 노출이라 포함) |
 | ~~**H9**~~ ✅ | `af3de18`. [registry.py](packages/scanlation-server/app/registry.py)의 `_discover`가 `ep.load()` 실패를 `except Exception: pass`로 삼켜 **왜 안 뜨는지 알 길이 없었다** — H1의 유령 entry_point 3종이 조용히 사라지고 있었다. `except`는 여전히 삼키되(깨진 엔진이 discovery를 죽이면 안 됨) role·entry_point 이름을 담은 warning을 남긴다. 뮤테이션으로 검증(bare swallow로 되돌리면 빨개짐) |
 | **H8** | [recognize-gpu-speed.md](packages/scanlation-server/tools/recognize-gpu-speed.md)가 "해상도 캡 150k + pow2 → 1.66x, 채택 방향"이라 적었으나 `scanlation-paddleocr-vl-for-manga`에 `max_pixels`/downscale이 없다. `_downscale_one`과 `GRID = 28`(`gpuconc:213-245`)이 프로덕션에 가야 할 코드인데 벤치에 갇혀 있다. **성능 변경이자 신규 기능이라 이 백로그 밖** — 별도 결정 |
 
@@ -428,7 +428,7 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
    측정값이 바뀌므로 `tools/*.md`의 1.27x vs 1.8x 결론 재검토가 따라온다
 7. **H8** — 해상도 캡을 프로덕션 recognizer로. 성능 변경이자 신규 기능이라 이 백로그 밖
 
-**문서:** H4·H5·H7
+**문서:** ~~H4·H5·H7~~ ✅ 완료 — 「현재 상태」 Tier 4 표 참조.
 
 ---
 
