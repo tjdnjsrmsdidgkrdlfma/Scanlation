@@ -7,7 +7,7 @@
 > ⚠ **이후 구현에서 바뀐 점 (이 문서는 원 설계 기록):** 현재 상태·사용법은 [README.md](README.md), 에이전트 지침은 [CLAUDE.md](CLAUDE.md)를 우선한다. 원 설계 대비 주요 divergence:
 > - **역할 어휘 통일** — 구 `ocr_extension` drop-in 호환(BOX/OCR/TSL)을 **폐기**하고 서버·와이어·확장·admin 전 계층을 `detector`/`recognizer`/`translator`로 통일. 결과 아이템 키도 `{bounds, source, destination}`으로 개명(구 `{ocr,tsl,box}`).
 > - **엔드포인트 정리 (아래 §2.1 표는 원 설계 기록이라 그대로 둔다)** — 아무 클라도 호출하지 않는 구 프로토콜 잔재 `run_tsl`·`get_trans`·`get_active_options`·`get_plugin_data`를 **삭제**(설치 상태·번역 조회는 각각 `/get_settings/`·페이지 파이프라인에 흡수됨), 나머지는 실제 역할/동작에 맞춰 **리네임**: `run_ocrtsl`→`run_pipeline`, `set_models`→`set_engines`, `set_lang`→`set_languages`, `manage_plugins`→`install_plugins`. 용어 규칙도 통일 — **plugin=설치 단위, engine=런타임**.
-> - **설정 = `/admin` 단일 소스** — 엔진·모델·언어·프롬프트를 서버 관리 페이지(`/admin`, `state.json` 영속)에서 지정. `OLLAMA_MODEL`/`LLAMACPP_MODEL` 등 **모델 env 폴백 제거**(미설정 시 에러). 모델은 백엔드 설치 목록 드롭다운으로 선택. **동시 번역 이미지 수**(구 §3.5 `translate_sem` = `SCANLATION_TRANSLATE_CONCURRENCY`)도 env를 걷어내고 동작 탭으로 옮겨, 변경 시 `translate_sem`을 새 Semaphore로 교체해 재시작 없이 반영.
+> - **설정 = `/admin` 단일 소스** — 엔진·모델·언어·프롬프트를 서버 관리 페이지(`/admin`, `state.json` 영속)에서 지정. `OLLAMA_MODEL`/`LLAMACPP_MODEL` 등 **모델 env 폴백 제거**(미설정 시 에러). 모델은 백엔드 설치 목록 드롭다운으로 선택. **동시 번역 이미지 수**(§3.5 `translate_sem` = `SCANLATION_TRANSLATE_CONCURRENCY`)는 env가 초기값(floor 1)을 seed하되 동작 탭이 런타임 권위 — 변경 시 `translate_sem`을 새 Semaphore로 교체해 재시작 없이 반영하고 `state.json`에 영속.
 > - **테스트 = 자체 핸드롤 러너** — pytest 미사용. `python -m tests`(빠른 스위트) / `python -m tests.test_comic_text_and_bubble_detector`(개별 스모크).
 > - **CLI** — `tools/visualize.py`(검출 육안 확인) + `tools/run_image.py`(헤드리스 로그 진단 — 실행 중 서버 `/run_pipeline/`에 POST, `force`로 캐시 무시). run_image는 초기에 in-process 러너로 삭제했다가, 확장 없이 로그를 보기 위한 서버 클라이언트로 재도입.
 > - **검출기 교체: comic-text-detector(ONNX) → RT-DETR** — 원 설계의 첫 검출기 `ctd`(comic-text-detector, onnxruntime seg-mask, 회전 quad)를 **제거**하고 `comic-text-and-bubble-detector`(RT-DETRv2 객체 검출기, HF `ogkalu/comic-text-and-bubble-detector`, 패키지 `scanlation-comic-text-and-bubble-detector`, transformers+torch, torch가 CUDA/ROCm이면 **GPU**·아니면 CPU)로 교체·**기본 검출기 지정**. 영역을 `bubble`/`text_bubble`/`text_free`로 분류해 text 두 클래스만 남기고(말풍선 컨테이너 버림) NMS-free 출력을 IoU+IoS로 중복제거. 옵션 float 3개 `conf`(0.6)/`nms_iou`(0.6)/`contain_thresh`(0.85). 가중치는 `install()`이 `huggingface_hub.snapshot_download`로 `models/comic-text-and-bubble-detector/`에 받고, env override는 `SCANLATION_COMIC_TEXT_AND_BUBBLE_DETECTOR_MODEL`(**디렉터리** 경로). **트레이드오프:** RT-DETR은 **축정렬** 박스만 내므로 기울어진/세로 텍스트를 위한 deskew 이점(회전 quad)은 지금 발휘되지 않는다(계약은 회전 quad를 여전히 지원 — 회전 검출기로 교체하면 되살아남). 아래 §2·§3·§4의 comic-text-detector/ONNX 관련 서술은 이 교체 이전의 원 설계 기록이다.
@@ -197,13 +197,18 @@ for r in regions:
     tsl = translator.translate(text, src, dst, opt_tsl)
     out.append({"ocr": text, "tsl": tsl, "box": list(r.bbox)})
 ```
+> ⚠ **이후 변경됨 (위 의사코드는 원 설계 기록):** [pipeline.py](packages/scanlation-server/app/pipeline.py)는
+> 옵션을 `opt_detect`/`opt_recognize`/`opt_translate`로, 결과 아이템 키를 `{bounds, source, destination}`으로 쓴다
+> (구 `opt_box`/`opt_ocr`/`opt_tsl`, `{ocr, tsl, box}`). 읽기 순서는 `assign_reading_order(regions, rtl=(src in LANG_RTL))` —
+> 죽어 있던 `vertical_hint`를 언어의 수평 방향(`LANG_RTL` 표)으로 배선했다(진짜 세로쓰기는 `Region.vertical`이 별도로 든다).
+
 **deskew(`geometry.deskew_crop`) — GPLv3 코드 복사 금지, 표준 OpenCV 레시피로 독립 재구현:**
 1. `region.polygon`에서 `cv2.minAreaRect`로 최소회전사각 → 목표 W,H.
 2. `M = cv2.getPerspectiveTransform(src_quad, dst_rect)`; `crop = cv2.warpPerspective(img, M, (W,H))`.
 3. 방향 복원(2.3/0.7 규칙): 세로/가로 판단(aspect + 검출기 힌트). **일본어 세로글자는 세로 유지**(manga-ocr이 세로 native). warp가 텍스트 자연방향 대비 누웠으면 `cv2.rotate`/transpose로 "사람이 읽는 방향"으로.
 4. `PIL.Image.fromarray`. 엣지: 영(0)면적 quad 스킵, 초소형 crop은 최소크기 패딩, grayscale→RGB.
 
-**동시성:** 전역 `asyncio.Lock`("gpu_lock")으로 detect+recognize 보호(CTD ONNX + manga-ocr torch가 GPU 경합). **번역(ollama)은 락 밖**에서 실행 → 한 이미지의 번역이 다음 이미지의 검출·인식과 겹침. `translate_sem`(=`SCANLATION_TRANSLATE_CONCURRENCY`, 기본 4)으로 동시 번역 이미지 수 제한. 핸들러는 `async def`, CPU/GPU 작업은 `run_in_threadpool`(이벤트 루프 비차단). `uvicorn --workers 1`(VRAM 모델 1벌). **번역은 이미지 단위 전체 배치** — 한 이미지의 말풍선 전부를 한 LLM 호출로(백엔드 네이티브 구조화 출력: 인덱스 키 JSON 스키마 `t0..t{n-1}`로 개수 강제; 실패 시 말풍선 단위 순차 폴백). 말풍선 상호 문맥으로 번역 일관성↑, 호스트 ollama `OLLAMA_NUM_PARALLEL`이 이미지 간 생성을 병렬화. (이전: v1은 말풍선 순차 루프 + 번역까지 락 안.)
+**동시성:** 전역 `asyncio.Lock`("gpu_lock")으로 detect+recognize 보호(CTD ONNX + manga-ocr torch가 GPU 경합). **번역(ollama)은 락 밖**에서 실행 → 한 이미지의 번역이 다음 이미지의 검출·인식과 겹침. `translate_sem`(env `SCANLATION_TRANSLATE_CONCURRENCY`가 초기값 seed, floor 1 기본; `/admin` 동작 탭이 런타임 권위)으로 동시 번역 이미지 수 제한. 핸들러는 `async def`, CPU/GPU 작업은 `run_in_threadpool`(이벤트 루프 비차단). `uvicorn --workers 1`(VRAM 모델 1벌). **번역은 이미지 단위 전체 배치** — 한 이미지의 말풍선 전부를 한 LLM 호출로(백엔드 네이티브 구조화 출력: 인덱스 키 JSON 스키마 `t0..t{n-1}`로 개수 강제; 실패 시 말풍선 단위 순차 폴백). 말풍선 상호 문맥으로 번역 일관성↑, 호스트 ollama `OLLAMA_NUM_PARALLEL`이 이미지 간 생성을 병렬화. (이전: v1은 말풍선 순차 루프 + 번역까지 락 안.)
 
 ### 3.6 캐시 + 수동 TM (`cache.py`)
 단일 sqlite(`data/scanlation.sqlite`, WAL + 스레드락):
