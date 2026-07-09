@@ -35,6 +35,13 @@ COMMON_LLM_OPTIONS: dict = {
 }
 
 
+def http_timeout() -> float:
+    """HTTP client timeout (seconds) for LLM translators — SCANLATION_HTTP_TIMEOUT
+    (default 10.0). Read from env directly: the SDK is plugin-facing and does not
+    import the server's config."""
+    return float(os.getenv("SCANLATION_HTTP_TIMEOUT", "10.0"))
+
+
 class HttpTranslatorBase(EngineBase):
     # --- subclass config ---
     ENDPOINT_ENV: str = ""          # env var holding the backend base URL
@@ -50,11 +57,11 @@ class HttpTranslatorBase(EngineBase):
             return
         import httpx
 
-        # Short timeout: think-off translations return in ~1s, so if a request
-        # hangs (backend stall) fail over to the per-text fallback fast instead of
-        # sitting for minutes. Keep the model warm (OLLAMA_KEEP_ALIVE=-1) so a cold
-        # 14GB reload can't eat this budget.
-        self._client = httpx.Client(timeout=10.0)
+        # Short timeout (default 10s, SCANLATION_HTTP_TIMEOUT): think-off translations
+        # return in ~1s, so if a request hangs (backend stall) fail over to the per-text
+        # fallback fast instead of sitting for minutes. Keep the model warm
+        # (OLLAMA_KEEP_ALIVE=-1) so a cold model reload can't eat this budget.
+        self._client = httpx.Client(timeout=http_timeout())
         self._log.info("%s translator ready (endpoint=%s)", self.name, self.endpoint)
 
     def unload(self) -> None:
