@@ -37,3 +37,69 @@ def run_modules(modules) -> int:
     for mod in modules:
         rc |= run(mod.TESTS, mod.__name__)
     return rc
+
+
+# --- shared engine test bodies (the parts every plugin's suite copied) ---
+
+def http_translator_contract(cls, success_payload: dict) -> list:
+    """The two backend-agnostic HttpTranslator tests, as a list of test callables
+    to splice into a plugin suite's ``TESTS``.
+
+    ``cls`` is the translator class; ``success_payload`` is what a faked ``_post``
+    returns for a successful call — its extracted text must be ``"x"`` (ollama:
+    ``{"response": "x"}``, llama.cpp: ``{"choices": [{"message": {"content": "x"}}]}``).
+    Both fake ``_post`` (the SDK seam), so only the payload shape differs. Backend-
+    specific request/batch assertions stay in each suite."""
+
+    def test_missing_model_raises():
+        tr = cls()
+        tr._post = lambda path, body: success_payload  # must never be reached
+        raised = False
+        try:
+            tr.translate("これは十分に長い文章です", "ja", "ko", {})  # no model in options
+        except ValueError:
+            raised = True
+        assert raised, "translate must raise when no model is selected"
+
+    def test_blank_skips_but_short_text_translates():
+        tr = cls()
+        calls = {"n": 0}
+
+        def fake(path, body):
+            calls["n"] += 1
+            return success_payload
+
+        tr._post = fake
+        assert tr.translate("  ", "ja", "ko", {}) == ""              # blank -> no model call
+        assert calls["n"] == 0
+        assert tr.translate("あ", "ja", "ko", {"model": "m"}) == "x"  # 1-char now goes to the model
+        assert calls["n"] == 1
+
+    return [test_missing_model_raises, test_blank_skips_but_short_text_translates]
+
+
+def recognizer_smoke(cls, spec_module: str, missing_pkg_skip: str, missing_weights_skip: str):
+    """A recognizer's weights-gated smoke, as a single test callable.
+
+    Skips (returns the given ``SKIP:`` string) when ``spec_module`` isn't importable
+    or the engine's weights aren't installed; otherwise loads the engine and asserts
+    ``recognize`` returns a str for an upright white crop. ``cls`` is the recognizer
+    class. Detectors have a different call/assert shape and keep their own smoke."""
+
+    def test_recognize_returns_str():
+        import importlib.util
+
+        if importlib.util.find_spec(spec_module) is None:
+            return missing_pkg_skip
+        from PIL import Image
+
+        from scanlation_sdk.contracts import Region
+
+        rec = cls()
+        if not rec.is_installed():
+            return missing_weights_skip
+        rec.load()
+        out = rec.recognize(Image.new("RGB", (160, 64), (255, 255, 255)), Region.from_bbox(0, 0, 160, 64), {})
+        assert isinstance(out, str)
+
+    return test_recognize_returns_str

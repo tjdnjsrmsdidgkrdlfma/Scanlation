@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 from scanlation_ollama.plugin import OllamaTranslator
+from scanlation_sdk.testing import http_translator_contract
 
 
 def _translator() -> OllamaTranslator:
@@ -51,32 +52,6 @@ def test_options_override():
     assert body["think"] is True
     assert body["options"]["num_ctx"] == 1024
     assert body["options"]["temperature"] == 0.7
-
-
-def test_blank_skips_but_short_text_translates():
-    tr = OllamaTranslator()
-    calls = {"n": 0}
-
-    def fake(path, body):
-        calls["n"] += 1
-        return {"response": "x"}
-
-    tr._post = fake
-    assert tr.translate("  ", "ja", "ko", {}) == ""              # blank -> no model call
-    assert calls["n"] == 0
-    assert tr.translate("あ", "ja", "ko", {"model": "m"}) == "x"  # 1-char now goes to the model
-    assert calls["n"] == 1
-
-
-def test_missing_model_raises():
-    tr = OllamaTranslator()
-    tr._post = lambda path, body: {"response": "x"}  # must never be reached
-    raised = False
-    try:
-        tr.translate("これは十分に長い文章です", "ja", "ko", {})  # no model in options
-    except ValueError:
-        raised = True
-    assert raised, "translate must raise when no model is selected"
 
 
 def test_batch_builds_format_request_and_aligns():
@@ -129,8 +104,7 @@ def test_batch_falls_back_to_per_text_on_bad_json():
 TESTS = [
     test_builds_request_from_tuned_config,
     test_options_override,
-    test_blank_skips_but_short_text_translates,
-    test_missing_model_raises,
+    *http_translator_contract(OllamaTranslator, {"response": "x"}),
     test_batch_builds_format_request_and_aligns,
     test_batch_passes_through_blanks,
     test_batch_falls_back_to_per_text_on_bad_json,

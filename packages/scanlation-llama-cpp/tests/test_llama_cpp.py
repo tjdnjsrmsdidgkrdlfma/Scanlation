@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from scanlation_llama_cpp.plugin import LlamaCppTranslator
+from scanlation_sdk.testing import http_translator_contract
 
 
 def _translator() -> LlamaCppTranslator:
@@ -46,32 +47,6 @@ def test_keep_think_when_disabled():
     assert "<think>" in out
 
 
-def test_missing_model_raises():
-    tr = LlamaCppTranslator()
-    tr._post = lambda path, body: {"choices": [{"message": {"content": "x"}}]}  # never reached
-    raised = False
-    try:
-        tr.translate("これは十分に長い文章です", "ja", "ko", {})  # no model in options
-    except ValueError:
-        raised = True
-    assert raised, "translate must raise when no model is selected"
-
-
-def test_blank_skips_but_short_text_translates():
-    tr = LlamaCppTranslator()
-    calls = {"n": 0}
-
-    def fake(path, body):
-        calls["n"] += 1
-        return {"choices": [{"message": {"content": "x"}}]}
-
-    tr._post = fake
-    assert tr.translate("  ", "ja", "ko", {}) == ""              # blank -> no model call
-    assert calls["n"] == 0
-    assert tr.translate("あ", "ja", "ko", {"model": "m"}) == "x"  # 1-char now goes to the model
-    assert calls["n"] == 1
-
-
 def test_batch_builds_response_format_and_aligns():
     tr = LlamaCppTranslator()
     captured: dict = {}
@@ -106,8 +81,7 @@ def test_batch_falls_back_on_wrong_length():
 TESTS = [
     test_builds_openai_chat_request,
     test_keep_think_when_disabled,
-    test_missing_model_raises,
-    test_blank_skips_but_short_text_translates,
+    *http_translator_contract(LlamaCppTranslator, {"choices": [{"message": {"content": "x"}}]}),
     test_batch_builds_response_format_and_aligns,
     test_batch_falls_back_on_wrong_length,
 ]

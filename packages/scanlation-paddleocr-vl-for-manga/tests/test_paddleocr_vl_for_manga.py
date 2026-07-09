@@ -2,29 +2,23 @@
 weights are present. Run on its own:
 
     python -m tests   (from packages/scanlation-paddleocr-vl-for-manga/)
+
+The smoke body is shared (scanlation_sdk.testing.recognizer_smoke) — only the
+engine class, the availability probe, and the two SKIP strings differ.
 """
 from __future__ import annotations
 
-import importlib.util
+from scanlation_paddleocr_vl_for_manga.plugin import PaddleOcrVLForMangaRecognizer
+from scanlation_sdk.testing import recognizer_smoke
 
-from PIL import Image
-
-
-def test_paddleocr_vl_for_manga_recognize_returns_str():
-    if importlib.util.find_spec("transformers") is None:
-        return "SKIP: transformers not installed"
-    from scanlation_paddleocr_vl_for_manga.plugin import PaddleOcrVLForMangaRecognizer
-    from scanlation_sdk.contracts import Region
-
-    rec = PaddleOcrVLForMangaRecognizer()
-    if not rec.is_installed():
-        return "SKIP: PaddleOCR-VL weights not downloaded"
-    rec.load()
-    out = rec.recognize(Image.new("RGB", (160, 64), (255, 255, 255)), Region.from_bbox(0, 0, 160, 64), {})
-    assert isinstance(out, str)
-
-
-TESTS = [test_paddleocr_vl_for_manga_recognize_returns_str]
+TESTS = [
+    recognizer_smoke(
+        PaddleOcrVLForMangaRecognizer,
+        "transformers",
+        "SKIP: transformers not installed",
+        "SKIP: PaddleOCR-VL weights not downloaded",
+    ),
+]
 
 if __name__ == "__main__":
     import sys
