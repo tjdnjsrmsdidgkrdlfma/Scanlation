@@ -12,11 +12,14 @@ read without instantiating, so the handshake/options routes stay light.
 """
 from __future__ import annotations
 
+import logging
 import threading
 from importlib.metadata import entry_points
 from typing import Any
 
 from .plugins_path import ensure_on_path
+
+logger = logging.getLogger("scanlation.registry")
 
 ROLES: dict[str, str] = {
     "detector": "scanlation.detectors",
@@ -47,8 +50,11 @@ class Registry:
             for ep in eps:
                 try:
                     self._classes[role][ep.name] = ep.load()
-                except Exception:  # noqa: BLE001 - a broken/absent engine must not kill discovery
-                    pass
+                except Exception as exc:  # noqa: BLE001 - a broken/absent engine must not kill discovery
+                    # ...but leave a trace. A silently-swallowed load failure hides
+                    # a ghost entry_point (stale install metadata) that then splits
+                    # an engine's name across registry and catalog with no symptom.
+                    logger.warning("skipping %s entry_point %r: failed to load (%r)", role, ep.name, exc)
 
     def rediscover(self) -> None:
         """Re-scan entry_points after a package is pip-installed at runtime (the

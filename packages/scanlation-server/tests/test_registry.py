@@ -10,12 +10,14 @@ enumerate engines never see it.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 from scanlation_sdk.contracts import EngineBase
 
+import app.registry as registry_mod
 from app.registry import registry
 
 from tests.helpers import run
@@ -95,10 +97,50 @@ def test_evict_then_reload():
         _cleanup_probe()
 
 
+class _BrokenEntryPoint:
+    """A discovery entry_point whose load() fails — stands in for a ghost/stale
+    install-metadata entry that importlib.metadata still enumerates (H1)."""
+    name = "__broken_probe__"
+
+    def load(self):
+        raise ImportError("deliberate probe failure")
+
+
+def test_discover_logs_failed_load():
+    """A failing ep.load() is logged, not silently swallowed — otherwise a ghost
+    entry_point vanishes with no trace and splits an engine's name across registry
+    and catalog (H9). Reverting the fix (bare `except: pass`) turns this red."""
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append  # type: ignore[method-assign]
+    logging.getLogger("scanlation.registry").addHandler(handler)
+
+    real_entry_points = registry_mod.entry_points
+
+    def fake_entry_points(*args, **kwargs):
+        eps = list(real_entry_points(*args, **kwargs))
+        if kwargs.get("group") == "scanlation.detectors":
+            eps.append(_BrokenEntryPoint())  # inject the ghost into detectors only
+        return eps
+
+    registry_mod.entry_points = fake_entry_points
+    try:
+        registry.rediscover()  # re-scan with the broken entry_point present
+        assert any("__broken_probe__" in r.getMessage() for r in records), \
+            "failed ep.load() was not logged"
+        assert not registry.has("detector", "__broken_probe__"), \
+            "a failed load must not register a class"
+    finally:
+        registry_mod.entry_points = real_entry_points
+        logging.getLogger("scanlation.registry").removeHandler(handler)
+        registry.rediscover()  # rebuild a clean class map without the probe
+
+
 TESTS = [
     test_concurrent_get_loads_once,
     test_cache_hit_does_not_reload,
     test_evict_then_reload,
+    test_discover_logs_failed_load,
 ]
 
 if __name__ == "__main__":
