@@ -24,7 +24,7 @@ from typing import Any
 from PIL import Image
 
 from scanlation_sdk.contracts import Region
-from scanlation_sdk.local_engine import LocalModelEngineBase
+from scanlation_sdk.local_engine import LocalModelEngineBase, install_hint, to_rgb
 
 logger = logging.getLogger("scanlation.PaddleOCR-VL-For-Manga")
 
@@ -43,10 +43,7 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
 
     PROC_REPO = "PaddlePaddle/PaddleOCR-VL"  # the fine-tune's own processor is a 4.x format -> load base's
     PROMPT = "OCR:"
-    INSTALL_HINT = (
-        'Install first: POST /install_plugins/ {"PaddleOCR-VL-For-Manga": true}, or '
-        "`python tools/install.py PaddleOCR-VL-For-Manga`."
-    )
+    INSTALL_HINT = install_hint("PaddleOCR-VL-For-Manga")
 
     def __init__(self) -> None:
         self._model = None
@@ -103,8 +100,7 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
         if self._model is None:
             self.load()
         options = self.resolve_options(options)
-        if crop.mode != "RGB":
-            crop = crop.convert("RGB")
+        crop = to_rgb(crop)
         messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": self.PROMPT}]}]
         text = self._proc.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
         inputs = self._proc(text=[text], images=[crop], return_tensors="pt").to(self._model.device)

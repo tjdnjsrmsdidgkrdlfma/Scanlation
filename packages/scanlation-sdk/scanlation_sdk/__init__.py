@@ -13,13 +13,15 @@ from scanlation_sdk.contracts import (
 )
 from scanlation_sdk.device import pick_device, release_cuda_cache
 from scanlation_sdk.http_translator import COMMON_LLM_OPTIONS, HttpTranslatorBase
-from scanlation_sdk.local_engine import LocalModelEngineBase
+from scanlation_sdk.local_engine import LocalModelEngineBase, install_hint, to_rgb
 
 __all__ = [
     "EngineBase",
     "HttpTranslatorBase",
     "COMMON_LLM_OPTIONS",
     "LocalModelEngineBase",
+    "to_rgb",
+    "install_hint",
     "Region",
     "Detector",
     "Recognizer",

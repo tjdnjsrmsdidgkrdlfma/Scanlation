@@ -13,7 +13,7 @@ from typing import Any
 from PIL import Image
 
 from scanlation_sdk.contracts import Region
-from scanlation_sdk.local_engine import LocalModelEngineBase
+from scanlation_sdk.local_engine import LocalModelEngineBase, install_hint, to_rgb
 
 logger = logging.getLogger("scanlation.manga-ocr")
 
@@ -27,10 +27,7 @@ class MangaOcrRecognizer(LocalModelEngineBase):
     SUPPORTED_SRC = ["ja"]
 
     MODEL_REPO = "kha-white/manga-ocr-base"
-    INSTALL_HINT = (
-        'Install first: POST /install_plugins/ {"manga-ocr": true}, or '
-        "`python tools/install.py manga-ocr`."
-    )
+    INSTALL_HINT = install_hint("manga-ocr")
 
     def __init__(self) -> None:
         self._m = None
@@ -70,6 +67,4 @@ class MangaOcrRecognizer(LocalModelEngineBase):
     def recognize(self, crop: Image.Image, region: Region, options: dict[str, Any]) -> str:
         if self._m is None:
             self.load()
-        if crop.mode != "RGB":
-            crop = crop.convert("RGB")
-        return self._m(crop)
+        return self._m(to_rgb(crop))

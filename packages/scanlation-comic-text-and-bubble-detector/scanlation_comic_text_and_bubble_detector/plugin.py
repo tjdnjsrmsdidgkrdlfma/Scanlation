@@ -25,7 +25,7 @@ from PIL import Image
 
 from scanlation_sdk.context import context
 from scanlation_sdk.contracts import Region
-from scanlation_sdk.local_engine import LocalModelEngineBase
+from scanlation_sdk.local_engine import LocalModelEngineBase, install_hint, to_rgb
 from . import postprocess
 
 logger = logging.getLogger("scanlation.comic-text-and-bubble-detector")
@@ -48,9 +48,9 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
     REPO = "ogkalu/comic-text-and-bubble-detector"
     KEEP_LABELS = {"text_bubble", "text_free"}  # drop the whole-"bubble" container box
     WEIGHT_PATTERNS = ["config.json", "preprocessor_config.json", "model.safetensors"]
-    INSTALL_HINT = (
-        'Install first: POST /install_plugins/ {"comic-text-and-bubble-detector": true}, or '
-        "`python tools/install.py comic-text-and-bubble-detector`, or set SCANLATION_COMIC_TEXT_AND_BUBBLE_DETECTOR_MODEL=/path/to/model_dir."
+    INSTALL_HINT = install_hint(
+        "comic-text-and-bubble-detector",
+        extra=", or set SCANLATION_COMIC_TEXT_AND_BUBBLE_DETECTOR_MODEL=/path/to/model_dir.",
     )
 
     def __init__(self) -> None:
@@ -108,7 +108,7 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
         nms_iou = options["nms_iou"]
         contain_thresh = options["contain_thresh"]
 
-        img = image.convert("RGB")
+        img = to_rgb(image)
         inputs = self._proc(images=img, return_tensors="pt").to(self._device)
         with torch.no_grad():
             out = self._model(**inputs)

@@ -12,6 +12,7 @@ server-internal (deskew, future inpaint).
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
 
@@ -72,6 +73,11 @@ class EngineBase:
     OPTION_SCHEMA: dict = {}
     SUPPORTED_SRC: list[str] = []           # iso1 codes, [] = any
     SUPPORTED_DST: list[str] = []
+
+    @property
+    def _log(self) -> logging.Logger:
+        """Per-engine logger, namespaced scanlation.<name> — shared by every plugin."""
+        return logging.getLogger(f"scanlation.{self.name}")
 
     def is_installed(self) -> bool:
         """Are this engine's local resources (weights) present? Engines with no

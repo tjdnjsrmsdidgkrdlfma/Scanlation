@@ -14,7 +14,6 @@ numpy + pillow only (the server core imports this module transitively).
 from __future__ import annotations
 
 import json
-import logging
 import os
 from typing import Any
 
@@ -45,10 +44,6 @@ class HttpTranslatorBase(EngineBase):
         # rstrip so a trailing slash in the env var can't produce a `//path` URL.
         self.endpoint = os.getenv(self.ENDPOINT_ENV, self.DEFAULT_ENDPOINT).rstrip("/")
         self._client = None
-
-    @property
-    def _log(self) -> logging.Logger:
-        return logging.getLogger(f"scanlation.{self.name}")
 
     def load(self) -> None:
         if self._client is not None:

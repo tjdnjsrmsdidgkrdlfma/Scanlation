@@ -10,10 +10,26 @@ Plugin-facing only: the server core must not import this module (see device.py).
 """
 from __future__ import annotations
 
-import logging
+from PIL import Image
 
 from scanlation_sdk.contracts import EngineBase
 from scanlation_sdk.device import device_label, pick_device, release_cuda_cache
+
+
+def to_rgb(img: Image.Image) -> Image.Image:
+    """An RGB view of ``img`` — ``img`` itself if already RGB, else a converted
+    copy. Local recognizers/detectors feed models that expect 3 channels."""
+    return img if img.mode == "RGB" else img.convert("RGB")
+
+
+def install_hint(name: str, extra: str = "") -> str:
+    """The '<engine> weights not installed' tail: the two install routes for
+    ``name``. Ends in '.'; pass ``extra`` — a clause carrying its own separator
+    and terminator, e.g. a model-path env override — to replace that period."""
+    return (
+        f'Install first: POST /install_plugins/ {{"{name}": true}}, or '
+        f"`python tools/install.py {name}`{extra or '.'}"
+    )
 
 
 class LocalModelEngineBase(EngineBase):
@@ -59,8 +75,7 @@ class LocalModelEngineBase(EngineBase):
         self._load(device)
         self._loaded = True
         # Uniform load line for every local engine (per-engine logger namespace kept).
-        logging.getLogger(f"scanlation.{self.name}").info(
-            "%s loaded on %s", self.display_name, device_label(device))
+        self._log.info("%s loaded on %s", self.display_name, device_label(device))
 
     def unload(self) -> None:
         self._unload()
