@@ -26,6 +26,15 @@ from scanlation_sdk.prompt import (
     build_prompt,
 )
 
+# Sampling options every LLM translator exposes identically. Spread into each
+# plugin's OPTION_SCHEMA; `model` stays local (its description differs per
+# backend) and so do backend-specific keys (num_ctx/think/strip_think/...).
+COMMON_LLM_OPTIONS: dict = {
+    "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
+    "seed": {"type": int, "default": 42, "description": "RNG seed."},
+    "top_p": {"type": float, "default": 1.0, "description": "Nucleus sampling p."},
+}
+
 
 class HttpTranslatorBase(EngineBase):
     # --- subclass config ---

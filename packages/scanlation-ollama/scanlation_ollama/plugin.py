@@ -20,7 +20,7 @@ The HTTP call is isolated in _generate() so request-building is unit-testable.
 """
 from __future__ import annotations
 
-from scanlation_sdk.http_translator import HttpTranslatorBase
+from scanlation_sdk.http_translator import COMMON_LLM_OPTIONS, HttpTranslatorBase
 
 
 class OllamaTranslator(HttpTranslatorBase):
@@ -34,9 +34,7 @@ class OllamaTranslator(HttpTranslatorBase):
         "model": {"type": str, "default": "", "description": "ollama model tag (e.g. gemma4:31b). Required — pick it in /admin."},
         "num_ctx": {"type": int, "default": 2048, "description": "KV-cache context window (holds a whole image's batch + its translations)."},
         "num_gpu": {"type": int, "default": 31, "description": "Layers to offload to GPU."},
-        "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
-        "seed": {"type": int, "default": 42, "description": "RNG seed."},
-        "top_p": {"type": float, "default": 1.0, "description": "Nucleus sampling p."},
+        **COMMON_LLM_OPTIONS,  # temperature, seed, top_p
         "repeat_penalty": {"type": float, "default": 1.1, "description": "Flat repetition penalty (ollama default 1.1 = neutral). Divides a repeated token's score once — often can't break a confident SFX loop. Prefer frequency_penalty for that."},
         "frequency_penalty": {"type": float, "default": 0.0, "description": "Escalating repetition penalty: subtracts count×value from a token's score, so it grows with each repeat and bounds runaway SFX/onomatopoeia loops (which flat repeat_penalty can't). Try ~1.0-2.0; 0 = off."},
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking' (slower; off for speed)."},

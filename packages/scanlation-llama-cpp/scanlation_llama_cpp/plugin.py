@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 
-from scanlation_sdk.http_translator import HttpTranslatorBase
+from scanlation_sdk.http_translator import COMMON_LLM_OPTIONS, HttpTranslatorBase
 
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -30,9 +30,7 @@ class LlamaCppTranslator(HttpTranslatorBase):
     DEFAULT_ENDPOINT = "http://127.0.0.1:8080"
     OPTION_SCHEMA = {
         "model": {"type": str, "default": "", "description": "Model id (from the server's /v1/models). Required — pick it in /admin. (llama-server ignores it; other OpenAI servers require it.)"},
-        "temperature": {"type": float, "default": 0.0, "description": "Sampling temperature (0 = deterministic)."},
-        "seed": {"type": int, "default": 42, "description": "RNG seed."},
-        "top_p": {"type": float, "default": 1.0, "description": "Nucleus sampling p."},
+        **COMMON_LLM_OPTIONS,  # temperature, seed, top_p
         "strip_think": {"type": bool, "default": True, "description": "Remove <think>...</think> from reasoning models."},
     }
 
