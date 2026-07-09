@@ -34,10 +34,6 @@ class LlamaCppTranslator(HttpTranslatorBase):
         "strip_think": {"type": bool, "default": True, "description": "Remove <think>...</think> from reasoning models."},
     }
 
-    def _chat(self, body: dict) -> dict:
-        """POST /v1/chat/completions. Kept as the unit-test seam (tests fake this)."""
-        return self._post("/v1/chat/completions", body)
-
     def _models_url(self) -> str:
         return f"{self.endpoint}/v1/models"
 
@@ -69,7 +65,7 @@ class LlamaCppTranslator(HttpTranslatorBase):
         return out.strip()
 
     def _translate(self, model: str, system: str, prompt: str, options: dict) -> str:
-        return self._extract(self._chat(self._body(model, system, prompt, options)), options)
+        return self._extract(self._post("/v1/chat/completions", self._body(model, system, prompt, options)), options)
 
     def _translate_batch_call(self, model: str, system: str, prompt: str, schema: dict, options: dict) -> str:
         """Batch: same body plus response_format=json_schema to force the exact
@@ -79,4 +75,4 @@ class LlamaCppTranslator(HttpTranslatorBase):
             "type": "json_schema",
             "json_schema": {"name": "translations", "schema": schema, "strict": True},
         }
-        return self._extract(self._chat(body), options)
+        return self._extract(self._post("/v1/chat/completions", body), options)

@@ -16,7 +16,8 @@ shape are the user's working setup. Key tunings:
 ollama runs as a separate service (env OLLAMA_ENDPOINT, default
 http://127.0.0.1:11434/api). The client lifecycle + guardrails live in
 HttpTranslatorBase; only the /generate body shape + response field are here.
-The HTTP call is isolated in _generate() so request-building is unit-testable.
+The HTTP call goes through HttpTranslatorBase._post (the unit-test seam), so
+request-building stays testable without a live server.
 """
 from __future__ import annotations
 
@@ -39,10 +40,6 @@ class OllamaTranslator(HttpTranslatorBase):
         "frequency_penalty": {"type": float, "default": 0.0, "description": "Escalating repetition penalty: subtracts count×value from a token's score, so it grows with each repeat and bounds runaway SFX/onomatopoeia loops (which flat repeat_penalty can't). Try ~1.0-2.0; 0 = off."},
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking' (slower; off for speed)."},
     }
-
-    def _generate(self, body: dict) -> dict:
-        """POST /generate. Kept as the unit-test seam (tests fake this)."""
-        return self._post("/generate", body)
 
     def _models_url(self) -> str:
         return f"{self.endpoint}/tags"
@@ -74,7 +71,7 @@ class OllamaTranslator(HttpTranslatorBase):
             "think": options["think"],
             "options": self._sampling(options),
         }
-        data = self._generate(body)
+        data = self._post("/generate", body)
         return (data.get("response") or "").strip()
 
     def _translate_batch_call(self, model: str, system: str, prompt: str, schema: dict, options: dict) -> str:
@@ -89,4 +86,4 @@ class OllamaTranslator(HttpTranslatorBase):
             "format": schema,
             "options": self._sampling(options),
         }
-        return (self._generate(body).get("response") or "").strip()
+        return (self._post("/generate", body).get("response") or "").strip()

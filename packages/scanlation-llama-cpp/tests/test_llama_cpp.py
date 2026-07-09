@@ -7,16 +7,16 @@ from scanlation_llama_cpp.plugin import LlamaCppTranslator
 
 
 def _translator() -> LlamaCppTranslator:
-    """A LlamaCppTranslator whose _chat is faked; tr._captured holds the body."""
+    """A LlamaCppTranslator whose _post is faked; tr._captured holds the body."""
     tr = LlamaCppTranslator()
     captured: dict = {}
 
-    def fake_chat(body):
+    def fake_post(path, body):
         captured.clear()
         captured.update(body)
         return {"choices": [{"message": {"content": "  <think>음...</think>안녕하세요  "}}]}
 
-    tr._chat = fake_chat
+    tr._post = fake_post
     tr._captured = captured
     return tr
 
@@ -41,14 +41,14 @@ def test_builds_openai_chat_request():
 
 def test_keep_think_when_disabled():
     tr = LlamaCppTranslator()
-    tr._chat = lambda body: {"choices": [{"message": {"content": "<think>x</think>네"}}]}
+    tr._post = lambda path, body: {"choices": [{"message": {"content": "<think>x</think>네"}}]}
     out = tr.translate("テスト文章", "ja", "ko", {"model": "local-test", "strip_think": False})
     assert "<think>" in out
 
 
 def test_missing_model_raises():
     tr = LlamaCppTranslator()
-    tr._chat = lambda body: {"choices": [{"message": {"content": "x"}}]}  # never reached
+    tr._post = lambda path, body: {"choices": [{"message": {"content": "x"}}]}  # never reached
     raised = False
     try:
         tr.translate("これは十分に長い文章です", "ja", "ko", {})  # no model in options
@@ -61,11 +61,11 @@ def test_blank_skips_but_short_text_translates():
     tr = LlamaCppTranslator()
     calls = {"n": 0}
 
-    def fake(body):
+    def fake(path, body):
         calls["n"] += 1
         return {"choices": [{"message": {"content": "x"}}]}
 
-    tr._chat = fake
+    tr._post = fake
     assert tr.translate("  ", "ja", "ko", {}) == ""              # blank -> no model call
     assert calls["n"] == 0
     assert tr.translate("あ", "ja", "ko", {"model": "m"}) == "x"  # 1-char now goes to the model
@@ -76,12 +76,12 @@ def test_batch_builds_response_format_and_aligns():
     tr = LlamaCppTranslator()
     captured: dict = {}
 
-    def fake_chat(body):
+    def fake_post(path, body):
         captured.clear()
         captured.update(body)
         return {"choices": [{"message": {"content": json.dumps({"t0": "가", "t1": "나"})}}]}
 
-    tr._chat = fake_chat
+    tr._post = fake_post
     out = tr.translate_batch(["日本語一", "日本語二"], "ja", "ko", {"model": "m"})
     assert out == ["가", "나"]
     rf = captured["response_format"]
@@ -93,12 +93,12 @@ def test_batch_builds_response_format_and_aligns():
 def test_batch_falls_back_on_wrong_length():
     tr = LlamaCppTranslator()
 
-    def fake_chat(body):
+    def fake_post(path, body):
         if "response_format" in body:  # batch attempt returns too few translations
             return {"choices": [{"message": {"content": json.dumps({"t0": "only one"})}}]}
         return {"choices": [{"message": {"content": "fb"}}]}  # per-text fallback
 
-    tr._chat = fake_chat
+    tr._post = fake_post
     out = tr.translate_batch(["長い文章その一", "長い文章その二"], "ja", "ko", {"model": "m"})
     assert out == ["fb", "fb"]  # missing t1 -> fallback fills both, aligned
 
