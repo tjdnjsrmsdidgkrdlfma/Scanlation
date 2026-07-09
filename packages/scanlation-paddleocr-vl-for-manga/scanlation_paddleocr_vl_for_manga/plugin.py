@@ -97,8 +97,6 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
 
     # --- inference ---
     def recognize(self, crop: Image.Image, region: Region, options: dict[str, Any]) -> str:
-        if self._model is None:
-            self.load()
         options = self.resolve_options(options)
         crop = to_rgb(crop)
         messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": self.PROMPT}]}]

@@ -65,6 +65,4 @@ class MangaOcrRecognizer(LocalModelEngineBase):
         self._m = None
 
     def recognize(self, crop: Image.Image, region: Region, options: dict[str, Any]) -> str:
-        if self._m is None:
-            self.load()
         return self._m(to_rgb(crop))

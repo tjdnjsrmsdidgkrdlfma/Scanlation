@@ -99,8 +99,6 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
 
     # --- inference ---
     def detect(self, image: Image.Image, options: dict[str, Any]) -> list[Region]:
-        if self._model is None:
-            self.load()
         import torch
 
         options = self.resolve_options(options)
