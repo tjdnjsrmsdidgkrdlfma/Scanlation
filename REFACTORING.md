@@ -27,6 +27,7 @@
 | B1 | `608fde7` | 읽기 순서가 소스 언어를 따른다 (죽은 `vertical_hint` 교체) |
 | B2 | `df36bae` | `apply_verbose(False)`가 `SCANLATION_LOG_LEVEL`을 파괴하던 것 |
 | B4 | `f053aa6` | dedup future의 예외를 읽어 asyncio 경고 제거 |
+| B3 | `6691088` | `registry.get()`의 `device` 인자가 캐시 히트 시 무시되던 것(시그니처가 거짓말) — `device`를 시그니처에서 빼고, lifespan이 배선하는 load-시점 `device_resolver` 훅으로. 권장안 (a), 동작 보존. 아래 Tier 0 표·전용 절 참조 |
 | H1·H2 | `b6985ad` | 개발 venv의 낡은 설치 메타데이터 (**PC별 작업** — 아래 참조) |
 | H9 | `af3de18` | `_discover`가 삼키던 `ep.load()` 실패에 `logger.warning` — 유령 entry_point가 흔적 없이 사라지던 것 |
 | R6 | `6e4761a`..`d2278b8` | 플러그인 보일러플레이트 → SDK (6커밋: `COMMON_LLM_OPTIONS` · `_post` seam · `_log`/`to_rgb`/`install_hint` · 죽은 가드 · 공유 테스트 헬퍼 · description 드리프트 가드). 아래 R6 절 참조 |
@@ -35,18 +36,19 @@
 | R8 | `b12307a` | `app/web/app.js`(995줄)의 i18n 블록(테이블+`t`/`LANG`, 14-239줄)을 `i18n.js`로. 클래식 스크립트 순서 로드(전역 스코프 공유)라 순수 이동. app.js 995→770. 아래 R8 절 참조 |
 | R9 | `0de4d77`..`bbc9318` | 확장 `content.js`(414줄): 공유 `constants.js`(`globalThis.SCAN`, 3 로드 리스트) + `md5.js` 순수 추출 (2커밋). endpoint 3중복·`minImageDim` gap·하드코딩 `"번역 실패"` 해소. content.js 414→339. 아래 R9 절 참조 |
 
-코어 테스트 58개 → **78개**. SDK 스위트도 6개(순수 헬퍼, 가중치 불필요).
+코어 테스트 58개 → **80개**(B3의 `device_resolver` 가드 +2). SDK 스위트도 6개(순수 헬퍼, 가중치 불필요).
+
+> **범위 밖(기록용):** B3에 이어 **모델 유휴 언로드**를 신규 기능으로 착수·완료(`1b6e33d`) — `/admin` 동작 탭 `model_idle_unload_minutes`(env `SCANLATION_MODEL_IDLE_UNLOAD_MINUTES`, 기본 5분, `0`=상주), 로컬 detector/recognizer를 유휴 시 lifespan 백그라운드 sweep가 VRAM에서 내린다(ollama `OLLAMA_KEEP_ALIVE`의 로컬 대응). 이 백로그의 동작 보존 범위 밖이라 R-항목이 아니다(테스트 +5 → 전체 85개). 상세는 [README.md](README.md)·[SCANLATION_DESIGN.md](SCANLATION_DESIGN.md).
 
 **결정을 기다리는 것:**
 
-- **B3** — `registry.get()`의 `device` 인자가 캐시 히트 시 무시된다. 시그니처를 진실에 맞출지, 코드를 시그니처에 맞출지 (Tier 0 표)
 - **H3** — `tools/vendored/`의 GPLv3 코드 1,003줄이 설계 문서의 약속과 충돌하고 LICENSE 파일이 없다 (아래 전용 절)
 - **H6** — entry-point 이름 케이싱 규칙. 이 이름은 `state.json`에 영속되고 캐시 키의 일부라 바꾸면 캐시가 무효화된다
 
 **측정 장비가 필요한 것:** B5·B6 — 벤치 크롭 세트 불일치. GPU 호스트에서 재측정해야 `tools/*.md`의 결론을 갱신할 수 있다.
 
 **남은 리팩토링:** 없음 — R1~R9 완료로 네 축(벤치 통합·어휘 정리·대형 파일 분할·하드코딩→`/admin`)의 구조 부채는 소진.
-남은 것은 결정 대기(B3·H3·H6)·측정(B5·B6·H8)뿐 — 문서 위생(H4·H5·H7)은 완료.
+남은 것은 결정 대기(H3·H6)·측정(B5·B6·H8)뿐 — 문서 위생(H4·H5·H7)은 완료.
 
 ---
 
@@ -90,14 +92,14 @@
 |---|---|---|
 | ~~**B1**~~ ✅ | [pipeline.py](packages/scanlation-server/app/pipeline.py) | `assign_reading_order(regions, vertical_hint)`의 본문이 `vertical_hint`를 **한 번도 읽지 않았다** — 첫 커밋(`741bf4b`)부터 죽어 있었고, [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md) §3.5 의사코드를 시그니처만 옮겨 적은 결과다. 읽기 순서는 `src`와 무관하게 **항상 만화 R→L**이었다. 이름도 틀렸다: 호출부는 *언어*(`src == "ja"`)로 계산하는데 정작 분기해야 할 건 세로/가로가 아니라 **수평 방향**이다(진짜 세로쓰기는 `Region.vertical`이 따로 들고 있다). `rtl` 인자 + `LANG_RTL` 언어 표로 실제 배선했다 |
 | ~~**B2**~~ ✅ | [logconfig.py](packages/scanlation-server/app/logconfig.py) | `apply_verbose(False)`가 `INFO`를 리터럴로 세팅했다. lifespan이 `configure_logging(settings.log_level)` 직후 이걸 부르므로 `SCANLATION_LOG_LEVEL=WARNING`은 조용히 INFO가 됐고, `/admin`에서 상세로그를 켰다 끄면 그때도 INFO로 떨어졌다. `configure_logging`이 연 레벨을 기억했다가 그리로 복귀한다 |
-| **B3** | [registry.py:76-78](packages/scanlation-server/app/registry.py#L76-L78) | `registry.get(name, device=...)`의 lock-free 캐시 히트 경로가 `device` 인자를 검사하지 않는다. `set_engine_device` → `unload_one` 순서 덕에 현재는 안전하지만 [orchestrator.py:86-87](packages/scanlation-server/app/orchestrator.py#L86-L87)이 매 요청 `device=`를 넘기므로 **시그니처가 거짓말을 한다.** 아래 두 갈래 중 결정 필요 |
+| ~~**B3**~~ ✅ | [registry.py](packages/scanlation-server/app/registry.py) | `registry.get(name, device=...)`의 lock-free 캐시 히트 경로가 `device`를 검사하지 않아 **시그니처가 거짓말을 했다**(첫 로드에만 반영, 이후 무시). 권장안 **(a) 구현**(`6691088`): `device`를 `get()`에서 빼고, lifespan이 배선하는 `device_resolver` 훅으로 load 시점에 해석. tool/test는 훅 미배선 → 기본 device(동작 보존). registry가 state를 import하지 않게 됐다 |
 | ~~**B4**~~ ✅ | [orchestrator.py](packages/scanlation-server/app/orchestrator.py) | `_run_deduped`에서 대기자가 없을 때 `fut.set_exception()` 후 pop → 아무도 읽지 않아 future finalize 시점에 asyncio가 "Future exception was never retrieved"와 트레이스백을 로그에 뿌렸다(실패 요청마다). `set_exception` 직후 `fut.exception()`으로 읽음 표시 — 대기자는 여전히 같은 예외 객체를 받는다 |
 | **B5** | `_bench_common.deskewed_crops` vs `bench_recognize_threads._raw_bbox_crop_files` | batch/gpuconc는 `deskew_crop(img, r)`, threads는 `img.crop(bbox)` — **크롭 픽셀이 다르다.** [recognize-crop-batching.md](packages/scanlation-server/tools/recognize-crop-batching.md)가 "배칭 1.27x는 멀티워커 1.8x에 진다"고 단언하는데 1.8x는 deskew 안 한 세트에서 나온 수치라 apples-to-apples 비교가 아니다. R1이 두 함수의 이름을 갈라 차이를 드러냈으니, 고치는 것은 threads의 크롭 방식을 바꾸고 재측정하는 일이다 |
 | **B6** | [bench_recognize_threads.py:366](packages/scanlation-server/tools/bench_recognize_threads.py#L366) | 생성되는 리포트 산문에 `"best ~1.8x over base"`가 측정값과 무관하게 하드코딩돼 있다. 다른 머신에서 돌리면 표는 1.2x인데 산문은 1.8x |
 
 > B5·B6은 이미 커밋된 `tools/*.md`의 결론에 영향을 준다. R1이 B5를 계약으로 승격시키므로 묶어서 처리한다.
 
-### B3 — 두 갈래
+### B3 — 두 갈래 ✅ (a)로 구현 (`6691088`)
 
 **(a) 계약을 코드에 맞춘다.** `device`를 `get()` 시그니처에서 빼고, 인스턴스 생성 시점에만 주입한다. 그러면
 "device는 로드 시점에 정해지고, 바꾸려면 `unload_one`한다"는 **현재의 진실**이 시그니처에 드러난다.
@@ -109,6 +111,8 @@
 
 **(a) 권장.** 이 프로젝트는 uvicorn 단일 워커에 VRAM 모델 한 벌이 전제다(`SCANLATION_DESIGN.md` §9-7).
 device당 인스턴스를 캐싱하는 건 그 전제와 어긋난다. 지금 코드가 하는 일이 맞고, 거짓말하는 건 시그니처다.
+
+**→ (a)로 구현됨(`6691088`).** `get()`에서 `device`를 빼고, `main` lifespan이 `registry.device_resolver = state.resolve_device_for`로 배선한다(조립 지점). 훅을 안 무는 tool/test는 기본 device로 로드 → 동작 보존. `device_resolver`를 직접 `state` import 대신 훅으로 둔 이유가 그것 — import로 하면 `visualize.py`·테스트가 갑자기 `state.json` device를 따르게 돼 동작이 바뀐다.
 
 ---
 
@@ -420,7 +424,7 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
 
 **결정이 먼저** — 위 「현재 상태」의 "결정을 기다리는 것":
 
-5. **B3** (권장 (a)), **H3** (권장 (a)), **H6** (캐시 무효화 감수 여부)
+5. **H3** (권장 (a)), **H6** (캐시 무효화 감수 여부)
 
 **GPU 호스트에서만:**
 
