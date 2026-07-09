@@ -51,6 +51,21 @@ class Settings:
         default_factory=lambda: int(_env("SCANLATION_MIN_IMAGE_DIM", "80"))
     )
 
+    # First-run default for the concurrent-translation limit (bounds parallel ollama
+    # requests). Persisted in state.json, editable in /admin (동작 tab). Floor 1: a
+    # 0/negative Semaphore would deadlock, matching set_client_config's clamp.
+    translate_concurrency: int = field(
+        default_factory=lambda: max(1, int(_env("SCANLATION_TRANSLATE_CONCURRENCY", "1")))
+    )
+
+    # First-run defaults for the GPU/torch build a plugin install pulls, so a headless
+    # deploy can pick the wheel via env instead of visiting /admin first. Persisted in
+    # state.json, editable in /admin (동작 tab); the /admin write path validates the
+    # values (torch_backend -> cpu/gpu, torch_vendor -> ""/amd/nvidia).
+    torch_backend: str = field(default_factory=lambda: _env("SCANLATION_TORCH_BACKEND", "cpu"))
+    torch_vendor: str = field(default_factory=lambda: _env("SCANLATION_TORCH_VENDOR", ""))
+    torch_index: str = field(default_factory=lambda: _env("SCANLATION_TORCH_INDEX", ""))
+
     # --- filesystem: delegated to the shared SDK context (single env source of
     #     truth, also read by every engine plugin) ---
     @property

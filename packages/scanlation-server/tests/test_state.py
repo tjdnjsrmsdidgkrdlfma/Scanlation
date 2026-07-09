@@ -74,10 +74,35 @@ def test_engine_device_override():
         context.base_dir = saved_base
 
 
+def test_config_env_seeds_settings_and_selection():
+    """B-grade values now carry an env default: Settings() reads the env (with a
+    floor-1 guard on translate_concurrency), and Selection seeds these fields from
+    the settings singleton rather than a bare literal."""
+    import os
+
+    from app.config import Settings, settings
+
+    os.environ["SCANLATION_TRANSLATE_CONCURRENCY"] = "5"
+    try:
+        assert Settings().translate_concurrency == 5           # env read per instance
+        os.environ["SCANLATION_TRANSLATE_CONCURRENCY"] = "0"
+        assert Settings().translate_concurrency == 1           # floor: a 0 Semaphore would deadlock
+    finally:
+        os.environ.pop("SCANLATION_TRANSLATE_CONCURRENCY", None)
+
+    # Selection defaults are seeded from the settings singleton (wiring, not literals)
+    sel = Selection()
+    assert sel.translate_concurrency == settings.translate_concurrency
+    assert sel.torch_backend == settings.torch_backend
+    assert sel.torch_vendor == settings.torch_vendor
+    assert sel.torch_index == settings.torch_index
+
+
 TESTS = [
     test_state_json_roundtrip,
     test_state_load_falls_back_on_bad_json,
     test_engine_device_override,
+    test_config_env_seeds_settings_and_selection,
 ]
 
 if __name__ == "__main__":

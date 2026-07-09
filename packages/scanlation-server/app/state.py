@@ -41,24 +41,26 @@ class Selection:
     # (동작 tab) and re-applied to the scanlation logger without a restart.
     verbose_log: bool = settings.log_level.upper() == "DEBUG"
     # Max images translating concurrently off the GPU lock (bounds how many the
-    # server sends to ollama at once). No env — edited in /admin (동작 tab) and
-    # applied at runtime by swapping translate_sem (see AppState.set_client_config).
+    # server sends to ollama at once). Seeded from SCANLATION_TRANSLATE_CONCURRENCY
+    # (floor 1), edited in /admin (동작 tab) and applied at runtime by swapping
+    # translate_sem (see AppState.set_client_config).
     # Default 1 is the safe floor: it never exceeds ollama's OLLAMA_NUM_PARALLEL
     # (whatever it is), so no request queues into a timeout. Even at 1 the translate
     # overlaps the next image's detect+recognize (it runs off the GPU lock). Parallel
     # GENERATION is opt-in: raise this AND OLLAMA_NUM_PARALLEL together (the lower of
     # the two = real parallelism; ollama can't be queried, so keeping them in sync is manual).
-    translate_concurrency: int = 1
+    translate_concurrency: int = settings.translate_concurrency
     # GPU/torch build for plugin installs (the /admin 동작 tab). "cpu" (default) or
     # "gpu"; on "gpu" the vendor is auto-detected from device nodes at install time
     # (app.gpus.detect_gpu_vendor). torch is ONE build = ONE vendor, so this decides
-    # which torch wheel a plugin install pulls — applied on the NEXT install.
-    torch_backend: str = "cpu"
+    # which torch wheel a plugin install pulls — applied on the NEXT install. Seeded
+    # from SCANLATION_TORCH_BACKEND/_VENDOR/_INDEX.
+    torch_backend: str = settings.torch_backend
     # Force the vendor when BOTH AMD+NVIDIA are detected ("" = auto). "amd" | "nvidia".
-    torch_vendor: str = ""
+    torch_vendor: str = settings.torch_vendor
     # Optional pip index URL override (blank = vendor default) — e.g. a specific
     # ROCm version whose prebuilt wheel matches the host (rocm6.2 vs 6.1, RDNA4…).
-    torch_index: str = ""
+    torch_index: str = settings.torch_index
 
 
 class AppState:
