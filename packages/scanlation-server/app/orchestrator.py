@@ -138,10 +138,11 @@ async def _run_deduped(id_, compute):
         state.inflight.pop(id_, None)
 
 
-async def run_page(plan: RunPlan, md5: str, contents: str) -> list:
+async def run_page(plan: RunPlan, md5: str, contents: str) -> tuple[list, dict]:
     """Compute (or join an in-flight computation of) the page result: decode ->
-    detect+recognize under the GPU lock -> translate off it -> cache. Raises
-    BadImageError on a bad image; other failures propagate to the caller."""
+    detect+recognize under the GPU lock -> translate off it -> cache. Returns
+    ``(result, timing)`` where timing is the per-stage ms breakdown (also logged).
+    Raises BadImageError on a bad image; other failures propagate to the caller."""
     async def compute():
         # Timed per stage so the log shows where the time goes. lockwait = time
         # spent waiting for the GPU lock (surfaces contention when images overlap).
@@ -171,6 +172,17 @@ async def run_page(plan: RunPlan, md5: str, contents: str) -> list:
             (t_dec - t0) * 1000, (t_lock - t_dec) * 1000, (t_det - t_lock) * 1000,
             (t_sem - t_det) * 1000, (t_tsl - t_sem) * 1000, (t_tsl - t0) * 1000,
         )
-        return result
+        # Same spans as the log line, returned so the /run_pipeline/ response can carry
+        # them (headless tools/reports read this; the extension ignores the extra key).
+        timing = {
+            "decode_ms": round((t_dec - t0) * 1000, 1),
+            "lockwait_ms": round((t_lock - t_dec) * 1000, 1),
+            "detect_recognize_ms": round((t_det - t_lock) * 1000, 1),
+            "semwait_ms": round((t_sem - t_det) * 1000, 1),
+            "translate_ms": round((t_tsl - t_sem) * 1000, 1),
+            "total_ms": round((t_tsl - t0) * 1000, 1),
+            "regions": len(recognized),
+        }
+        return result, timing
 
     return await _run_deduped((md5, *plan.cache_key), compute)

@@ -73,10 +73,12 @@ async def run_pipeline(req: RunRequest) -> dict:
     _require("translator", plan.translator)
 
     try:
-        result = await run_page(plan, req.md5, req.contents)
+        result, timing = await run_page(plan, req.md5, req.contents)
     except BadImageError as exc:
         raise HTTPException(status_code=400, detail=f"bad image: {exc}")
     except Exception as exc:  # noqa: BLE001
         logger.exception("run_pipeline failed md5=%s", req.md5[:8])
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"result": result}
+    # timing = per-stage ms breakdown (fresh runs only; a cache hit above returns no
+    # timing). Additive — existing clients read only `result`.
+    return {"result": result, "timing": timing}

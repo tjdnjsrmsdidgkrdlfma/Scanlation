@@ -66,12 +66,34 @@ def test_run_pipeline_requires_contents():
     assert c.post("/run_pipeline/", json={"md5": p["md5"]}).status_code == 400
 
 
+def test_run_pipeline_returns_per_stage_timing():
+    """A fresh run carries the per-stage `timing` breakdown (headless tools read it);
+    a cache hit does not, since run_page — where timing is measured — is skipped."""
+    c = client()
+    p = payload(color=(9, 42, 200))  # unique md5 -> cache miss -> fresh, timed run
+    fresh = c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]})
+    assert fresh.status_code == 200
+    timing = fresh.json().get("timing")
+    assert timing is not None, "a fresh run must carry timing"
+    assert set(timing) == {
+        "decode_ms", "lockwait_ms", "detect_recognize_ms",
+        "semwait_ms", "translate_ms", "total_ms", "regions",
+    }
+    assert all(isinstance(v, (int, float)) for v in timing.values())
+
+    # same md5, no force -> served from cache -> run_page skipped -> no timing key
+    hit = c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]})
+    assert hit.status_code == 200
+    assert "timing" not in hit.json()
+
+
 TESTS = [
     test_run_pipeline_work_returns_result_items,
     test_run_pipeline_md5_mismatch_is_400,
     test_no_engine_installed_is_400,
     test_lookup_miss_then_work_then_hit,
     test_run_pipeline_requires_contents,
+    test_run_pipeline_returns_per_stage_timing,
 ]
 
 if __name__ == "__main__":
