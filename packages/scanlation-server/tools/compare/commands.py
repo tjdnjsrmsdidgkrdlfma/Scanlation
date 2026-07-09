@@ -168,6 +168,13 @@ def _run_label(adapter: Adapter, dev: str | None) -> str:
     return _resolve_device(dev) if adapter.device_switchable else "server"
 
 
+def _run_devices(adapter: Adapter, devices: list[str | None]) -> list[str | None]:
+    """The device list to run one OCR adapter over: `devices` for engines we drive,
+    [None] for ollama (its server picks), cpu dropped for cpu_ok=False models."""
+    run_devs = devices if adapter.device_switchable else [None]  # ollama: server picks the device
+    return [dv for dv in run_devs if adapter.cpu_ok or dv != "cpu"]  # skip cpu for cpu_ok=False (e.g. 7B)
+
+
 def _time_recognize(adapter: Adapter, crops: list[Image.Image]) -> tuple[list[str], float]:
     """OCR every crop, returning (texts, total_ms). One warm-up call first so the
     timing excludes one-off init (CUDA kernels / lazy weights) and CPU-vs-GPU is fair."""
@@ -198,8 +205,7 @@ def cmd_ocr(args) -> None:
     for a, ok, _ in _run_available(_select("ocr", args.only, args.exclude), _explicit_ids(args.only)):
         if not ok:
             continue
-        run_devs = devices if a.device_switchable else [None]  # ollama: server picks the device
-        run_devs = [dv for dv in run_devs if a.cpu_ok or dv != "cpu"]  # skip cpu for cpu_ok=False (e.g. 7B)
+        run_devs = _run_devices(a, devices)
         if not run_devs:
             print(f"    {a.id}: skipped — needs a GPU but this run has no cuda device", file=sys.stderr)
             continue
@@ -272,8 +278,7 @@ def cmd_ocrbatch(args) -> None:
     for a, ok, _ in _run_available(_select("ocr", args.only, args.exclude), _explicit_ids(args.only)):
         if not ok:
             continue
-        run_devs = devices if a.device_switchable else [None]  # ollama: server picks the device
-        run_devs = [dv for dv in run_devs if a.cpu_ok or dv != "cpu"]  # skip cpu for cpu_ok=False (e.g. 7B)
+        run_devs = _run_devices(a, devices)
         if not run_devs:
             print(f"  {a.id}: skipped — needs a GPU (cpu_ok=False) but this run has no cuda device", file=sys.stderr)
             continue
