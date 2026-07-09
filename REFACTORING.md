@@ -40,14 +40,15 @@
 
 > **범위 밖(기록용):** B3에 이어 **모델 유휴 언로드**를 신규 기능으로 착수·완료(`1b6e33d`) — `/admin` 동작 탭 `model_idle_unload_minutes`(env `SCANLATION_MODEL_IDLE_UNLOAD_MINUTES`, 기본 5분, `0`=상주), 로컬 detector/recognizer를 유휴 시 lifespan 백그라운드 sweep가 VRAM에서 내린다(ollama `OLLAMA_KEEP_ALIVE`의 로컬 대응). 이 백로그의 동작 보존 범위 밖이라 R-항목이 아니다(테스트 +5 → 전체 85개). 상세는 [README.md](README.md)·[SCANLATION_DESIGN.md](SCANLATION_DESIGN.md).
 
-**결정을 기다리는 것:**
+**결정 완료:**
 
-- **H3** — `tools/vendored/`의 GPLv3 코드 1,003줄이 설계 문서의 약속과 충돌하고 LICENSE 파일이 없다 (아래 전용 절)
+- **H3** — vendored bake-off를 **유지**하기로 결정(2026-07-09). OCR 인식이 파이프라인 핵심이고 그 모델 비교(bake-off)가 중요해 (a) 제거·(c) 분리를 기각. 형식 라이선스 확정((b))은 보류. 이에 따라 §9-4의 "트리에 GPLv3 미포함"을 현실에 맞게 정정. **LICENSE 파일 부재만 미결**로 남긴다(소유자 보류) — 아래 전용 절
+- **H6** — 정정: 결함 아님. entry-point 이름은 업스트림 고유명(Ollama·llama.cpp·PaddleOCR-VL-For-Manga·manga-ocr…)을 그대로 따른 것 — Tier 4 표 참조
 
 **측정 장비가 필요한 것:** B5·B6 — 벤치 크롭 세트 불일치. GPU 호스트에서 재측정해야 `tools/*.md`의 결론을 갱신할 수 있다.
 
 **남은 리팩토링:** 없음 — R1~R9 완료로 네 축(벤치 통합·어휘 정리·대형 파일 분할·하드코딩→`/admin`)의 구조 부채는 소진.
-남은 것은 결정 대기(H3)·측정(B5·B6·H8)뿐 — 문서 위생(H4·H5·H7)은 완료.
+남은 것은 측정(B5·B6·H8)·가중치 머신 검증뿐 — 결정 대기 0(H3 유지 결정·H6 정정 완료), 문서 위생(H4·H5·H7) 완료.
 
 ---
 
@@ -364,7 +365,7 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
 |---|---|
 | ~~**H1**~~ ✅ | 개발 venv에 **낡은 설치 메타데이터**가 남으면 죽은 entry_point가 등록된다: `scanlation_ctd` → `[scanlation.detectors] ctd`, `scanlation_mangaocr` → `[scanlation.recognizers] mangaocr`, 그리고 `scanlation_server`의 dist-info가 현 pyproject에 없는 `dummy` 3개. **다만 `/admin`에는 뜨지 않는다** — `registry._discover`의 `except Exception: pass`가 실패한 `ep.load()`를 삼킨다. 비용은 discovery마다 헛도는 import와, 아래 H2가 그러듯 이름이 갈라지는 것. `pip uninstall` + 잔해 디렉터리 삭제 + editable 재설치 |
 | ~~**H2**~~ ✅ | 설치된 `scanlation_ollama` 메타데이터는 `ollama`(소문자), [pyproject.toml](packages/scanlation-ollama/pyproject.toml)은 `Ollama`(대문자). editable 설치에서는 그 메타데이터가 `importlib.metadata`가 읽는 실물이라 **registry는 `ollama`, catalog는 `Ollama`로 같은 엔진을 두 이름으로 본다**. `pip install -e` 재설치로 dist-info 재생성 |
-| **H3** | **라이선스 미결.** [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md) §9-4가 "트리에 GPLv3 코드 미포함"을 약속하는데 `tools/vendored/`에 manga-image-translator(GPL) 코드 1,003줄이 실재한다(`_mit_ocr_48px.py` 635 + `_mit_ocr_ctc.py` 368). tools 전용·프로덕션 의존 0인 건 확인됐지만 배포 단위가 같은 저장소라면 문서의 불변식은 깨져 있다. 또 `_mit_xpos.py:2`가 `[see LICENSE for details]`를 가리키는데 **저장소에 LICENSE 파일이 없다**(MIT 고지 요건 미충족) |
+| **H3** (결정: 유지) | **라이선스 미결 → 유지 결정.** [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md) §9-4가 "트리에 GPLv3 코드 미포함"을 약속하는데 `tools/vendored/`에 manga-image-translator(GPL) 코드 1,003줄이 실재한다(`_mit_ocr_48px.py` 635 + `_mit_ocr_ctc.py` 368). tools 전용·프로덕션 의존 0인 건 확인됐지만 배포 단위가 같은 저장소라면 문서의 불변식은 깨져 있었다. **결정: OCR 비교가 핵심이라 bake-off를 유지**((a)/(c) 기각) → §9-4를 현실에 맞게 정정(제품엔 GPL 없음/tools엔 research-only 사본 존재). 또 `_mit_xpos.py:2`가 `[see LICENSE for details]`를 가리키는데 **저장소에 LICENSE 파일이 없다**(MIT 고지 요건 미충족) — 이 부분만 미결로 남김 |
 | ~~**H4**~~ ✅ | R7 분할로 문자열이 [adapters.py:254](packages/scanlation-server/tools/compare/adapters.py#L254)로 이동. `MitOcrAdapter.install_hint`가 `"weights auto-included in tools/vendored/_mit_weights/"`라 했으나 [.gitignore](.gitignore)가 그 디렉터리를 제외한다 — `available()`은 이미 `wpath.exists()`로 부재를 검사한다. install_hint를 "download weights into … (gitignored, not bundled)"로 정정 |
 | ~~**H5**~~ ✅ | [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md) §3.5 의사코드에 폐기 어휘(`opt_box`/`opt_ocr`/`opt_tsl`·`{ocr,tsl,box}`·`vertical_hint`)가 ⚠ 마커 없이 그대로 있었다 — §2.1·§3.4·§4.1이 쓰는 forward-pointing ⚠ 노트를 §3.5에도 붙여 현 시그니처(`opt_detect`/…·`{bounds,source,destination}`·`assign_reading_order(rtl=)`)를 가리킨다. **백로그가 "env 걷어내고 /admin 전용"이라 한 것은 이 문서 자체와 함께 stale이었다** — R5(`ed2f0a7`)가 `SCANLATION_TRANSLATE_CONCURRENCY`를 seed 기본값(floor 1)으로 재도입했다. 상단 노트(10줄)의 "env 걷어내고"와 §3.5의 "기본 4"를 실제 하이브리드(env seed + `/admin` 런타임 권위)로 정정. `CTD` 언급은 상단 divergence 노트(§2·§3·§4 일괄)가 이미 덮으므로 유지 |
 | ~~**H6**~~ ✅ (정정: 결함 아님) | entry-point 이름이 케이싱 규칙 없이 섞여 보였다: `comic-text-and-bubble-detector`·`manga-ocr`(kebab) vs `PaddleOCR-VL-For-Manga`·`Ollama`·`llama.cpp`. **오진이다** — 이 이름들은 **업스트림 고유명을 그대로 따른 것**이다(`Ollama`=제품명, `llama.cpp`=프로젝트명(점 포함), `PaddleOCR-VL-For-Manga`=모델명; `manga-ocr`·`comic-text-and-bubble-detector`=pip/HF 레포명이라 원래 kebab). "Claude"를 "cLAUdE"로 못 쓰듯 kebab 강제 통일은 고유명 훼손이다. 암묵 규칙은 이미 있다 — **"업스트림 고유명에 충실"**, 이게 지향할 규칙이고 현 이름이 이미 그것. (의도와 어긋난 대소문자 *불일치* 버그는 H2가 이미 처리; 이 이름들이 `state.json`·캐시 키의 일부라 함부로 못 바꾼다는 사실은 그 원칙을 더 강화한다.) |
@@ -395,8 +396,9 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
 - **(b) 안고 간다** — 프로젝트 라이선스를 GPLv3로 확정하고, `vendored/`에 upstream COPYING + `_mit_xpos.py`용 MIT LICENSE를 넣고 NOTICE를 쓴다. 정직하지만 저장소 전체가 GPL로 묶인다
 - **(c) 분리한다** — bake-off 하네스를 별도 저장소로 (`git subtree split --prefix=packages/scanlation-server/tools`). 이 저장소는 깨끗해지고 그쪽이 GPL을 진다
 
-**(a) 권장.** `vendored/`가 tools 전용이고 프로덕션 의존이 0이라 제품 손실이 없다. (b)는 "라이선스 미정" 상태를
-끝내야 하는데 그건 리팩토링이 아니라 프로젝트 차원의 결정이다. **법적 함의가 있으므로 소유자 판단 사항.**
+**(a) 권장이었으나 소유자 판단은 (a) 아님.** `vendored/`가 tools 전용이고 프로덕션 의존이 0이라 (a)는 제품 손실이 없지만, (b)는 "라이선스 미정" 상태를 끝내야 하는 프로젝트 차원의 결정이다. **법적 함의가 있어 소유자 판단 사항이었고, 아래로 결정됐다.**
+
+**→ 결정: 유지(놔둔다)(2026-07-09).** OCR 인식이 파이프라인 핵심이고 그 모델 비교(bake-off)가 중요해 (a) 제거·(c) 분리를 기각하고 vendored 하네스를 남긴다. 형식 라이선스((b))는 보류. 이 결정에 따라 [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md) §9-4를 "제품/런타임엔 GPL 미포함(deskew 독립 재구현), 단 `tools/vendored/`엔 research-only GPL 사본 존재·wheel/Docker 제외"로 정정했다(트리에 GPL이 있다는 사실을 문서가 더는 부정하지 않게). **남는 미결: `LICENSE` 파일 부재** — 공개 배포 시 최소한 upstream COPYING + `_mit_xpos.py`용 MIT 고지가 필요하다(소유자 보류).
 
 곁가지: **H4** — `compare_models.py:397`의 `"weights auto-included in tools/vendored/_mit_weights/"`는 사실이
 아니다. `.gitignore`가 그 디렉터리를 제외하므로 새 clone에선 수동 다운로드가 필요하다. (a)를 고르면 함께 사라진다.
@@ -421,9 +423,7 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
 
 **바로 착수 가능** — 없음. R1~R9(리팩토링 네 축)가 모두 완료돼 구조 부채는 소진됐다. 남은 것은 아래 세 부류다.
 
-**결정이 먼저** — 위 「현재 상태」의 "결정을 기다리는 것":
-
-5. **H3** (권장 (a))
+**결정 대기** — 없음. H3(유지)·H6(정정)이 처리돼 열린 결정은 0. H3의 잔여 미결은 `LICENSE` 파일 하나(소유자 보류) — 위 H3 상세 참조.
 
 **GPU 호스트에서만:**
 

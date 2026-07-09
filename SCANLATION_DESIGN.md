@@ -1,7 +1,7 @@
 # Greenfield 만화 OCR+번역 시스템 — 설계 & 핸드오프 문서
 
 > **프로젝트명:** `Scanlation` (폴더/패키지/도커 서비스명으로 쓰임)
-> **라이선스:** TBD (단 전제: GPLv3 코드는 **복사 금지**, 알고리즘만 독립 재구현)
+> **라이선스:** TBD (전제: **제품 코드**는 GPLv3 복사 금지·알고리즘만 독립 재구현. 예외: `tools/vendored/` bake-off의 GPL OCR 사본은 research-only로 안고 감 — §9-4)
 > **이 문서의 목적:** 컨텍스트가 길어져 **새 세션에서 이어서 빌드**하기 위한 자족적(self-contained) 설계서. 사전 지식 없이 이 문서만으로 구현을 시작할 수 있도록 작성됨.
 
 > ⚠ **이후 구현에서 바뀐 점 (이 문서는 원 설계 기록):** 현재 상태·사용법은 [README.md](README.md), 에이전트 지침은 [CLAUDE.md](CLAUDE.md)를 우선한다. 원 설계 대비 주요 divergence:
@@ -301,7 +301,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 1. **gfx1200(RDNA4) ort-ROCm 성숙도:** 사전빌드 휠 부재 가능 → DirectML(Win 개발)/CPU fallback/소스빌드. 완화: CTD는 작아 CPU로도 충분; provider 선택은 CPU fallback + active provider 로그.
 2. **manga-ocr(torch-rocm) VRAM 경합:** ollama ≈14GB/16GB라 CTD+manga-ocr OOM 위험. 선택지(P8 결정): (a) **CTD+manga-ocr를 CPU로, GPU는 ollama 전용**[정확도우선+빡빡VRAM+페이지당 영역 적음 → 가장 안전한 기본]; (b) ollama 전후 load/unload; (c) ollama `num_gpu` 캡.
 3. **CTD ONNX 디코딩 미검증** *(rtdetr 교체로 해소):* 출력 이름/순서, thresh/unclip/NMS, letterbox 좌표역변환을 실제 모델+레퍼런스 `inference.py`로 확인 필수. 최대 미지수 — P3에 실시간 확보, `visualize.py`를 먼저 만들어 육안 검증.
-4. **라이선스(중요):** manga-image-translator=GPLv3 → `get_transformed_region` **복사 시 우리 서버도 GPLv3 전염**. deskew는 표준 homography → **알고리즘 설명만 보고 OpenCV 프리미티브로 독립 재구현**(§3.5). manga-ocr=Apache-2.0(런타임 의존 OK). comic-text-detector 가중치 라이선스는 번들 전 확인. 구 Crivella 코드(GPLv3)는 **학습만, 복사 금지**. → **프로젝트 라이선스 미정(TBD)**, 단 트리에 GPLv3 코드 미포함, 런타임 의존만.
+4. **라이선스(중요):** manga-image-translator=GPLv3 → `get_transformed_region` **복사 시 우리 서버도 GPLv3 전염**. deskew는 표준 homography → **알고리즘 설명만 보고 OpenCV 프리미티브로 독립 재구현**(§3.5). manga-ocr=Apache-2.0(런타임 의존 OK). comic-text-detector 가중치 라이선스는 번들 전 확인. 구 Crivella 코드(GPLv3)는 **학습만, 복사 금지**. → **프로젝트 라이선스 미정(TBD)**. 제품/런타임(`app`·wheel·Docker)엔 GPLv3 코드 미포함·런타임 의존만. **단 `tools/vendored/`엔 manga-image-translator의 48px/48px_ctc OCR(GPLv3) 사본이 있다** — OCR 모델 비교(bake-off) 전용 research-only이고 wheel(`include=["app*"]`)·Docker에서 제외되지만, 배포 단위가 저장소라 이 사본은 **안고 가기로 결정**(OCR 비교가 핵심 — REFACTORING.md H3). `LICENSE` 파일 부재는 미결.
 5. **세로/방향 정확성:** "기울기는 펴되 세로는 세로 유지"는 실제 세로 일본어+기울어진 SFX로 경험적 검증 필요 → visualize.py + crop 덤프로 P3~P4 튜닝.
 6. **디바이스 배치는 런타임 정책(계약 아님) — 엔진별로 구현됨:** 연산 장치(`cpu`/`cuda`)를 **엔진마다 따로** `/admin`(엔진 옵션 탭)에서 지정. 전역 설정은 없다 — 각 엔진이 코드 기본값(`LocalModelEngineBase.DEFAULT_DEVICE`; PaddleOCR-VL-For-Manga=`cuda`, 나머지=`cpu`, `OPTION_SCHEMA`의 `default`와 같은 방식)을 갖고, admin override는 `state.selection.devices[engine]`에 영속. resolve는 `override or DEFAULT_DEVICE` → `pick_device(hint)`가 cuda 불가 시 cpu fallback. 변경 시 그 엔진만 `registry.unload_one`으로 재로드. LLM(ollama)은 별도 프로세스라 무관. (초기엔 전역 단일 설정이었으나 "device는 엔진별 속성"이라는 원칙으로 엔진별 override로 전환하며 `SCANLATION_DEVICE` env도 제거.)
 7. **uvicorn 단일 워커** 필수(VRAM 모델 1벌) → 프로세스 병렬 없음; asyncio 락+threadpool로 단일사용자 충분(멀티유저 원하면 재검토).
