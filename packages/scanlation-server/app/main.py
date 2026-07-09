@@ -7,6 +7,7 @@ to work). No CSRF (FastAPI has none; all POSTs are open).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -73,7 +74,18 @@ async def lifespan(app: FastAPI):
     from .registry import registry
     registry.device_resolver = state.resolve_device_for
     settings.ensure_dirs()
-    yield
+    # Periodic idle-unload of local torch engines (VRAM reclaim between sessions);
+    # reads state.selection.model_idle_unload_minutes each pass. Cancelled on shutdown.
+    from .idle_unload import sweep_loop
+    sweep_task = asyncio.create_task(sweep_loop())
+    try:
+        yield
+    finally:
+        sweep_task.cancel()
+        try:
+            await sweep_task
+        except asyncio.CancelledError:
+            pass
 
 
 def create_app() -> FastAPI:

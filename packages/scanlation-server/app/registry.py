@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from importlib.metadata import entry_points
 from typing import Any, Callable
 
@@ -28,12 +29,20 @@ ROLES: dict[str, str] = {
 }
 # The three role ids in fixed order — the single source everything else derives.
 ROLE_NAMES: tuple[str, ...] = tuple(ROLES)
+# Roles whose engines load in-process onto a compute device (torch/VRAM). Only
+# these are worth reclaiming on idle; translators are out-of-process HTTP clients
+# (ollama's own OLLAMA_KEEP_ALIVE governs the LLM's residency). See state.Selection.
+LOCAL_ROLES: tuple[str, ...] = ("detector", "recognizer")
 
 
 class Registry:
     def __init__(self) -> None:
         self._classes: dict[str, dict[str, type]] = {r: {} for r in ROLES}
         self._instances: dict[tuple[str, str], Any] = {}
+        # key -> time.monotonic() of last get(), for the idle-unload sweep. Bumped on
+        # every resolve (hit + load); dropped on unload. A single-key dict write is
+        # atomic under the GIL, so the fast path bumps it lock-free like the hit above.
+        self._last_used: dict[tuple[str, str], float] = {}
         # Per-engine compute-device resolver, wired at the composition root (main
         # lifespan) so the registry needn't import state. A device is a LOAD-TIME
         # property: it's read only when a key is first loaded (below), never on a
@@ -87,6 +96,7 @@ class Registry:
         key = (role, name)
         inst = self._instances.get(key)  # lock-free fast path (atomic dict.get under the GIL)
         if inst is not None:
+            self._last_used[key] = time.monotonic()  # bump for the idle sweep (lock-free)
             return inst
         with self._lock:  # miss: serialize create+load so two threads don't double-load a key
             inst = self._instances.get(key)  # re-check: another thread may have loaded it
@@ -99,6 +109,7 @@ class Registry:
                     inst._device_override = device
                 inst.load()  # heavy + GIL-releasing; held under the lock on purpose (loads once)
                 self._instances[key] = inst  # publish only after a successful load
+            self._last_used[key] = time.monotonic()  # freshly loaded / re-check hit: mark used
             return inst
 
     def unload_one(self, role: str, name: str) -> None:
@@ -106,12 +117,26 @@ class Registry:
         (e.g. after its per-engine device override changed). No-op if not loaded.
         Call under the GPU lock so no inference is mid-flight on it."""
         with self._lock:  # symmetric with get(): no concurrent re-create mid-unload
+            self._last_used.pop((role, name), None)
             inst = self._instances.pop((role, name), None)
             if inst is not None:
                 try:
                     inst.unload()
                 except Exception:  # noqa: BLE001 - a broken unload must not block the switch
                     pass
+
+    def idle_candidates(self, ttl_seconds: float, now: float) -> list[tuple[str, str]]:
+        """Loaded LOCAL engines (detector/recognizer — the in-process torch/VRAM
+        roles) not used for more than ``ttl_seconds`` as of ``now`` (a monotonic
+        clock). The idle-unload sweep reads this lock-free to pick candidates, then
+        re-checks each under the GPU lock before unloading (a request may have just
+        bumped it). Translators are excluded — they hold no VRAM here."""
+        return [
+            key for key in list(self._instances)
+            if key[0] in LOCAL_ROLES
+            and (last := self._last_used.get(key)) is not None
+            and now - last > ttl_seconds
+        ]
 
 
 ensure_on_path()  # volume-installed engine packages are importable before discovery

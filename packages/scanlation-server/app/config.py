@@ -58,6 +58,16 @@ class Settings:
         default_factory=lambda: max(1, int(_env("SCANLATION_TRANSLATE_CONCURRENCY", "1")))
     )
 
+    # First-run default for idle model unload (MINUTES): a local torch engine
+    # (detector/recognizer) not used for this long is dropped from VRAM by a
+    # background sweep, so it stops holding the GPU between reading sessions — the
+    # in-process analog of ollama's OLLAMA_KEEP_ALIVE (translators are separate
+    # processes, unaffected). Persisted in state.json, editable in /admin (동작 tab).
+    # Floor 0; 0 = never auto-unload (keep resident).
+    model_idle_unload_minutes: int = field(
+        default_factory=lambda: max(0, int(_env("SCANLATION_MODEL_IDLE_UNLOAD_MINUTES", "5")))
+    )
+
     # First-run defaults for the GPU/torch build a plugin install pulls, so a headless
     # deploy can pick the wheel via env instead of visiting /admin first. Persisted in
     # state.json, editable in /admin (동작 tab); the /admin write path validates the

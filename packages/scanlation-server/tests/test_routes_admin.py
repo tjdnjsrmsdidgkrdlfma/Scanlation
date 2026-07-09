@@ -147,6 +147,25 @@ def test_client_config_translate_concurrency():
         c.post("/set_client_config/", json={"translate_concurrency": 1})  # cleanup (back to default)
 
 
+def test_client_config_model_idle_unload_minutes():
+    c = client()
+    # server-only (NOT in the handshake the extension reads); shown in the admin snapshot
+    assert "model_idle_unload_minutes" not in c.get("/").json()
+    assert "model_idle_unload_minutes" in c.get("/get_settings/").json()["selection"]
+    try:
+        r = c.post("/set_client_config/", json={"model_idle_unload_minutes": 15})
+        assert r.status_code == 200 and r.json()["model_idle_unload_minutes"] == 15
+        assert c.get("/get_settings/").json()["selection"]["model_idle_unload_minutes"] == 15
+        # 0 stays 0 (disabled — keep resident); negative clamps to 0 (state is the
+        # single validation authority, not a 400)
+        r = c.post("/set_client_config/", json={"model_idle_unload_minutes": 0})
+        assert r.status_code == 200 and r.json()["model_idle_unload_minutes"] == 0
+        r = c.post("/set_client_config/", json={"model_idle_unload_minutes": -3})
+        assert r.status_code == 200 and r.json()["model_idle_unload_minutes"] == 0
+    finally:
+        c.post("/set_client_config/", json={"model_idle_unload_minutes": 5})  # cleanup (back to default)
+
+
 TESTS = [
     test_get_settings_shape,
     test_get_settings_merges_catalog,
@@ -158,6 +177,7 @@ TESTS = [
     test_client_config_min_image_dim,
     test_client_config_verbose_log,
     test_client_config_translate_concurrency,
+    test_client_config_model_idle_unload_minutes,
 ]
 
 if __name__ == "__main__":

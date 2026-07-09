@@ -31,12 +31,14 @@ def test_state_json_roundtrip():
         st.save_prompt("mine", "PROMPT")
         old_sem = st.translate_sem
         st.set_client_config(min_image_dim=123, verbose_log=True, translate_concurrency=8,
+                             model_idle_unload_minutes=20,
                              torch_backend="gpu", torch_vendor="amd", torch_index="https://x/rocm6.2")
         assert st.translate_sem is not old_sem  # semaphore instance swapped at runtime
         # a fresh instance reads state.json back; dataclass equality covers every field
         assert AppState().selection == st.selection
         assert AppState().selection.verbose_log is True  # verbose toggle persisted
         assert AppState().selection.translate_concurrency == 8  # concurrency persisted
+        assert AppState().selection.model_idle_unload_minutes == 20  # idle-unload window persisted
         assert AppState().selection.torch_backend == "gpu"      # torch backend persisted
         assert AppState().selection.torch_vendor == "amd"
         assert AppState().selection.torch_index == "https://x/rocm6.2"
@@ -90,9 +92,18 @@ def test_config_env_seeds_settings_and_selection():
     finally:
         os.environ.pop("SCANLATION_TRANSLATE_CONCURRENCY", None)
 
+    os.environ["SCANLATION_MODEL_IDLE_UNLOAD_MINUTES"] = "12"
+    try:
+        assert Settings().model_idle_unload_minutes == 12      # env read per instance
+        os.environ["SCANLATION_MODEL_IDLE_UNLOAD_MINUTES"] = "-1"
+        assert Settings().model_idle_unload_minutes == 0       # floor 0 (0 = never unload)
+    finally:
+        os.environ.pop("SCANLATION_MODEL_IDLE_UNLOAD_MINUTES", None)
+
     # Selection defaults are seeded from the settings singleton (wiring, not literals)
     sel = Selection()
     assert sel.translate_concurrency == settings.translate_concurrency
+    assert sel.model_idle_unload_minutes == settings.model_idle_unload_minutes
     assert sel.torch_backend == settings.torch_backend
     assert sel.torch_vendor == settings.torch_vendor
     assert sel.torch_index == settings.torch_index

@@ -109,6 +109,16 @@
       </div>
       <p class="note" data-i18n="behavior.concurrency.desc">GPU 락 밖에서 한 번에 번역할 이미지 수(재시작 없이 즉시 적용). ollama의 OLLAMA_NUM_PARALLEL과 맞추세요 — 둘 중 낮은 값이 실제 병렬도이고, 이 값만 높이면 요청이 큐에 밀려 타임아웃·폴백이 납니다.</p>
       <div class="row">
+        <label class="grow"><span data-i18n="behavior.idleUnload.label">모델 유휴 언로드 (분)</span>
+          <div class="stepper">
+            <button type="button" class="step-btn" data-step="-1" aria-label="decrease">−</button>
+            <input id="model-idle-unload-minutes" type="number" min="0" step="1" inputmode="numeric" />
+            <button type="button" class="step-btn" data-step="1" aria-label="increase">+</button>
+          </div>
+        </label>
+      </div>
+      <p class="note" data-i18n="behavior.idleUnload.desc">로컬 torch 엔진(탐지·인식)을 이 시간(분) 동안 안 쓰면 VRAM에서 내려, 작업 사이에 GPU를 붙잡고 있지 않게 합니다(ollama 번역기는 별도 프로세스라 무관 — 그쪽은 OLLAMA_KEEP_ALIVE가 관리). 0 = 안 내림(상주 유지).</p>
+      <div class="row">
         <label class="grow"><span data-i18n="behavior.backend.label">연산 백엔드 (torch)</span>
           <select id="torch-backend">
             <option value="cpu">CPU</option>

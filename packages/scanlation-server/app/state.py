@@ -50,6 +50,12 @@ class Selection:
     # GENERATION is opt-in: raise this AND OLLAMA_NUM_PARALLEL together (the lower of
     # the two = real parallelism; ollama can't be queried, so keeping them in sync is manual).
     translate_concurrency: int = settings.translate_concurrency
+    # Idle-unload timer (MINUTES) for local torch engines (detector/recognizer): a
+    # background sweep drops one from VRAM after it's gone this long without use, so
+    # it doesn't hold the GPU between reading sessions. Translators are HTTP/out-of-
+    # process and unaffected — ollama's own OLLAMA_KEEP_ALIVE governs those. Seeded
+    # from SCANLATION_MODEL_IDLE_UNLOAD_MINUTES, edited in /admin (동작 tab). 0 = never.
+    model_idle_unload_minutes: int = settings.model_idle_unload_minutes
     # GPU/torch build for plugin installs (the /admin 동작 tab). "cpu" (default) or
     # "gpu"; on "gpu" the vendor is auto-detected from device nodes at install time
     # (app.gpus.detect_gpu_vendor). torch is ONE build = ONE vendor, so this decides
@@ -127,15 +133,16 @@ class AppState:
 
     def set_client_config(
         self, *, min_image_dim: int | None = None, verbose_log: bool | None = None,
-        translate_concurrency: int | None = None,
+        translate_concurrency: int | None = None, model_idle_unload_minutes: int | None = None,
         torch_backend: str | None = None, torch_vendor: str | None = None,
         torch_index: str | None = None,
     ) -> None:
         """Persist behavior settings (the /admin 동작 tab): the extension image
-        filter, the verbose-log toggle, the concurrent-translation limit, and the
-        GPU/torch backend for plugin installs. Verbose re-applies to the live logger
-        and translate_concurrency swaps translate_sem (runtime, no restart); the torch
-        backend takes effect on the NEXT plugin install."""
+        filter, the verbose-log toggle, the concurrent-translation limit, the idle
+        model-unload timer, and the GPU/torch backend for plugin installs. Verbose
+        re-applies to the live logger and translate_concurrency swaps translate_sem
+        (runtime, no restart); the idle timer is read live by the background sweep;
+        the torch backend takes effect on the NEXT plugin install."""
         if min_image_dim is not None:
             self.selection.min_image_dim = max(0, int(min_image_dim))
         if verbose_log is not None:
@@ -147,6 +154,10 @@ class AppState:
             # New Semaphore instance: in-flight translates finish on the old one, new
             # requests use the new limit (run_page reads state.translate_sem each call).
             self.translate_sem = asyncio.Semaphore(self.selection.translate_concurrency)
+        if model_idle_unload_minutes is not None:
+            # Clamp is the single validation authority (>= 0; 0 = never unload). No
+            # runtime re-apply — the idle sweep reads this fresh on each pass.
+            self.selection.model_idle_unload_minutes = max(0, int(model_idle_unload_minutes))
         if torch_backend is not None:
             self.selection.torch_backend = torch_backend if torch_backend in ("cpu", "gpu") else "cpu"
         if torch_vendor is not None:

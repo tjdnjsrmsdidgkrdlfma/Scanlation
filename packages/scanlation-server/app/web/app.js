@@ -372,6 +372,7 @@ function renderBehavior() {
   $("min-image-dim").value = DATA.selection.min_image_dim;
   $("verbose-log").checked = !!DATA.selection.verbose_log;
   $("translate-concurrency").value = DATA.selection.translate_concurrency;
+  $("model-idle-unload-minutes").value = DATA.selection.model_idle_unload_minutes;
   renderTorchBackend();
 }
 
@@ -684,11 +685,13 @@ async function saveBehavior() {
   try {
     const n = parseInt($("min-image-dim").value, 10);
     const c = parseInt($("translate-concurrency").value, 10);
+    const u = parseInt($("model-idle-unload-minutes").value, 10);
     await postJSON("/set_client_config/", {
       // NaN guard only (empty field -> a sane default); the server clamps the range.
       min_image_dim: Number.isFinite(n) ? n : 0,
       verbose_log: $("verbose-log").checked,
       translate_concurrency: Number.isFinite(c) ? c : 1,
+      model_idle_unload_minutes: Number.isFinite(u) ? u : 0,
       torch_backend: $("torch-backend").value,
       torch_vendor: $("torch-vendor-row").hidden ? "" : $("torch-vendor").value,
       torch_index: $("torch-index").value.trim(),

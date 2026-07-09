@@ -232,6 +232,7 @@ cd packages/scanlation-server
 | `SCANLATION_AUTH_TOKEN` | (빈 값) | 설정 시 모든 API·admin이 `X-Auth-Token` 헤더를 요구(빈 값=무인증). 확장 팝업·`/admin`에 같은 값 입력. `OPTIONS`·`/admin` 정적은 면제 |
 | `SCANLATION_LOG_LEVEL` | `INFO` | `scanlation.*` 로거 레벨(서드파티는 root WARNING으로 고정). access 로그는 자체 미들웨어가 타임스탬프+소요시간(`METHOD PATH -> STATUS Nms`)으로 대체. `DEBUG`로 상세화 |
 | `SCANLATION_MIN_IMAGE_DIM` | `80` | 확장 이미지 필터 최초 기본값: **짧은 변**이 이 px 미만이면 아이콘·배너로 보고 스킵. `/admin` **동작** 탭에서 조절(→ handshake로 확장에 전달). `0`=전부 번역 |
+| `SCANLATION_MODEL_IDLE_UNLOAD_MINUTES` | `5` | 로컬 torch 엔진(detector·recognizer)을 이 **분**만큼 안 쓰면 백그라운드 sweep가 VRAM에서 내림(작업 사이 GPU 반납). `/admin` **동작** 탭에서 조절, `state.json` 영속. `0`=안 내림(상주). 번역기(ollama)는 별도 프로세스라 무관 — 그쪽은 `OLLAMA_KEEP_ALIVE`가 관리 |
 | `SCANLATION_DETECTOR` / `_RECOGNIZER` / `_TRANSLATOR` | `comic-text-and-bubble-detector` / (빈 값) / (빈 값) | 최초 기동 기본 엔진(detector 기본 `comic-text-and-bubble-detector`; 나머지 빈 값=미선택; 이후 `/admin`이 덮어씀) |
 | `SCANLATION_LANG_SRC` / `_DST` | `ja` / `ko` | 최초 기동 기본 언어(이후 `/admin`) |
 | `SCANLATION_BASE_DIR` | 실행 위치(CWD) | `data/`(캐시, state.json) 루트; Docker/테스트는 명시 지정 |
@@ -248,6 +249,8 @@ cd packages/scanlation-server
 > 모델 태그는 이제 env가 아니라 **`/admin` 엔진 옵션의 드롭다운**에서만 정합니다(백엔드에 설치된 모델을 조회). `state.json`에 영속.
 
 > **ollama 동시성**: 번역은 이미지 단위 배치로 GPU 락 밖에서 여러 이미지를 **동시에** 처리합니다(동시 이미지 수는 `/admin` **동작** 탭의 "동시 번역 이미지 수", **기본 1** — `state.json`에 영속, 재시작 없이 조절). 기본 1은 안전값(어떤 ollama 설정에서도 큐 대기·타임아웃 없음)이며, 1이어도 검출·인식↔번역이 겹칩니다. GPU에서 **실제 병렬 생성**을 켜려면 이 값과 **호스트 ollama 데몬**의 `OLLAMA_NUM_PARALLEL`을 **함께** 올려야 합니다(둘 중 낮은 쪽이 실제 병렬도) — 설정 방법·VRAM 계산은 아래 **배포 → 호스트 ollama 튜닝** 참고.
+
+> **로컬 엔진 유휴 언로드**: 검출·인식(로컬 torch 엔진)은 첫 사용 시 VRAM에 로드돼 계속 상주합니다. `/admin` **동작** 탭의 "모델 유휴 언로드 (분)"(env `SCANLATION_MODEL_IDLE_UNLOAD_MINUTES`, **기본 5분**)만큼 안 쓰이면 백그라운드 sweep가 GPU 락 아래에서 내려 작업 사이 VRAM을 반납합니다(`0`=상주 유지). 번역기(ollama)의 `OLLAMA_KEEP_ALIVE`를 로컬 엔진에 대응시킨 것 — ollama 모델 자체는 여전히 그 데몬이 관리합니다.
 
 ---
 
