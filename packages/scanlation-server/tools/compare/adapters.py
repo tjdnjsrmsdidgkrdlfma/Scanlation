@@ -251,8 +251,8 @@ class MitOcrAdapter(Adapter):
 
     def __init__(self, id_: str, variant: str, label: str):
         self.id, self.variant, self.label = id_, variant, label
-        self.install_hint = ("vendored — weights auto-included in tools/vendored/_mit_weights/ "
-                             "(from zyddnys/manga-image-translator release beta-0.3)")
+        self.install_hint = ("vendored — download weights into tools/vendored/_mit_weights/ "
+                             "(from zyddnys/manga-image-translator release beta-0.3; gitignored, not bundled)")
 
     def _ckpt(self) -> str:
         return "ocr-ctc.ckpt" if self.variant == "ctc" else "ocr_ar_48px.ckpt"
