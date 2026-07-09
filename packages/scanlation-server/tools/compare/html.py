@@ -87,6 +87,24 @@ _HTML_JS = """
 """
 
 
+def render_vote_page(dest, *, title, css, legend, catwrap_summary, body,
+                     engs, cat_list, cat_n, vote_ns) -> None:
+    """Assemble one self-contained scoring page: the shared <head>/legend/category
+    scaffold + the click-to-tally script (_HTML_JS), around a caller-built body.
+    _write_ocr_html and _write_box_html differ only in css, legend, summary, the
+    body, the per-category denominator (cat_n), and the vote namespace."""
+    import json
+    P = [f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>{title}</title><style>{css}</style></head><body>",
+         legend,
+         f"<details open id='catwrap'><summary>{catwrap_summary}</summary>"
+         "<div id='catbreak'></div></details>"]
+    P += body
+    P.append(f"<script>var VK='{vote_ns}',engs={json.dumps(engs)},"
+             f"catList={json.dumps(cat_list, ensure_ascii=False)},"
+             f"catN={json.dumps(cat_n, ensure_ascii=False)};{_HTML_JS}</script></body></html>")
+    dest.write_text("".join(P), encoding="utf-8")
+
+
 def _write_ocr_html(dest: Path, images, ref_id: str, out_root: Path, *, embed: bool = True, cap: int = 400) -> None:
     """Self-contained HTML: per image a table of crop rows — the crop image, then each
     engine's text with only the runs that DIFFER from ref_id highlighted red. Engine
@@ -95,7 +113,6 @@ def _write_ocr_html(dest: Path, images, ref_id: str, out_root: Path, *, embed: b
     (portable) unless embed=False (relative <img src>)."""
     import base64
     import html
-    import json
     css = ("body{font-family:'Segoe UI',system-ui,sans-serif;margin:14px;background:#1e1e1e;color:#d4d4d4}"
            "h2{margin:22px 0 4px;font-size:14px;color:#e0e0e0;border-bottom:1px solid #3a3a3a}"
            ".legend{position:sticky;top:0;background:#1e1e1e;padding:8px 0;border-bottom:1px solid #444;font-size:13px;z-index:3}"
@@ -136,16 +153,12 @@ def _write_ocr_html(dest: Path, images, ref_id: str, out_root: Path, *, embed: b
         if c not in cat_list:
             cat_list.append(c)
         cat_n[c] = cat_n.get(c, 0) + len(rows)
-    P = [f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>OCR compare</title><style>{css}</style></head><body>",
-         f"<div class='legend'>기준 = <b>{html.escape(ref_id)}</b> · 차이만 <span class='d'>&nbsp;빨강&nbsp;</span> "
-         f"(공백 무시) · 칸 클릭 = 득표 <span id='tally'></span><button id='reset'>초기화</button></div>",
-         "<details open id='catwrap'><summary>분류별 채택률 (분류 × 엔진 — 득표수 · %)</summary>"
-         "<div id='catbreak'></div></details>"]
+    body = []
     for rel, cols, rows in images:
         ri = cols.index(ref_id) if ref_id in cols else 0
         cat = rel.split("/")[0]  # category = first path segment, embedded in each cell for per-category tally
-        P.append(f"<h2>{html.escape(rel)}</h2><table><tr><th class='idx'>#</th><th class='im'>crop</th>"
-                 + "".join(f"<th>{html.escape(c)}{' (기준)' if i == ri else ''}</th>" for i, c in enumerate(cols)) + "</tr>")
+        body.append(f"<h2>{html.escape(rel)}</h2><table><tr><th class='idx'>#</th><th class='im'>crop</th>"
+                    + "".join(f"<th>{html.escape(c)}{' (기준)' if i == ri else ''}</th>" for i, c in enumerate(cols)) + "</tr>")
         for i, row in enumerate(rows):
             ref = clip(row[ri])
             tds = []
@@ -154,12 +167,15 @@ def _write_ocr_html(dest: Path, images, ref_id: str, out_root: Path, *, embed: b
                 cls = "eng ref" if j == ri else "eng"
                 tds.append(f"<td class='{cls}' data-eng='{esc_attr(cols[j])}' data-cat='{esc_attr(cat)}' "
                            f"data-key='{esc_attr(f'{rel}|{i:02d}|{cols[j]}')}'>{inner}</td>")
-            P.append(f"<tr><td class='idx'>{i:02d}</td><td class='im'>{crop_cell(rel, i)}</td>" + "".join(tds) + "</tr>")
-        P.append("</table>")
-    P.append(f"<script>var VK='ocrsel:',engs={json.dumps(engs)},"
-             f"catList={json.dumps(cat_list, ensure_ascii=False)},"
-             f"catN={json.dumps(cat_n, ensure_ascii=False)};{_HTML_JS}</script></body></html>")
-    dest.write_text("".join(P), encoding="utf-8")
+            body.append(f"<tr><td class='idx'>{i:02d}</td><td class='im'>{crop_cell(rel, i)}</td>" + "".join(tds) + "</tr>")
+        body.append("</table>")
+    render_vote_page(
+        dest, title="OCR compare", css=css,
+        legend=(f"<div class='legend'>기준 = <b>{html.escape(ref_id)}</b> · 차이만 <span class='d'>&nbsp;빨강&nbsp;</span> "
+                f"(공백 무시) · 칸 클릭 = 득표 <span id='tally'></span><button id='reset'>초기화</button></div>"),
+        catwrap_summary="분류별 채택률 (분류 × 엔진 — 득표수 · %)",
+        body=body, engs=engs, cat_list=cat_list, cat_n=cat_n, vote_ns="ocrsel:",
+    )
 
 
 def _consolidate_box_images(out_root: Path):
@@ -183,7 +199,6 @@ def _write_box_html(dest: Path, images, out_root: Path, *, embed: bool = False) 
     default (full-page PNGs are big); embed=True base64-inlines them (portable, heavy)."""
     import base64
     import html
-    import json
     css = ("body{font-family:'Segoe UI',system-ui,sans-serif;margin:14px;background:#1e1e1e;color:#d4d4d4}"
            "h2{margin:22px 0 6px;font-size:15px;color:#e0e0e0;border-bottom:1px solid #3a3a3a}"
            "h3{margin:14px 0 4px;font-size:13px;color:#bbb;font-weight:600}"
@@ -221,27 +236,26 @@ def _write_box_html(dest: Path, images, out_root: Path, *, embed: bool = False) 
             return None
         return ("data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()) if embed else f"{rel}/{m}.png"
 
-    P = [f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>BOX compare</title><style>{css}</style></head><body>",
-         "<div class='legend'>detector 박스 채점 · 오버레이 클릭 = 득표 "
-         "<span id='tally'></span><button id='reset'>초기화</button></div>",
-         "<details open id='catwrap'><summary>분류별 채택률 (분류 × 모델 — 득표수 · %)</summary>"
-         "<div id='catbreak'></div></details>"]
+    body = []
     last_cat = None
     for rel, _models in images:
         cat = rel.split("/")[0]
         if cat != last_cat:
-            P.append(f"<h2>{html.escape(cat)}</h2>")
+            body.append(f"<h2>{html.escape(cat)}</h2>")
             last_cat = cat
-        P.append(f"<h3>{html.escape(rel.split('/', 1)[-1])}</h3><div class='row'>")
+        body.append(f"<h3>{html.escape(rel.split('/', 1)[-1])}</h3><div class='row'>")
         for m in engs:
             s = src(rel, m)
             if s is None:
                 continue
-            P.append(f"<div class='eng box' data-eng='{esc_a(m)}' data-cat='{esc_a(cat)}' "
-                     f"data-key='{esc_a(f'{rel}|{m}')}'><div class='ml'>{html.escape(m)}</div>"
-                     f"<img src='{s}' loading='lazy'></div>")
-        P.append("</div>")
-    P.append(f"<script>var VK='boxsel:',engs={json.dumps(engs)},"
-             f"catList={json.dumps(cat_list, ensure_ascii=False)},"
-             f"catN={json.dumps(cat_n, ensure_ascii=False)};{_HTML_JS}</script></body></html>")
-    dest.write_text("".join(P), encoding="utf-8")
+            body.append(f"<div class='eng box' data-eng='{esc_a(m)}' data-cat='{esc_a(cat)}' "
+                        f"data-key='{esc_a(f'{rel}|{m}')}'><div class='ml'>{html.escape(m)}</div>"
+                        f"<img src='{s}' loading='lazy'></div>")
+        body.append("</div>")
+    render_vote_page(
+        dest, title="BOX compare", css=css,
+        legend=("<div class='legend'>detector 박스 채점 · 오버레이 클릭 = 득표 "
+                "<span id='tally'></span><button id='reset'>초기화</button></div>"),
+        catwrap_summary="분류별 채택률 (분류 × 모델 — 득표수 · %)",
+        body=body, engs=engs, cat_list=cat_list, cat_n=cat_n, vote_ns="boxsel:",
+    )
