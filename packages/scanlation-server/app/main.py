@@ -67,6 +67,11 @@ async def lifespan(app: FastAPI):
     from .logconfig import apply_verbose
     from .state import state
     apply_verbose(state.selection.verbose_log)
+    # Wire the per-engine device resolver here (the composition root) so the
+    # registry stays free of a state import. Tools/tests leave it None -> engines
+    # load on their DEFAULT_DEVICE.
+    from .registry import registry
+    registry.device_resolver = state.resolve_device_for
     settings.ensure_dirs()
     yield
 

@@ -97,6 +97,34 @@ def test_evict_then_reload():
         _cleanup_probe()
 
 
+def test_device_resolver_applied_on_load():
+    """get() reads the wired device_resolver at load time and stamps the override
+    onto the fresh instance. Reverting get() to ignore the resolver turns this red."""
+    _register_probe()
+    saved = registry.device_resolver
+    try:
+        registry.device_resolver = lambda n: "cuda:7" if n == _PROBE_KEY[1] else None
+        inst = registry.get(*_PROBE_KEY)
+        assert getattr(inst, "_device_override", None) == "cuda:7"
+    finally:
+        registry.device_resolver = saved
+        _cleanup_probe()
+
+
+def test_no_device_resolver_leaves_default():
+    """With no resolver wired (tools/tests), get() loads without stamping a device
+    override -> the engine falls back to its DEFAULT_DEVICE, as before B3."""
+    _register_probe()
+    saved = registry.device_resolver
+    try:
+        registry.device_resolver = None
+        inst = registry.get(*_PROBE_KEY)
+        assert getattr(inst, "_device_override", None) is None
+    finally:
+        registry.device_resolver = saved
+        _cleanup_probe()
+
+
 class _BrokenEntryPoint:
     """A discovery entry_point whose load() fails — stands in for a ghost/stale
     install-metadata entry that importlib.metadata still enumerates (H1)."""
@@ -140,6 +168,8 @@ TESTS = [
     test_concurrent_get_loads_once,
     test_cache_hit_does_not_reload,
     test_evict_then_reload,
+    test_device_resolver_applied_on_load,
+    test_no_device_resolver_leaves_default,
     test_discover_logs_failed_load,
 ]
 

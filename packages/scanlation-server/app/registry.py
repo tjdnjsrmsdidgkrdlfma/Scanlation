@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import threading
 from importlib.metadata import entry_points
-from typing import Any
+from typing import Any, Callable
 
 from .plugins_path import ensure_on_path
 
@@ -34,6 +34,12 @@ class Registry:
     def __init__(self) -> None:
         self._classes: dict[str, dict[str, type]] = {r: {} for r in ROLES}
         self._instances: dict[tuple[str, str], Any] = {}
+        # Per-engine compute-device resolver, wired at the composition root (main
+        # lifespan) so the registry needn't import state. A device is a LOAD-TIME
+        # property: it's read only when a key is first loaded (below), never on a
+        # cache hit — changing an engine's device means unload_one, then reload.
+        # Left None in tools/tests -> engines load on their DEFAULT_DEVICE.
+        self.device_resolver: Callable[[str], str | None] | None = None
         # Serializes instance create+load so a key loads exactly once, even when
         # callers no longer hold an external lock. get() runs on a threadpool
         # worker (run_in_threadpool), so this is a threading.Lock, not asyncio.
@@ -77,7 +83,7 @@ class Registry:
         return self._classes
 
     # --- lazy instance (loads weights on first use) ---
-    def get(self, role: str, name: str, device: str | None = None) -> Any:
+    def get(self, role: str, name: str) -> Any:
         key = (role, name)
         inst = self._instances.get(key)  # lock-free fast path (atomic dict.get under the GIL)
         if inst is not None:
@@ -86,6 +92,7 @@ class Registry:
             inst = self._instances.get(key)  # re-check: another thread may have loaded it
             if inst is None:
                 inst = self._classes[role][name]()
+                device = self.device_resolver(name) if self.device_resolver else None
                 if device is not None:
                     # Per-engine override; honored by LocalModelEngineBase.load(),
                     # ignored by engines that don't load onto a device (translators).
