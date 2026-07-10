@@ -16,6 +16,8 @@ dependencies = [
     # shares the /plugins transformers. paddleocr_vl is natively supported on 5.12.x.
     "transformers>=5.0,<5.13",
     "torch",
+    # transformers' device_map= load path (plugin._load) requires accelerate.
+    "accelerate",
     "huggingface_hub",
     "pillow",
 ]
