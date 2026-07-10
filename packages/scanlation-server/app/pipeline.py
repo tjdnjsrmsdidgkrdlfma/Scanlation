@@ -138,6 +138,17 @@ def translate_regions(
     ]
 
 
+def recognized_to_result(recognized: list[tuple[str, Region]]) -> list[ResultItem]:
+    """Wire result for a recognize-only run (skip_translate): recognized text as
+    ``source`` with an empty ``destination`` — the same shape as translate_regions
+    minus the LLM call. Lets a benchmark measure detect+recognize without a translator
+    running (e.g. when a GPU VLM recognizer and the LLM can't share VRAM)."""
+    return [
+        ResultItem(bounds=region.wire_box(), source=text, destination="")
+        for text, region in recognized
+    ]
+
+
 def run_pipeline(
     img: Image.Image,
     *,

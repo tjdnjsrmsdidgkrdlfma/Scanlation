@@ -19,7 +19,7 @@ from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
 from .cache import cache, opt_hash
-from .pipeline import detect_and_recognize, translate_regions
+from .pipeline import detect_and_recognize, recognized_to_result, translate_regions
 from .registry import registry
 from .state import state
 
@@ -139,11 +139,15 @@ async def _run_deduped(id_, compute):
         state.inflight.pop(id_, None)
 
 
-async def run_page(plan: RunPlan, md5: str, contents: str) -> tuple[list, dict]:
+async def run_page(plan: RunPlan, md5: str, contents: str, *, skip_translate: bool = False) -> tuple[list, dict]:
     """Compute (or join an in-flight computation of) the page result: decode ->
     detect+recognize under the GPU lock -> translate off it -> cache. Returns
     ``(result, timing)`` where timing is the per-stage ms breakdown (also logged).
-    Raises BadImageError on a bad image; other failures propagate to the caller."""
+    Raises BadImageError on a bad image; other failures propagate to the caller.
+
+    ``skip_translate`` is a recognize-only mode for benchmarks: it emits the source
+    with an empty destination, skips the LLM half (semwait/translate stay 0), and does
+    NOT cache — a translation-less result must never shadow a real one."""
     async def compute():
         # Timed per stage so the log shows where the time goes. lockwait = time
         # spent waiting for the GPU lock (surfaces contention when images overlap).
@@ -158,11 +162,17 @@ async def run_page(plan: RunPlan, md5: str, contents: str) -> tuple[list, dict]:
             t_lock = time.perf_counter()
             recognized, translator, sub = await run_in_threadpool(_read_sync, img, plan)
         t_det = time.perf_counter()
-        async with state.translate_sem:
-            t_sem = time.perf_counter()  # sem acquired: split our queue-wait from the actual call
-            result = await run_in_threadpool(_translate_sync, recognized, translator, plan)
-        t_tsl = time.perf_counter()
-        cache.put_run(md5, *plan.cache_key, result)
+        if skip_translate:
+            # recognize-only: source with no translation; leave the translate spans at 0
+            # and don't cache (a translation-less result must not shadow a real one).
+            result = recognized_to_result(recognized)
+            t_sem = t_tsl = t_det
+        else:
+            async with state.translate_sem:
+                t_sem = time.perf_counter()  # sem acquired: split our queue-wait from the actual call
+                result = await run_in_threadpool(_translate_sync, recognized, translator, plan)
+            t_tsl = time.perf_counter()
+            cache.put_run(md5, *plan.cache_key, result)
         # semwait = time queued on translate_sem (our backpressure); translate = the
         # actual backend call (ollama generate + any ollama-side queue). Splitting them
         # tells whether OUR limit or the BACKEND is the bottleneck when translates pile up.
@@ -190,4 +200,6 @@ async def run_page(plan: RunPlan, md5: str, contents: str) -> tuple[list, dict]:
         }
         return result, timing
 
-    return await _run_deduped((md5, *plan.cache_key), compute)
+    # skip_translate in the dedup key so a recognize-only run never joins (or is joined
+    # by) a full run for the same image — they compute different results.
+    return await _run_deduped((md5, *plan.cache_key, skip_translate), compute)

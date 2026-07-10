@@ -62,7 +62,9 @@ async def run_pipeline(req: RunRequest) -> dict:
     if req.md5 != hashlib.md5(req.contents.encode("utf-8")).hexdigest():
         raise HTTPException(status_code=400, detail="md5 mismatch")
 
-    if not req.force:
+    # skip_translate bypasses the cache both ways: never serve a cached (translated)
+    # result for a recognize-only request, and (in run_page) never write one back.
+    if not req.force and not req.skip_translate:
         cached = cached_result(plan, req.md5)
         if cached is not None:
             return {"result": cached}
@@ -73,7 +75,7 @@ async def run_pipeline(req: RunRequest) -> dict:
     _require("translator", plan.translator)
 
     try:
-        result, timing = await run_page(plan, req.md5, req.contents)
+        result, timing = await run_page(plan, req.md5, req.contents, skip_translate=bool(req.skip_translate))
     except BadImageError as exc:
         raise HTTPException(status_code=400, detail=f"bad image: {exc}")
     except Exception as exc:  # noqa: BLE001

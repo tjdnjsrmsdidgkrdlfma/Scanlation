@@ -19,6 +19,7 @@ class RunRequest(BaseModel):
     contents: Optional[str] = None          # base64; required by /run_pipeline/, ignored by /run_lookup/
     options: Optional[dict[str, Any]] = None  # {engine_name: {opt: val}}
     force: Optional[bool] = False           # extension never sends this; re-run + overwrite
+    skip_translate: Optional[bool] = False  # recognize-only run (benchmarks): emit source, skip the LLM, don't cache
 
 
 # --- /set_engines/ ----------------------------------------------------------

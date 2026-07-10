@@ -87,6 +87,30 @@ def test_run_pipeline_returns_per_stage_timing():
     assert "timing" not in hit.json()
 
 
+def test_skip_translate_is_recognize_only_and_bypasses_cache():
+    """skip_translate: source-only (empty destination) with the translate spans zeroed,
+    and it neither reads nor writes the cache — it never serves a cached translation and
+    never shadows one."""
+    c = client()
+    p = payload(color=(11, 99, 201))  # unique md5
+
+    # a full run caches a translated result (dummy translator fills destination)
+    full = c.post("/run_pipeline/", json={"md5": p["md5"], "contents": p["b64"]})
+    assert full.status_code == 200 and all(it["destination"] for it in full.json()["result"])
+
+    # skip_translate on the SAME (now-cached) image ignores the cache -> recognize-only
+    recog = c.post("/run_pipeline/",
+                   json={"md5": p["md5"], "contents": p["b64"], "skip_translate": True})
+    assert recog.status_code == 200
+    body = recog.json()
+    assert body["result"] and all(it["source"] and it["destination"] == "" for it in body["result"])
+    assert body["timing"]["translate_ms"] == 0 and body["timing"]["semwait_ms"] == 0
+
+    # it did NOT overwrite the cache: the cached translation is still there
+    hit = c.post("/run_lookup/", json={"md5": p["md5"]})
+    assert hit.status_code == 200 and all(it["destination"] for it in hit.json()["result"])
+
+
 TESTS = [
     test_run_pipeline_work_returns_result_items,
     test_run_pipeline_md5_mismatch_is_400,
@@ -94,6 +118,7 @@ TESTS = [
     test_lookup_miss_then_work_then_hit,
     test_run_pipeline_requires_contents,
     test_run_pipeline_returns_per_stage_timing,
+    test_skip_translate_is_recognize_only_and_bypasses_cache,
 ]
 
 if __name__ == "__main__":

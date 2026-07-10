@@ -79,12 +79,14 @@ def _headers(token: str, *, json_body: bool) -> dict:
     return h
 
 
-def post_pipeline(server: str, token: str, img: Path, force: bool) -> dict:
+def post_pipeline(server: str, token: str, img: Path, force: bool, skip_translate: bool = False) -> dict:
     """POST one image to /run_pipeline/ and return the FULL parsed response
-    (``{result, timing?}``). md5 is over the base64 string, matching the extension."""
+    (``{result, timing?}``). md5 is over the base64 string, matching the extension.
+    skip_translate = recognize-only (source, no destination) for a translator-free bench."""
     b64 = base64.b64encode(img.read_bytes()).decode("ascii")
     md5 = hashlib.md5(b64.encode("utf-8")).hexdigest()
-    body = json.dumps({"md5": md5, "contents": b64, "force": force}).encode("utf-8")
+    body = json.dumps({"md5": md5, "contents": b64, "force": force,
+                       "skip_translate": skip_translate}).encode("utf-8")
     req = urllib.request.Request(f"{server}/run_pipeline/", data=body,
                                  headers=_headers(token, json_body=True))
     with urllib.request.urlopen(req) as resp:
@@ -157,6 +159,7 @@ def build_report(runs: list[dict], settings_summary: dict | None, meta: dict) ->
         "generated_at": meta["generated_at"],
         "server": meta["server"],
         "mode": meta["mode"],          # "serial" | "parallel" (timing is contended when parallel)
+        "skip_translate": meta.get("skip_translate", False),  # recognize-only run (no translation)
         "settings": settings_summary,
         "images": runs,
         "aggregate": {
@@ -197,6 +200,8 @@ def build_markdown(report: dict) -> str:
              + ("" if report["mode"] == "serial"
                 else "  ⚠ 병렬 실행이라 lockwait/semwait 등 단계별 시간은 이미지 간 경합으로 오염됨"))
     L.append(f"- 이미지: {agg['images']} (성공 {agg['ok']}, 실패 {agg['failed']})  ·  총 리전 {agg['regions_total']}")
+    if report.get("skip_translate"):
+        L.append("- ⚠ **번역 스킵(recognize-only)** — destination 비어 있고 translate_ms=0. detect/recognize 벤치용.")
 
     s = report.get("settings")
     if s:
@@ -276,10 +281,10 @@ def build_markdown(report: dict) -> str:
 
 
 # --- driver ---------------------------------------------------------------------
-def _run_one(server: str, token: str, img: Path, force: bool) -> dict:
+def _run_one(server: str, token: str, img: Path, force: bool, skip_translate: bool = False) -> dict:
     """Drive one image; never raises — failures are captured into the run record."""
     try:
-        resp = post_pipeline(server, token, img, force)
+        resp = post_pipeline(server, token, img, force, skip_translate)
         return {"image": img.name, "ok": True,
                 "regions": resp.get("result") or [], "timing": resp.get("timing"), "error": None}
     except urllib.error.HTTPError as e:
@@ -343,6 +348,9 @@ def main() -> int:
                     help="fire all images at once (reproduces concurrent page load; pollutes per-stage timing)")
     ap.add_argument("--use-cache", action="store_true",
                     help="honor the cache (default: force a fresh run so timing is present)")
+    ap.add_argument("--no-translate", action="store_true",
+                    help="recognize-only: skip the LLM (source only, no translation). For an OCR "
+                         "bench when the GPU recognizer and the translate model can't share VRAM.")
     ap.add_argument("--out", default=None, help="output prefix (default: run_report_<timestamp>)")
     ap.add_argument("--selftest", action="store_true", help="verify report formatting on canned data, no server")
     a = ap.parse_args()
@@ -355,12 +363,14 @@ def main() -> int:
 
     server = a.server.rstrip("/")
     force = not a.use_cache
+    skip_translate = a.no_translate
     mode = "parallel" if a.parallel else "serial"
     imgs = list(iter_images(a.images))
     if not imgs:
         print("no images found", file=sys.stderr)
         return 1
-    print(f"POST {server}/run_pipeline/  ({len(imgs)} images, {mode}, force={force})", file=sys.stderr)
+    print(f"POST {server}/run_pipeline/  ({len(imgs)} images, {mode}, force={force}"
+          f"{', no-translate' if skip_translate else ''})", file=sys.stderr)
 
     settings_summary = summarize_settings(get_settings(server, a.token))
 
@@ -369,13 +379,15 @@ def main() -> int:
         # from different folders, and a name-keyed dict would collide (one result lost,
         # another duplicated) while the count still looked right.
         with ThreadPoolExecutor(max_workers=len(imgs)) as ex:
-            futs = {ex.submit(_run_one, server, a.token, img, force): i for i, img in enumerate(imgs)}
+            futs = {ex.submit(_run_one, server, a.token, img, force, skip_translate): i
+                    for i, img in enumerate(imgs)}
             done = {futs[f]: f.result() for f in as_completed(futs)}
         runs = [done[i] for i in range(len(imgs))]  # restore input order
     else:
-        runs = [_run_one(server, a.token, img, force) for img in imgs]
+        runs = [_run_one(server, a.token, img, force, skip_translate) for img in imgs]
 
-    meta = {"generated_at": datetime.now().isoformat(timespec="seconds"), "server": server, "mode": mode}
+    meta = {"generated_at": datetime.now().isoformat(timespec="seconds"), "server": server,
+            "mode": mode, "skip_translate": skip_translate}
     report = build_report(runs, settings_summary, meta)
 
     prefix = a.out or f"run_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
