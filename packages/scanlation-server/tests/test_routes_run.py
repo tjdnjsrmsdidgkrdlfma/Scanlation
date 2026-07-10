@@ -76,7 +76,7 @@ def test_run_pipeline_returns_per_stage_timing():
     timing = fresh.json().get("timing")
     assert timing is not None, "a fresh run must carry timing"
     assert set(timing) == {
-        "decode_ms", "lockwait_ms", "detect_recognize_ms",
+        "decode_ms", "lockwait_ms", "detect_recognize_ms", "detect_ms", "recognize_ms",
         "semwait_ms", "translate_ms", "total_ms", "regions",
     }
     assert all(isinstance(v, (int, float)) for v in timing.values())

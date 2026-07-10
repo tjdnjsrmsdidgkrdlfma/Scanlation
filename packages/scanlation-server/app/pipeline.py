@@ -65,11 +65,12 @@ def detect_and_recognize(
     src: str,
     opt_detect: dict[str, Any],
     opt_recognize: dict[str, Any],
-) -> list[tuple[str, Region]]:
-    """Detect regions, order them, deskew+recognize each. Returns non-empty
-    (text, region) pairs in reading order. This is the GPU/model half of the
-    pipeline — the route runs it under the GPU lock. assign_reading_order is
-    called exactly once here (it assigns region.order)."""
+) -> tuple[list[tuple[str, Region]], dict[str, float]]:
+    """Detect regions, order them, deskew+recognize each. Returns ``(pairs, timing)``:
+    non-empty (text, region) pairs in reading order, plus ``{detect_ms, recognize_ms}``
+    (the two halves, also logged — the caller surfaces them in the run response). This
+    is the GPU/model half of the pipeline — the route runs it under the GPU lock.
+    assign_reading_order is called exactly once here (it assigns region.order)."""
     t0 = time.perf_counter()
     regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
     t_det = time.perf_counter()
@@ -89,12 +90,14 @@ def detect_and_recognize(
         )
         if text:
             out.append((text, region))
+    t_rec = time.perf_counter()
     logger.info(
         "detect %s: %d regions %.0fms | recognize %s: %d texts %.0fms",
         getattr(detector, "name", "?"), len(regions), (t_det - t0) * 1000,
-        getattr(recognizer, "name", "?"), len(out), (time.perf_counter() - t_det) * 1000,
+        getattr(recognizer, "name", "?"), len(out), (t_rec - t_det) * 1000,
     )
-    return out
+    return out, {"detect_ms": round((t_det - t0) * 1000, 1),
+                 "recognize_ms": round((t_rec - t_det) * 1000, 1)}
 
 
 def _translate_all(
@@ -149,7 +152,7 @@ def run_pipeline(
 ) -> list[ResultItem]:
     """Detect+recognize then translate — the composed reference path (tests, and
     any single-call use). The route splits these two halves across the GPU lock."""
-    recognized = detect_and_recognize(
+    recognized, _timing = detect_and_recognize(
         img, detector=detector, recognizer=recognizer, src=src, opt_detect=opt_detect, opt_recognize=opt_recognize
     )
     return translate_regions(recognized, translator=translator, src=src, dst=dst, opt_translate=opt_translate)

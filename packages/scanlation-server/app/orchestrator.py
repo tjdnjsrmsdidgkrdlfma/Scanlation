@@ -75,7 +75,8 @@ def cached_result(plan: RunPlan, md5: str) -> list | None:
 
 def _read_sync(img, plan: RunPlan):
     """Read the image = detect + recognize (the GPU/model half). Resolves all three
-    engines (loads weights on first use); returns (recognized pairs, translator).
+    engines (loads weights on first use); returns (recognized pairs, translator,
+    sub-timing) where sub-timing is {detect_ms, recognize_ms} from the two halves.
 
     Runs in the threadpool UNDER the GPU lock: registry.get is not thread-safe
     (check-then-set on _instances) and model loads must be serialized. The
@@ -86,11 +87,11 @@ def _read_sync(img, plan: RunPlan):
     detector = registry.get("detector", plan.detector)
     recognizer = registry.get("recognizer", plan.recognizer)
     translator = registry.get("translator", plan.translator)
-    recognized = detect_and_recognize(
+    recognized, sub = detect_and_recognize(
         img, detector=detector, recognizer=recognizer,
         src=plan.src, opt_detect=plan.opt_detect, opt_recognize=plan.opt_recognize,
     )
-    return recognized, translator
+    return recognized, translator, sub
 
 
 def _translate_sync(recognized, translator, plan: RunPlan):
@@ -155,7 +156,7 @@ async def run_page(plan: RunPlan, md5: str, contents: str) -> tuple[list, dict]:
         # overrun the backend's parallel slots.
         async with state.gpu_lock:
             t_lock = time.perf_counter()
-            recognized, translator = await run_in_threadpool(_read_sync, img, plan)
+            recognized, translator, sub = await run_in_threadpool(_read_sync, img, plan)
         t_det = time.perf_counter()
         async with state.translate_sem:
             t_sem = time.perf_counter()  # sem acquired: split our queue-wait from the actual call
@@ -177,7 +178,11 @@ async def run_page(plan: RunPlan, md5: str, contents: str) -> tuple[list, dict]:
         timing = {
             "decode_ms": round((t_dec - t0) * 1000, 1),
             "lockwait_ms": round((t_lock - t_dec) * 1000, 1),
+            # detect_recognize_ms is the whole GPU half (t_det - t_lock): it also covers
+            # engine resolve/first-load + threadpool handoff, so it's >= detect + recognize.
             "detect_recognize_ms": round((t_det - t_lock) * 1000, 1),
+            "detect_ms": sub["detect_ms"],
+            "recognize_ms": sub["recognize_ms"],
             "semwait_ms": round((t_sem - t_det) * 1000, 1),
             "translate_ms": round((t_tsl - t_sem) * 1000, 1),
             "total_ms": round((t_tsl - t0) * 1000, 1),
