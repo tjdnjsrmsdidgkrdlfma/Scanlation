@@ -61,6 +61,12 @@ _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 # span — it also covers engine resolve/first-load, so it stays >= detect + recognize).
 _STAGES = ["decode_ms", "lockwait_ms", "detect_recognize_ms", "detect_ms", "recognize_ms",
            "semwait_ms", "translate_ms", "total_ms"]
+# translate_ms is one span around a single translate_batch call and is not split further:
+# the batch-vs-per-text fallback lives inside the translator plugin and the backend's
+# prompt-eval/generation time is opaque over HTTP. A spiking translate_ms almost always
+# means the batch fell back (http_timeout + N per-text calls) — the server log's
+# "batch of N failed (...); falling back to per-text" line is the tell. semwait_ms (queue
+# on translate_sem) vs translate_ms (the call) is the only translate split available here.
 
 
 # --- HTTP (stdlib) --------------------------------------------------------------
