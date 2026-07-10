@@ -37,6 +37,13 @@ ENV PYTHONUNBUFFERED=1 \
 ENV MIOPEN_USER_DB_PATH=/data/miopen \
     MIOPEN_CUSTOM_CACHE_DIR=/data/miopen
 
+# torch's own JIT kernel cache ($HOME/.cache/torch/kernels -- hiprtc-compiled generic
+# kernels on a process's first forward) hits the same non-writable-$HOME problem;
+# libtorch_hip honors this override. Pin to /data so that one-time cold compile also
+# persists across container recreation. Cold-start only, no warm-throughput effect;
+# no-op on CPU-only runs.
+ENV PYTORCH_KERNEL_CACHE_PATH=/data/torch-kernels
+
 # Core only: sdk + server, installed non-editable (a real package, not a mounted
 # source tree). Build from the copied source, then discard it — the final image
 # carries no repo working tree, just the installed core (+ dummy engine).
