@@ -24,9 +24,11 @@ from typing import Any
 from PIL import Image
 
 from scanlation_sdk.contracts import Region
-from scanlation_sdk.local_engine import LocalModelEngineBase, install_hint, to_rgb
+from scanlation_sdk.local_engine import LocalModelEngineBase, downscale_to_cap, install_hint, to_rgb
 
 logger = logging.getLogger("scanlation.PaddleOCR-VL-For-Manga")
+
+_MODES = ("area", "box", "grid28", "boxgrid", "pow2")  # downscale_mode choices; validated in recognize
 
 
 class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
@@ -38,6 +40,12 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
     OPTION_SCHEMA = {
         "max_new_tokens": {"type": int, "default": 1024,
                            "description": "Max output tokens per crop; lower to cap runaway generation."},
+        "max_pixels": {"type": int,
+                       "default": int(os.environ.get("SCANLATION_RECOGNIZE_MAX_PIXELS", "150000")),
+                       "description": "Downscale crops above this many pixels before OCR to cut vision tokens (~1.66x). 0 = off."},
+        "downscale_mode": {"type": str,
+                           "default": os.environ.get("SCANLATION_RECOGNIZE_DOWNSCALE_MODE", "pow2"),
+                           "description": "How to downscale when max_pixels applies: pow2 (recommended) / box / area / grid28 / boxgrid."},
     }
     SUPPORTED_SRC = ["ja", "en", "zh", "ko"]
 
@@ -99,6 +107,8 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
     def recognize(self, crop: Image.Image, region: Region, options: dict[str, Any]) -> str:
         options = self.resolve_options(options)
         crop = to_rgb(crop)
+        mode = options["downscale_mode"] if options["downscale_mode"] in _MODES else "pow2"
+        crop = downscale_to_cap(crop, options["max_pixels"], mode)
         messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": self.PROMPT}]}]
         text = self._proc.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
         inputs = self._proc(text=[text], images=[crop], return_tensors="pt").to(self._model.device)

@@ -11,7 +11,20 @@ from __future__ import annotations
 from scanlation_paddleocr_vl_for_manga.plugin import PaddleOcrVLForMangaRecognizer
 from scanlation_sdk.testing import recognizer_smoke
 
+
+def test_downscale_options_default_on():
+    """The resolution cap ships on: max_pixels defaults to a positive int, mode to pow2,
+    and resolve_options fills both for a bare call. Fast — no weights needed."""
+    schema = PaddleOcrVLForMangaRecognizer.OPTION_SCHEMA
+    assert isinstance(schema["max_pixels"]["default"], int) and schema["max_pixels"]["default"] > 0
+    assert schema["downscale_mode"]["default"] == "pow2"
+    resolved = PaddleOcrVLForMangaRecognizer().resolve_options({})
+    assert resolved["max_pixels"] == schema["max_pixels"]["default"]
+    assert resolved["downscale_mode"] == "pow2"
+
+
 TESTS = [
+    test_downscale_options_default_on,
     recognizer_smoke(
         PaddleOcrVLForMangaRecognizer,
         "transformers",

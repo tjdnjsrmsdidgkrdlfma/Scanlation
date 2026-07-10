@@ -22,6 +22,28 @@ def to_rgb(img: Image.Image) -> Image.Image:
     return img if img.mode == "RGB" else img.convert("RGB")
 
 
+GRID = 28  # dynamic-res VLM vision patch grid (PaddleOCR-VL: patch14 x merge2)
+
+
+def downscale_to_cap(crop: Image.Image, cap: int, mode: str = "pow2") -> Image.Image:
+    """Shrink a crop to <= ``cap`` pixels (aspect preserved) so a dynamic-resolution
+    VLM recognizer emits fewer vision tokens. ``pow2`` (BOX integer halving) is the
+    validated-best mode — packages/scanlation-server/tools/recognize-gpu-speed.md.
+    ``cap <= 0`` or an already-small crop is returned unchanged (same object)."""
+    w, h = crop.width, crop.height
+    if cap <= 0 or w * h <= cap:
+        return crop
+    if mode == "pow2":
+        while crop.width * crop.height > cap and crop.width >= 2 and crop.height >= 2:
+            crop = crop.reduce(2)
+        return crop
+    scale = (cap / (w * h)) ** 0.5
+    tw, th = max(1, int(w * scale)), max(1, int(h * scale))
+    if mode in ("grid28", "boxgrid"):
+        tw, th = max(GRID, tw - tw % GRID), max(GRID, th - th % GRID)
+    return crop.resize((tw, th), Image.BOX if mode in ("box", "boxgrid") else Image.LANCZOS)
+
+
 def install_hint(name: str, extra: str = "") -> str:
     """The '<engine> weights not installed' tail: the two install routes for
     ``name``. Ends in '.'; pass ``extra`` — a clause carrying its own separator

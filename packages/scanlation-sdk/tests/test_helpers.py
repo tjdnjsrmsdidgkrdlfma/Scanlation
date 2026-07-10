@@ -9,7 +9,7 @@ from PIL import Image
 
 import os
 
-from scanlation_sdk import EngineBase, install_hint, to_rgb
+from scanlation_sdk import EngineBase, downscale_to_cap, install_hint, to_rgb
 from scanlation_sdk.http_translator import http_timeout
 
 
@@ -24,6 +24,37 @@ def test_to_rgb_converts_non_rgb():
     for mode in ("L", "RGBA", "P"):
         out = to_rgb(Image.new(mode, (8, 8)))
         assert out.mode == "RGB"
+
+
+def test_downscale_to_cap_noop_when_off_or_small():
+    """cap<=0, or a crop already under the cap, is returned unchanged (same object)."""
+    img = Image.new("RGB", (400, 300))  # 120k px
+    assert downscale_to_cap(img, 0, "pow2") is img       # off
+    assert downscale_to_cap(img, -1, "pow2") is img      # off (negative)
+    assert downscale_to_cap(img, 150000, "pow2") is img  # 120k <= 150k -> untouched
+
+
+def test_downscale_to_cap_pow2_halves_until_under():
+    """pow2 halves by exact 2x2 blocks until <= cap (overshoots well under)."""
+    out = downscale_to_cap(Image.new("RGB", (1000, 1000)), 150000, "pow2")  # 1,000,000 px
+    assert out.size == (250, 250)  # 1000 -> 500 (250k) -> 250 (62.5k <= 150k)
+    assert out.width * out.height <= 150000
+
+
+def test_downscale_to_cap_box_area_lands_at_cap_aspect_kept():
+    """box/area shrink to ~cap px with aspect ratio preserved."""
+    for mode in ("area", "box"):
+        out = downscale_to_cap(Image.new("RGB", (1200, 800)), 150000, mode)  # 3:2
+        assert out.width * out.height <= 150000
+        assert abs(out.width / out.height - 1.5) < 0.02
+
+
+def test_downscale_to_cap_grid_modes_multiple_of_28():
+    """grid28/boxgrid snap each side down to a multiple of the 28px patch grid."""
+    for mode in ("grid28", "boxgrid"):
+        out = downscale_to_cap(Image.new("RGB", (1200, 800)), 150000, mode)
+        assert out.width % 28 == 0 and out.height % 28 == 0
+        assert out.width * out.height <= 150000
 
 
 def test_install_hint_default_matches_template():
@@ -71,6 +102,10 @@ def test_http_timeout_default_and_env():
 TESTS = [
     test_to_rgb_passes_through_rgb,
     test_to_rgb_converts_non_rgb,
+    test_downscale_to_cap_noop_when_off_or_small,
+    test_downscale_to_cap_pow2_halves_until_under,
+    test_downscale_to_cap_box_area_lands_at_cap_aspect_kept,
+    test_downscale_to_cap_grid_modes_multiple_of_28,
     test_install_hint_default_matches_template,
     test_install_hint_extra_replaces_period,
     test_engine_base_log_is_namespaced,
