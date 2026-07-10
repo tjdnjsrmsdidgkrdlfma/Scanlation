@@ -57,7 +57,10 @@ _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 # The per-stage timing keys the server returns (orchestrator.run_page), in report order.
-_STAGES = ["decode_ms", "lockwait_ms", "detect_recognize_ms", "semwait_ms", "translate_ms", "total_ms"]
+# detect_ms + recognize_ms are the two halves inside detect_recognize_ms (the whole GPU
+# span — it also covers engine resolve/first-load, so it stays >= detect + recognize).
+_STAGES = ["decode_ms", "lockwait_ms", "detect_recognize_ms", "detect_ms", "recognize_ms",
+           "semwait_ms", "translate_ms", "total_ms"]
 
 
 # --- HTTP (stdlib) --------------------------------------------------------------
@@ -122,14 +125,28 @@ def _mean(vals: list[float]) -> float | None:
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
+def _median(vals: list[float]) -> float | None:
+    if not vals:
+        return None
+    s = sorted(vals)
+    mid = len(s) // 2
+    m = s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
+    return round(m, 1)
+
+
 def build_report(runs: list[dict], settings_summary: dict | None, meta: dict) -> dict:
     """Assemble the canonical report object (the JSON sidecar). ``runs`` is a list of
     {image, ok, regions, timing, error}. The Markdown renders from this same object."""
     ok = [r for r in runs if r["ok"]]
     failed = [r for r in runs if not r["ok"]]
     timed = [r for r in ok if r.get("timing")]
-    timing_sum = {k: round(sum(r["timing"].get(k, 0) for r in timed), 1) for k in _STAGES} if timed else {}
-    timing_mean = {k: _mean([r["timing"].get(k, 0) for r in timed]) for k in _STAGES} if timed else {}
+    # Per-stage sample lists (one value per timed image); every aggregate stat reads off these.
+    vals = {k: [r["timing"].get(k, 0) for r in timed] for k in _STAGES}
+    timing_sum = {k: round(sum(v), 1) for k, v in vals.items()} if timed else {}
+    timing_mean = {k: _mean(v) for k, v in vals.items()} if timed else {}
+    timing_median = {k: _median(v) for k, v in vals.items()} if timed else {}
+    timing_min = {k: round(min(v), 1) for k, v in vals.items()} if timed else {}
+    timing_max = {k: round(max(v), 1) for k, v in vals.items()} if timed else {}
     return {
         "generated_at": meta["generated_at"],
         "server": meta["server"],
@@ -143,6 +160,9 @@ def build_report(runs: list[dict], settings_summary: dict | None, meta: dict) ->
             "regions_total": sum(len(r.get("regions") or []) for r in ok),
             "timing_sum": timing_sum,
             "timing_mean": timing_mean,
+            "timing_median": timing_median,
+            "timing_min": timing_min,
+            "timing_max": timing_max,
         },
     }
 
@@ -156,7 +176,9 @@ def _fmt_timing(t: dict | None) -> str:
     if not t:
         return "(no timing — cache hit? use a fresh run)"
     return (f"total {t.get('total_ms')}ms  (decode {t.get('decode_ms')} / "
-            f"detect+recognize {t.get('detect_recognize_ms')} / translate {t.get('translate_ms')}"
+            f"detect+recognize {t.get('detect_recognize_ms')} "
+            f"[detect {t.get('detect_ms')} + recognize {t.get('recognize_ms')}] / "
+            f"translate {t.get('translate_ms')}"
             f"; lockwait {t.get('lockwait_ms')}, semwait {t.get('semwait_ms')})")
 
 
@@ -186,19 +208,37 @@ def build_markdown(report: dict) -> str:
 
     mean = agg.get("timing_mean") or {}
     if mean:
+        med, lo, hi = agg.get("timing_median") or {}, agg.get("timing_min") or {}, agg.get("timing_max") or {}
         L.append("")
         L.append("## 집계 — 단계별 시간 (성공 실행 기준)")
         L.append("")
-        L.append("| stage | 합 ms | 평균 ms |")
-        L.append("|---|---|---|")
+        L.append("| stage | 합 ms | 평균 ms | 중앙값 ms | 최소 ms | 최대 ms |")
+        L.append("|---|---|---|---|---|---|")
         for k in _STAGES:
-            L.append(f"| {k} | {agg['timing_sum'].get(k)} | {mean.get(k)} |")
+            L.append(f"| {k} | {agg['timing_sum'].get(k)} | {mean.get(k)} "
+                     f"| {med.get(k)} | {lo.get(k)} | {hi.get(k)} |")
+        L.append("")
+        L.append("_detect_recognize_ms는 GPU 반쪽 전체(엔진 resolve·first-load 포함)라 "
+                 "detect_ms+recognize_ms보다 큼. recognize_ms가 엔진 교체·최적화 대상._")
         dr, tr = mean.get("detect_recognize_ms"), mean.get("translate_ms")
         if dr is not None and tr is not None:
             verdict = "translate-bound (번역이 지배)" if tr > dr else "detect+recognize-bound (인식이 지배)"
             L.append("")
             L.append(f"→ 평균 detect+recognize **{dr}ms** vs translate **{tr}ms** ⇒ **{verdict}**"
                      + ("" if report["mode"] == "serial" else "  (병렬 모드라 참고용)"))
+
+        # Per-case timing (image = one translate batch = finest granularity available).
+        # recognize is surfaced next to translate because it's the stage being swapped/tuned.
+        cases = [(r["image"], r["timing"]) for r in report["images"] if r["ok"] and r.get("timing")]
+        if cases:
+            L.append("")
+            L.append("### 케이스별 시간 (이미지 = 배치 1건)")
+            L.append("")
+            L.append("| 이미지 | recognize ms | translate ms | total ms | regions |")
+            L.append("|---|---|---|---|---|")
+            for name, t in cases:
+                L.append(f"| {_md_cell(name)} | {t.get('recognize_ms')} | {t.get('translate_ms')} "
+                         f"| {t.get('total_ms')} | {t.get('regions')} |")
 
     L.append("")
     L.append("## 이미지별")
@@ -251,6 +291,7 @@ def _selftest() -> int:
          "regions": [{"bounds": [1, 2, 3, 4], "source": "こんにちは", "destination": "안녕하세요"},
                      {"bounds": [5, 6, 7, 8], "source": "a|b\nc", "destination": "표 | 안전"}],
          "timing": {"decode_ms": 5.0, "lockwait_ms": 0.1, "detect_recognize_ms": 40.0,
+                    "detect_ms": 12.0, "recognize_ms": 26.0,  # sum 38 <= 40 (umbrella)
                     "semwait_ms": 0.0, "translate_ms": 900.0, "total_ms": 945.1, "regions": 2},
          "error": None},
         {"image": "bad.png", "ok": False, "regions": [], "timing": None, "error": "HTTP 400 bad image"},
@@ -265,15 +306,19 @@ def _selftest() -> int:
     report = build_report(runs, settings, {"generated_at": "SELFTEST", "server": "http://x", "mode": "serial"})
     md = build_markdown(report)
     # invariants
-    assert report["aggregate"] == {"images": 2, "ok": 1, "failed": 1, "regions_total": 2,
-                                   "timing_sum": {"decode_ms": 5.0, "lockwait_ms": 0.1,
-                                                  "detect_recognize_ms": 40.0, "semwait_ms": 0.0,
-                                                  "translate_ms": 900.0, "total_ms": 945.1},
-                                   "timing_mean": {"decode_ms": 5.0, "lockwait_ms": 0.1,
-                                                   "detect_recognize_ms": 40.0, "semwait_ms": 0.0,
-                                                   "translate_ms": 900.0, "total_ms": 945.1}}, report["aggregate"]
+    agg = report["aggregate"]
+    stage_vals = {"decode_ms": 5.0, "lockwait_ms": 0.1, "detect_recognize_ms": 40.0,
+                  "detect_ms": 12.0, "recognize_ms": 26.0,
+                  "semwait_ms": 0.0, "translate_ms": 900.0, "total_ms": 945.1}
+    assert (agg["images"], agg["ok"], agg["failed"], agg["regions_total"]) == (2, 1, 1, 2), agg
+    # one timed run → sum/mean/median/min/max all collapse to that single sample
+    for key in ("timing_sum", "timing_mean", "timing_median", "timing_min", "timing_max"):
+        assert agg[key] == stage_vals, (key, agg[key])
     assert "안녕하세요" in md and "こんにちは" in md          # OCR + translation rendered
     assert "translate-bound" in md                          # 900 > 40 verdict
+    assert "중앙값" in md and "최소" in md and "최대" in md    # per-stage spread columns
+    assert "recognize_ms" in md and "detect 12.0 + recognize 26.0" in md  # detect/recognize split
+    assert "케이스별 시간" in md                              # per-case timing list
     assert "표 \\| 안전" in md and "a\\|b ⏎ c" in md          # pipe/newline escaping in cells
     assert "manga-ocr" in md and "model=gemma" in md         # settings header
     assert json.dumps(report, ensure_ascii=False)           # JSON-serialisable
