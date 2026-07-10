@@ -359,10 +359,13 @@ def main() -> int:
     settings_summary = summarize_settings(get_settings(server, a.token))
 
     if a.parallel:
+        # Key futures by input index, not img.name: rglob can yield the same basename
+        # from different folders, and a name-keyed dict would collide (one result lost,
+        # another duplicated) while the count still looked right.
         with ThreadPoolExecutor(max_workers=len(imgs)) as ex:
-            futs = {ex.submit(_run_one, server, a.token, img, force): img for img in imgs}
-            done = {futs[f].name: f.result() for f in as_completed(futs)}
-        runs = [done[img.name] for img in imgs]  # restore input order
+            futs = {ex.submit(_run_one, server, a.token, img, force): i for i, img in enumerate(imgs)}
+            done = {futs[f]: f.result() for f in as_completed(futs)}
+        runs = [done[i] for i in range(len(imgs))]  # restore input order
     else:
         runs = [_run_one(server, a.token, img, force) for img in imgs]
 
