@@ -28,6 +28,15 @@ ENV PYTHONUNBUFFERED=1 \
     SCANLATION_ENGINE_REPO=https://github.com/tjdnjsrmsdidgkrdlfma/Scanlation.git \
     SCANLATION_ENGINE_REF=main
 
+# MIOpen (ROCm) caches compiled conv kernels + its perf db under $HOME by default.
+# The container runs as the non-root `app` user, so the default /root/.config/miopen
+# isn't writable -> MIOpen dies "permission denied [/root/.config/miopen]" ->
+# miopenStatusUnknownError on the first GPU conv (e.g. a torch VLM recognizer). Pin
+# both to the /data volume: app-writable AND persistent, so a cold gfx compile
+# (10-30s) survives container recreation. No-op on CPU-only runs.
+ENV MIOPEN_USER_DB_PATH=/data/miopen \
+    MIOPEN_CUSTOM_CACHE_DIR=/data/miopen
+
 # Core only: sdk + server, installed non-editable (a real package, not a mounted
 # source tree). Build from the copied source, then discard it — the final image
 # carries no repo working tree, just the installed core (+ dummy engine).
