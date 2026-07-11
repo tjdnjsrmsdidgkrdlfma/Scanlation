@@ -48,7 +48,7 @@
 **측정 장비가 필요한 것:** B5·B6 — 벤치 크롭 세트 불일치. GPU 호스트에서 재측정해야 `tools/*.md`의 결론을 갱신할 수 있다.
 
 **남은 리팩토링:** 없음 — R1~R9 완료로 네 축(벤치 통합·어휘 정리·대형 파일 분할·하드코딩→`/admin`)의 구조 부채는 소진.
-남은 것은 측정(B5·B6·H8)·가중치 머신 검증뿐 — 결정 대기 0(H3 유지 결정·H6 정정 완료), 문서 위생(H4·H5·H7) 완료.
+남은 것은 측정(B5·B6)·가중치 머신 검증뿐 — 결정 대기 0(H3 유지 결정·H6 정정 완료), 문서 위생(H4·H5·H7) 완료, H8(해상도 캡)은 범위 밖 신규 기능으로 완료.
 
 ---
 
@@ -371,7 +371,7 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
 | ~~**H6**~~ ✅ (정정: 결함 아님) | entry-point 이름이 케이싱 규칙 없이 섞여 보였다: `comic-text-and-bubble-detector`·`manga-ocr`(kebab) vs `PaddleOCR-VL-For-Manga`·`Ollama`·`llama.cpp`. **오진이다** — 이 이름들은 **업스트림 고유명을 그대로 따른 것**이다(`Ollama`=제품명, `llama.cpp`=프로젝트명(점 포함), `PaddleOCR-VL-For-Manga`=모델명; `manga-ocr`·`comic-text-and-bubble-detector`=pip/HF 레포명이라 원래 kebab). "Claude"를 "cLAUdE"로 못 쓰듯 kebab 강제 통일은 고유명 훼손이다. 암묵 규칙은 이미 있다 — **"업스트림 고유명에 충실"**, 이게 지향할 규칙이고 현 이름이 이미 그것. (의도와 어긋난 대소문자 *불일치* 버그는 H2가 이미 처리; 이 이름들이 `state.json`·캐시 키의 일부라 함부로 못 바꾼다는 사실은 그 원칙을 더 강화한다.) |
 | ~~**H7**~~ ✅ | 플러그인 5개 + `scanlation-server`(모두 SDK 소비자)가 `scanlation-sdk`를 버전 제약 없이 의존했다 — git ref 배포라 낡은 SDK가 조용히 통과했다. 6개 pyproject 전부 `scanlation-sdk>=0.1.0`(현 버전 = 플로어)으로. 너무 낡은 SDK를 설치 시점에 거른다(백로그는 5개라 했으나 server도 같은 노출이라 포함) |
 | ~~**H9**~~ ✅ | `af3de18`. [registry.py](packages/scanlation-server/app/registry.py)의 `_discover`가 `ep.load()` 실패를 `except Exception: pass`로 삼켜 **왜 안 뜨는지 알 길이 없었다** — H1의 유령 entry_point 3종이 조용히 사라지고 있었다. `except`는 여전히 삼키되(깨진 엔진이 discovery를 죽이면 안 됨) role·entry_point 이름을 담은 warning을 남긴다. 뮤테이션으로 검증(bare swallow로 되돌리면 빨개짐) |
-| **H8** | [recognize-gpu-speed.md](packages/scanlation-server/tools/recognize-gpu-speed.md)가 "해상도 캡 150k + pow2 → 1.66x, 채택 방향"이라 적었으나 `scanlation-paddleocr-vl-for-manga`에 `max_pixels`/downscale이 없다. `_downscale_one`과 `GRID = 28`(`gpuconc:213-245`)이 프로덕션에 가야 할 코드인데 벤치에 갇혀 있다. **성능 변경이자 신규 기능이라 이 백로그 밖** — 별도 결정 |
+| ~~**H8**~~ ✅ (범위 밖 신규 기능) | 해상도 캡(150k + `pow2`)을 PaddleOCR-VL recognizer에 도입(`3503181`, 기본 활성). `max_pixels`(env `SCANLATION_RECOGNIZE_MAX_PIXELS`·기본 150000)·`downscale_mode`(기본 `pow2`)를 `OPTION_SCHEMA`로 `/admin` 노출, `recognize` 입력 전 `downscale_to_cap` 적용. 성능 변경이자 신규 기능이라 R-항목은 아니다(유휴 언로드와 같은 범주). 캡 켠 뒤 멀티워커 재측정 1.38x는 [recognize-gpu-speed.md](packages/scanlation-server/tools/recognize-gpu-speed.md) 참조 |
 
 ### H3 상세 — `tools/vendored/`의 GPL 코드와 라이선스 부재
 
@@ -413,7 +413,7 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
 - R1의 `warm()` 통합 — 워밍업 횟수가 툴마다 다르므로(threads는 `workers * 2`) 통합하면 측정 조건이 바뀐다
 - R1의 `add_data_args` — threads의 `--data`를 positional로 통일하면 CLI가 바뀐다
 - R1의 `sweep_baseline` 검증 신설, R5의 확장 fetch 타임아웃 신설 — 없던 동작 추가
-- **H8** — 프로덕션 recognizer에 해상도 캡 도입
+- ~~**H8** — 프로덕션 recognizer에 해상도 캡 도입~~ → 완료(`3503181`, 위 Tier 4 표). 신규 기능이라 이 백로그 밖이었으나 구현됨
 
 `batch:315`(배치 크기마다 per-crop 레퍼런스 재계산)는 **이미 계산한 값의 재사용**이므로 R1에 남긴다.
 
@@ -429,7 +429,6 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
 
 6. **B5+B6** — threads의 `_raw_bbox_crop_files`를 deskew 크롭으로 바꾸고 리포트의 하드코딩된 결론 산문을 제거.
    측정값이 바뀌므로 `tools/*.md`의 1.27x vs 1.8x 결론 재검토가 따라온다
-7. **H8** — 해상도 캡을 프로덕션 recognizer로. 성능 변경이자 신규 기능이라 이 백로그 밖
 
 **문서:** ~~H4·H5·H7~~ ✅ 완료 — 「현재 상태」 Tier 4 표 참조.
 
