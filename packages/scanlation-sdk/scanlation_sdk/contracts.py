@@ -133,6 +133,22 @@ class Recognizer(Protocol):
 
 
 @runtime_checkable
+class BatchRecognizer(Recognizer, Protocol):
+    """A recognizer that can read a whole page's crops in ONE model call.
+
+    Optional: the pipeline tests for this protocol and falls back to a per-crop
+    ``recognize`` loop when a recognizer doesn't implement it. ``recognize_batch``
+    returns one string per crop, aligned to the input order — a dynamic-res VLM
+    batches ragged crops via padding, so it handles that internally rather than
+    raising (mirrors ``BatchTranslator``).
+    """
+
+    def recognize_batch(
+        self, crops: list[Image.Image], regions: list[Region], options: dict
+    ) -> list[str]: ...
+
+
+@runtime_checkable
 class Translator(Protocol):
     def translate(self, text: str, src: str, dst: str, options: dict) -> str: ...
 

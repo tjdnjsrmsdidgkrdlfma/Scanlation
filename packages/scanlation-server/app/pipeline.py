@@ -14,7 +14,9 @@ from typing import Any, TypedDict
 from PIL import Image
 
 from scanlation_sdk.context import LANG_RTL
-from scanlation_sdk.contracts import BatchTranslator, Detector, Recognizer, Region, Translator
+from scanlation_sdk.contracts import (
+    BatchRecognizer, BatchTranslator, Detector, Recognizer, Region, Translator,
+)
 from .geometry import deskew_crop
 
 logger = logging.getLogger("scanlation.pipeline")
@@ -74,19 +76,18 @@ def detect_and_recognize(
     t0 = time.perf_counter()
     regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
     t_det = time.perf_counter()
+    crops = [deskew_crop(img, region) for region in regions]
+    texts = _recognize_all(crops, regions, recognizer, opt_recognize)
     out: list[tuple[str, Region]] = []
-    for region in regions:
-        crop = deskew_crop(img, region)
-        t_crop = time.perf_counter()
-        text = recognizer.recognize(crop, region, opt_recognize).strip()
+    for region, text in zip(regions, texts):
+        text = text.strip()
         # One line per region (verbose/DEBUG): what was detected, where, its class,
-        # per-crop recognize time, and what the recognizer read — logged even when empty
-        # ("detected but recognized nothing" is itself a signal). See /admin 동작.
+        # and what the recognizer read — logged even when empty ("detected but
+        # recognized nothing" is itself a signal). See /admin 동작.
         logger.debug(
-            "  #%d %s bbox=%s%s score=%.2f %.0fms -> %r",
+            "  #%d %s bbox=%s%s score=%.2f -> %r",
             region.order, getattr(region, "label", "") or "?", region.bbox,
-            " vert" if region.vertical else "", region.score,
-            (time.perf_counter() - t_crop) * 1000, text,
+            " vert" if region.vertical else "", region.score, text,
         )
         if text:
             out.append((text, region))
@@ -98,6 +99,20 @@ def detect_and_recognize(
     )
     return out, {"detect_ms": round((t_det - t0) * 1000, 1),
                  "recognize_ms": round((t_rec - t_det) * 1000, 1)}
+
+
+def _recognize_all(
+    crops: list[Image.Image], regions: list[Region], recognizer: Recognizer, options: dict
+) -> list[str]:
+    """Recognize a whole page's crops. Uses the recognizer's batch path when it has
+    one (a VLM that reads N crops in one forward) and a per-crop loop otherwise (the
+    CPU recognizers, the test dummy) — the same optional-capability seam as
+    ``_translate_all``. One string per crop, aligned to input order."""
+    if not crops:
+        return []
+    if isinstance(recognizer, BatchRecognizer):
+        return recognizer.recognize_batch(crops, regions, options)
+    return [recognizer.recognize(crop, region, options) for crop, region in zip(crops, regions)]
 
 
 def _translate_all(
