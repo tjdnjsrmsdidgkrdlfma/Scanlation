@@ -44,6 +44,9 @@ force). Options:
     --paddle-cpu     run PaddleOCR-VL on CPU anyway (slow; for a no-GPU box)
     --paddle-items N per-crop baseline crops for PaddleOCR-VL (default 24)
     --probe-cap N    max_new_tokens for the paddle batch probe (default 256)
+    --report         image-level batch report in run_report.py's format (detect + cap
+                     + per-crop gate + vision-token bucketed batch); pages dir in `data`
+    --selftest       verify the report helpers (bucket order/restore, gate summary), no GPU
 """
 from __future__ import annotations
 
@@ -263,6 +266,195 @@ def bench_paddle(crops, batch_sizes, device: str, items: int, probe_cap: int, ro
     rows += probe_rows + [""]
 
 
+# --- report mode: image-level batch recognize in run_report.py's format ------
+def _recognize_batch(rec, crops, max_new_tokens: int) -> list[str]:
+    """One batched generate over already-capped crops; texts returned in input order.
+    Mirrors PaddleOcrVLForMangaRecognizer.recognize but for N images at once -- left-pad
+    so every sequence's generation frontier aligns at the right edge."""
+    import torch
+    proc, model = rec._proc, rec._model
+    messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": rec.PROMPT}]}]
+    text = proc.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+    with contextlib.suppress(Exception):
+        proc.tokenizer.padding_side = "left"
+    inputs = proc(text=[text] * len(crops), images=list(crops),
+                  padding=True, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        out = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+    gen = out[:, inputs["input_ids"].shape[1]:]
+    return [proc.decode(g, skip_special_tokens=True).strip() for g in gen]
+
+
+def _batch_summary(runs: list) -> str:
+    """The batch-vs-per-crop tail appended under run_report's Markdown: the throughput
+    delta (why bother) and the correctness gate + every crop the batch read differently
+    (whether it's safe). Matches are on the WHOLE crop set, not a lucky subset."""
+    timed = [r for r in runs if r.get("_matches") is not None]
+    total_pc = sum(r.get("_percrop_ms", 0.0) for r in timed)
+    total_b = sum(r["timing"]["recognize_ms"] for r in timed)
+    n = sum(len(r["_matches"]) for r in timed)
+    ok = sum(sum(r["_matches"]) for r in timed)
+    L = ["", "## 배치 요약 (per-crop 대비)", ""]
+    if total_b:
+        L.append(f"- recognize 합: per-crop {total_pc:.0f}ms → 배치 {total_b:.0f}ms "
+                 f"(**{total_pc / total_b:.2f}x**)")
+    gate = " — 전부 일치 ✅" if n and ok == n else (f" ⚠ {n - ok}개 불일치 (silently-wrong)" if n else "")
+    L.append(f"- correctness 게이트: **{ok}/{n} match**{gate}")
+    bad = []
+    for r in timed:
+        for i, m in enumerate(r["_matches"]):
+            if not m:
+                bad.append(f"- `{r['image']}` #{i}: want={r['_ref'][i]!r} got={r['regions'][i]['source']!r}")
+    if bad:
+        L += ["", "### 불일치 크롭 (배치가 per-crop과 다르게 읽음)", "", *bad]
+    L.append("")
+    return "\n".join(L)
+
+
+def bench_report(data: str, device: str) -> int:
+    """Image-level batch-recognize report in run_report.py's exact format.
+
+    Per page: detect + deskew -> cap each crop (the plugin's /admin defaults) ->
+    per-crop recognize (the reference) -> vision-token bucketed batch recognize.
+    recognize_ms is the BATCH time, source is the BATCH text, and the gate flags any
+    crop the batch read differently. Renders via run_report.build_markdown so the file
+    diffs 1:1 against a per-crop run_report_*.md."""
+    import time as _t
+    from datetime import datetime
+
+    from PIL import Image
+
+    from app.geometry import deskew_crop
+    from run_report import build_markdown, build_report
+    from scanlation_comic_text_and_bubble_detector.plugin import ComicTextAndBubbleDetector
+    from scanlation_paddleocr_vl_for_manga.plugin import _MODES
+    from scanlation_sdk.contracts import Region
+    from scanlation_sdk.local_engine import downscale_to_cap, to_rgb
+
+    rec = load_paddle(device, None)
+    opts = rec.resolve_options({})  # the plugin's /admin defaults (max_pixels, mode, tokens)
+    mp, mnt = opts["max_pixels"], opts["max_new_tokens"]
+    mode = opts["downscale_mode"] if opts["downscale_mode"] in _MODES else "pow2"
+
+    root = Path(data)
+    pages = [root] if root.is_file() else sorted(
+        f for f in root.rglob("*") if f.suffix.lower() in IMAGE_EXTS)
+    if not pages:
+        sys.exit(f"no images found under {data}")
+
+    det = ComicTextAndBubbleDetector()
+    with silenced():
+        det.load()
+    runs: list[dict] = []
+    print(f"\n-- batch report: {len(pages)} pages on {device} (cap {mp}px/{mode})")
+    try:
+        for page in pages:
+            img = Image.open(page).convert("RGB")
+            t0 = _t.perf_counter()
+            regions = det.detect(img, {})
+            detect_ms = (_t.perf_counter() - t0) * 1000
+
+            crops, bounds = [], []
+            for r in regions:
+                x0, y0, x1, y1 = (int(v) for v in r.bbox)
+                if x1 - x0 < 4 or y1 - y0 < 4:
+                    continue
+                crops.append(deskew_crop(img, r))
+                bounds.append([x0, y0, x1, y1])
+
+            # per-crop reference (recognize() caps internally) + its time (the gate baseline)
+            t0 = _t.perf_counter()
+            ref = [rec.recognize(c, Region.from_bbox(0, 0, c.width, c.height), {}) for c in crops]
+            percrop_ms = (_t.perf_counter() - t0) * 1000
+
+            # batch: cap outside, bucket largest-first (least left-pad), one generate
+            t0 = _t.perf_counter()
+            capped = [downscale_to_cap(to_rgb(c), mp, mode) for c in crops]
+            order = sorted(range(len(capped)), key=lambda i: capped[i].width * capped[i].height, reverse=True)
+            got_sorted = _recognize_batch(rec, [capped[i] for i in order], mnt) if crops else []
+            batch_ms = (_t.perf_counter() - t0) * 1000
+            got = [""] * len(crops)
+            for k, i in enumerate(order):
+                got[i] = got_sorted[k]
+            matches = [ref[i] == got[i] for i in range(len(crops))]
+
+            regions_out = [{"bounds": bounds[i], "source": got[i], "destination": ""}
+                           for i in range(len(crops))]
+            runs.append({
+                "image": page.name, "ok": True, "regions": regions_out, "error": None,
+                "timing": {"decode_ms": 0.0, "lockwait_ms": 0.0,
+                           "detect_ms": round(detect_ms, 1), "recognize_ms": round(batch_ms, 1),
+                           "detect_recognize_ms": round(detect_ms + batch_ms, 1),
+                           "semwait_ms": 0.0, "translate_ms": 0.0,
+                           "total_ms": round(detect_ms + batch_ms, 1), "regions": len(crops)},
+                "_percrop_ms": round(percrop_ms, 1), "_matches": matches, "_ref": ref})
+            print(f"   {page.name}: {len(crops)} crops  per-crop {percrop_ms:.0f}ms -> "
+                  f"batch {batch_ms:.0f}ms  match {sum(matches)}/{len(crops)}")
+    finally:
+        det.unload()
+        rec.unload()
+
+    settings_summary = {
+        "languages": "ja->ko", "prompt_active": None,
+        "engines": {
+            "detector": {"name": "comic-text-and-bubble-detector", "device": None, "options": {}},
+            "recognizer": {"name": rec.name, "device": device,
+                           "options": {"max_pixels": mp, "downscale_mode": mode, "max_new_tokens": mnt}},
+            "translator": {"name": "(배치 벤치 — 번역 없음)", "device": None, "options": {}},
+        },
+    }
+    meta = {"generated_at": datetime.now().isoformat(timespec="seconds"),
+            "server": "(local batch bench)", "mode": "serial", "skip_translate": True}
+    report = build_report(runs, settings_summary, meta)
+    md = build_markdown(report) + _batch_summary(runs)
+    return write_report([md], "bench_report_batch_report")
+
+
+def _report_selftest() -> int:
+    """Verify the GPU-free report logic: bucket order is largest-first, restore is its
+    inverse, and the gate summary counts matches + lists mismatches. No model needed."""
+    sizes = [100, 400, 50]  # crop pixel areas
+    order = sorted(range(len(sizes)), key=lambda i: sizes[i], reverse=True)
+    assert order == [1, 0, 2], order  # largest (400) first
+    got_sorted = ["big", "mid", "small"]  # batch output in `order` sequence
+    got = [""] * len(sizes)
+    for k, i in enumerate(order):
+        got[i] = got_sorted[k]
+    assert got == ["mid", "big", "small"], got  # restored to input order
+
+    runs = [{"image": "p.png", "_percrop_ms": 200.0, "_matches": [True, False],
+             "_ref": ["x", "y"], "regions": [{"source": "x"}, {"source": "Y"}],
+             "timing": {"recognize_ms": 120.0}}]
+    s = _batch_summary(runs)
+    assert "1.67x" in s, s               # 200 / 120
+    assert "1/2 match" in s, s
+    assert "want='y' got='Y'" in s, s    # the mismatched crop is listed
+
+    # integration: the exact render path bench_report uses -> run_report's 174504 format
+    from run_report import build_markdown, build_report
+    runs2 = [{"image": "00.jpg", "ok": True,
+              "regions": [{"bounds": [1, 2, 3, 4], "source": "はぁ", "destination": ""}],
+              "error": None,
+              "timing": {"decode_ms": 0.0, "lockwait_ms": 0.0, "detect_ms": 300.0,
+                         "recognize_ms": 1400.0, "detect_recognize_ms": 1700.0,
+                         "semwait_ms": 0.0, "translate_ms": 0.0, "total_ms": 1700.0, "regions": 1},
+              "_percrop_ms": 2000.0, "_matches": [True], "_ref": ["はぁ"]}]
+    settings = {"languages": "ja->ko", "prompt_active": None,
+                "engines": {"detector": {"name": "comic-text-and-bubble-detector", "device": None, "options": {}},
+                            "recognizer": {"name": "PaddleOCR-VL-For-Manga", "device": "cuda",
+                                           "options": {"max_pixels": 150000, "downscale_mode": "pow2",
+                                                       "max_new_tokens": 1024}},
+                            "translator": {"name": "(배치 벤치 — 번역 없음)", "device": None, "options": {}}}}
+    meta = {"generated_at": "SELFTEST", "server": "(local batch bench)", "mode": "serial", "skip_translate": True}
+    md = build_markdown(build_report(runs2, settings, meta)) + _batch_summary(runs2)
+    assert "번역 실행 리포트" in md and "recognize-only" in md    # header + skip-translate note
+    assert "detect+recognize-bound" in md                        # translate 0 -> recognize dominates
+    assert "케이스별 시간" in md and "max_pixels=150000" in md      # per-case table + cap in settings
+    assert "배치 요약" in md and "1.43x" in md                     # 2000/1400 throughput delta
+    print("report selftest OK - bucket order/restore, gate summary, and 174504-format render")
+    return 0
+
+
 def main() -> int:
     # Line-buffer stdout so progress shows live even when it's a Docker pipe
     # (non-TTY defaults to block buffering -> output would only appear at the end).
@@ -283,9 +475,22 @@ def main() -> int:
     ap.add_argument("--paddle-cpu", action="store_true", help="run PaddleOCR-VL on CPU anyway (slow)")
     ap.add_argument("--paddle-items", type=int, default=24, help="per-crop baseline crops for PaddleOCR-VL")
     ap.add_argument("--probe-cap", type=int, default=256, help="max_new_tokens for the paddle batch probe")
+    ap.add_argument("--report", action="store_true",
+                    help="이미지별 배치 리포트 생성(run_report 형식): detect + 캡 + per-crop 게이트 + vision-token 버킷 배치")
+    ap.add_argument("--selftest", action="store_true",
+                    help="GPU 없이 리포트 헬퍼(버킷 정렬/복원/게이트 요약) 검증")
     args = ap.parse_args()
+    if args.selftest:
+        return _report_selftest()
     if not args.data:
         ap.error("a folder of manga pages is required (add --detect to cut crops), or set $BENCH_DATA")
+
+    if args.report:
+        device, reason = paddle_device(args.paddle_cpu)
+        if device is None:
+            print(f"\nPaddleOCR-VL 리포트 스킵: {reason} (--paddle-cpu로 강제 가능하나 ~60s/crop)")
+            return 1
+        return bench_report(args.data, device)
 
     batch_sizes = [int(x) for x in args.batch.split(",") if x.strip()]
     crops, source = load_crops(args.data, args.detect)
