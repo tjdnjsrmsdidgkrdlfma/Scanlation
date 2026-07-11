@@ -55,6 +55,8 @@ def main() -> int:
     if device is None:
         sys.exit(f"PaddleOCR-VL unavailable: {reason}")
 
+    import torch
+
     from scanlation_sdk.local_engine import downscale_to_cap, to_rgb
 
     crops, source = load_crops(args.data, use_detect=not args.no_detect)
@@ -72,18 +74,23 @@ def main() -> int:
 
     capped = [downscale_to_cap(to_rgb(c), mp, mode) for c in sub]
 
-    # Warmup: the process's first forward JIT-compiles kernels (10-30s). Excluded
-    # from every number below so the comparison isn't cold-start noise.
-    _ = model.generate(
-        **proc(text=[prompt], images=[capped[0]], return_tensors="pt").to(model.device),
-        max_new_tokens=8, do_sample=False)
+    # no_grad on every generate: without it the forward builds an autograd graph, which
+    # barely shows on a single crop but balloons the batch (N x the activations) — that
+    # was the bug in this script's first run (10.5x, not the real number).
+    # Warmup: the process's first forward JIT-compiles kernels (10-30s). Excluded from
+    # every number below so the comparison isn't cold-start noise.
+    with torch.no_grad():
+        _ = model.generate(
+            **proc(text=[prompt], images=[capped[0]], return_tensors="pt").to(model.device),
+            max_new_tokens=8, do_sample=False)
 
     print("== per-crop ==")
     pc_total = 0.0
     for i, c in enumerate(capped):
         inp = proc(text=[prompt], images=[c], return_tensors="pt").to(model.device)
         t = time.perf_counter()
-        out = model.generate(**inp, max_new_tokens=mnt, do_sample=False)
+        with torch.no_grad():
+            out = model.generate(**inp, max_new_tokens=mnt, do_sample=False)
         dt = (time.perf_counter() - t) * 1000
         ntok = int(out.shape[1] - inp["input_ids"].shape[1])
         print(f"  #{i} {c.size[0]}x{c.size[1]}px  {_shapes(inp)}  out={ntok}tok  {dt:.0f}ms")
@@ -94,7 +101,8 @@ def main() -> int:
     inp = proc(text=[prompt] * len(capped), images=capped, padding=True, return_tensors="pt").to(model.device)
     print(f"  {_shapes(inp)}")
     t = time.perf_counter()
-    out = model.generate(**inp, max_new_tokens=mnt, do_sample=False)
+    with torch.no_grad():
+        out = model.generate(**inp, max_new_tokens=mnt, do_sample=False)
     dt = (time.perf_counter() - t) * 1000
     ntok = int(out.shape[1] - inp["input_ids"].shape[1])
     print(f"  out{tuple(out.shape)}  gen={ntok}tok  {dt:.0f}ms")
