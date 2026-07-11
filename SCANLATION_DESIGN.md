@@ -42,6 +42,8 @@
 
 **환경:** Docker/Linux 호스트 + AMD **gfx1200(RDNA4)** GPU(ROCm). VRAM 빡빡 — Ollama ≈14GB / 16GB 카드라 OCR과 경합.
 
+> ⚠ **하드웨어·토폴로지 divergence.** recognize GPU는 **9060 XT 16GB**(gfx1200/RDNA4), **MI50 32GB(HBM2) 도입 예정**. 방향은 **GPU 역할 분리** — recognize(PaddleOCR-VL)=9060 XT, translate(Gemma)=MI50 — 라 "한 카드에서 Ollama와 OCR이 VRAM 경합"하던 원 전제가 풀린다(MI50가 HBM2 대역폭 + 넉넉한 VRAM으로 KV캐시 희생하며 Gemma 다중 인스턴스). 정확도 때문에 recognizer를 manga-ocr→**PaddleOCR-VL**로 전환하면 파이프라인이 **recognize-bound**가 된다(recognize-only 68.6s = translate 31.7s의 2.2배, run_report 실측). 그래서 recognizer 처리량(멀티워커·배치)이 최적화 대상. 상세: [recognize-gpu-speed.md](packages/scanlation-server/tools/recognize-gpu-speed.md).
+
 ---
 
 ## 2. 검증된 Ground Truth (구현 시 반드시 지킬 것)
@@ -299,7 +301,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 
 ## 9. 열린 리스크 / 미결정
 1. **gfx1200(RDNA4) ort-ROCm 성숙도:** 사전빌드 휠 부재 가능 → DirectML(Win 개발)/CPU fallback/소스빌드. 완화: CTD는 작아 CPU로도 충분; provider 선택은 CPU fallback + active provider 로그.
-2. **manga-ocr(torch-rocm) VRAM 경합:** ollama ≈14GB/16GB라 CTD+manga-ocr OOM 위험. 선택지(P8 결정): (a) **CTD+manga-ocr를 CPU로, GPU는 ollama 전용**[정확도우선+빡빡VRAM+페이지당 영역 적음 → 가장 안전한 기본]; (b) ollama 전후 load/unload; (c) ollama `num_gpu` 캡.
+2. **manga-ocr(torch-rocm) VRAM 경합:** ollama ≈14GB/16GB라 CTD+manga-ocr OOM 위험. 선택지(P8 결정): (a) **CTD+manga-ocr를 CPU로, GPU는 ollama 전용**[정확도우선+빡빡VRAM+페이지당 영역 적음 → 가장 안전한 기본]; (b) ollama 전후 load/unload; (c) ollama `num_gpu` 캡. → **갱신:** idle-unload(로컬 엔진을 유휴 시 VRAM에서 반납, README `SCANLATION_MODEL_IDLE_UNLOAD_MINUTES`) + **GPU 역할 분리**(recognize=9060 XT / translate=MI50)로 경합이 풀린다. 원 "OCR을 CPU로" 기본은 recognizer가 PaddleOCR-VL로 바뀌며 뒤집힌다 — 정확도 우선이라 GPU 필수(CPU ~60s/crop 사실상 불가). §1 divergence 참조.
 3. **CTD ONNX 디코딩 미검증** *(rtdetr 교체로 해소):* 출력 이름/순서, thresh/unclip/NMS, letterbox 좌표역변환을 실제 모델+레퍼런스 `inference.py`로 확인 필수. 최대 미지수 — P3에 실시간 확보, `visualize.py`를 먼저 만들어 육안 검증.
 4. **라이선스(중요):** manga-image-translator=GPLv3 → `get_transformed_region` **복사 시 우리 서버도 GPLv3 전염**. deskew는 표준 homography → **알고리즘 설명만 보고 OpenCV 프리미티브로 독립 재구현**(§3.5). manga-ocr=Apache-2.0(런타임 의존 OK). comic-text-detector 가중치 라이선스는 번들 전 확인. 구 Crivella 코드(GPLv3)는 **학습만, 복사 금지**. → **프로젝트 라이선스 미정(TBD)**. 제품/런타임(`app`·wheel·Docker)엔 GPLv3 코드 미포함·런타임 의존만. **단 `tools/vendored/`엔 manga-image-translator의 48px/48px_ctc OCR(GPLv3) 사본이 있다** — OCR 모델 비교(bake-off) 전용 research-only이고 wheel(`include=["app*"]`)·Docker에서 제외되지만, 배포 단위가 저장소라 이 사본은 **안고 가기로 결정**(OCR 비교가 핵심 — REFACTORING.md H3). `LICENSE` 파일 부재는 미결.
 5. **세로/방향 정확성:** "기울기는 펴되 세로는 세로 유지"는 실제 세로 일본어+기울어진 SFX로 경험적 검증 필요 → visualize.py + crop 덤프로 P3~P4 튜닝.

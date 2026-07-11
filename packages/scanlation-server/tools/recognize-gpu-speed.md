@@ -8,7 +8,7 @@
 |---|---|---|---|
 | **AOTriton flash attention** (env 한 줄) | **3.7x** | 없음 | **채택 — `docker-compose.rocm.yml`에 반영됨** |
 | 해상도 캡 150k + `pow2` | 1.66x | 24개 중 3개가 뭉개진 말줄임/작은 가나(줄 소실 없음), 나머지는 표기 차 | **채택 — 구현 완료(`3503181`)** |
-| 멀티워커 (W=4) | 1.31x | VRAM 4배, per-crop 지연 3.4배 | 지금은 안 넣음 (천장에 구조적 이유) |
+| 멀티워커 (W=4) | 1.31x (캡 후 1.38x) | VRAM 4배, per-crop 지연 | **채택 방향** — PaddleOCR-VL recognize-bound + MI50 GPU분리로 재고조건 충족 (§동시성 판정) |
 
 병목은 **vision attention**이 맞다 — 큰 crop이 수백 개 vision 토큰을 만들고 attention이 그걸 매 스텝 문다. **그런데 해법이 막힌 게 아니었다:** `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`이 sdpa를 flash/mem-efficient 커널로 태운다.
 
@@ -102,6 +102,8 @@ flash 없는 sdpa(math 폴백)는 이 둘을 O(n²)로 문다. **AOTriton이 그
 - **W=1 baseline 0.34→0.58(1.71x)** — 이건 동시성이 아니라 **캡의 처리량 이득**이다(run_report의 1.75x와 교차 검증).
 - **천장 1.31x→1.38x**: 캡이 vision prefill(GPU 집약)을 줄여 crop이 decode-bound 쪽으로 이동 → W=1 GPU 점유율 ~76%→~72% → 늘어난 유휴를 동시성이 회수. 구조적 천장(ROCm MPS 없음)은 그대로다.
 - **판정 유지 — 안 넣는다.** 1.38x에 VRAM 4배 + per-crop 지연 2.8배(1614→4569ms), W=6은 후퇴. **캡은 공짜(VRAM 0)로 1.71x**를 주는데 멀티워커는 그 위에서 4배 VRAM으로 1.38x만 더한다. `chars max 62`가 전 W 동일 → 동시성은 배치와 달리 correctness가 온전(재확인).
+
+> **판정 전환 (2026-07-12) — 재고조건 충족.** 위 "안 넣음"은 **manga-ocr가 기본**이라 파이프라인이 translate-bound(recognize가 전체의 18.7%)이던 전제였다. **PaddleOCR-VL로 전환하면 recognize가 병목**이 된다 — recognize-only 68.6s = translate 31.7s의 **2.2배**, 전체의 **64.7%**(run_report 2건 실측, manga-ocr는 18.7% ↔ PaddleOCR-VL는 64.7%로 역전). 그리고 **MI50 32GB 도입으로 translate(Gemma)를 별 GPU로 분리**하면 이 절이 든 반대가 다 사라진다: VRAM 4배 → 9060 XT 16GB를 recognize가 전용, per-crop 지연 → 처리량 워크로드라 무관, `gpu_lock` 경합 → GPU 물리 분리로 0. correctness는 배치와 달리 원래 안전. **→ 채택 방향.** 구현(`gpu_lock`→semaphore + 프로세스풀)은 하드웨어 도착 후. 단 [배치](recognize-crop-batching.md)가 2.04x로 더 큰 레버라(둘은 곱 안 됨) 배치의 correctness가 잡히면 배치가 주 레버·멀티워커가 안전 폴백.
 
 ## 해상도 캡 (flash-ON 실측 — 판정 보류)
 
