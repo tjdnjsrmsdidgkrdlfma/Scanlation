@@ -156,7 +156,7 @@ for region in regions:
 
 **멀티워커가 배치보다 낫고, 둘은 곱해지지 않는다** — 같은 CPU 메모리 대역폭 여유를 두 방식이 나눠 쓰는 것이라, 멀티워커가 이미 대역폭 천장(스레드 벤치가 확인한 flattening) 근처다. 배치는 디코더 weight 읽기를 줄여 천장을 살짝 밀 뿐이고, 순진하게 얹으면(16스레드 배치 × N워커) 오버서브스크립션으로 오히려 느려진다. 합쳐도 ~1.8–2.0x가 상한이지 1.27×1.8=2.3x는 안 나온다.
 
-### PaddleOCR-VL GPU 배치 (2026-07-07, ROCm 실측)
+### PaddleOCR-VL GPU 배치 (2026-07-07, ROCm 실측 — ⚠ stale, 하단 §판단의 2026-07-12 최종 실측 참조)
 
 문서의 [§다음](#다음--실측-항목) 4번(GPU torch 세팅 후 재실행)을 채운다. 환경: 서버 9060 XT(gfx1200/RDNA4) + ROCm 7.1, `torch 2.x+rocm7.0`(컨테이너, MIOpen 커널 캐시를 `/data`에 영속). 같은 Pixiv 챕터 크롭으로 batch 1~16 스윕. **커널 캐시가 warm된 2회차 값만 유효**하다 — 1회차는 shape별 MIOpen JIT가 지배(baseline 12.7s→2.9s/crop, 캐시 히트 시 4.4x). dynamic-res라 새 crop 크기마다 커널을 컴파일하지만, 픽셀 단위가 아니라 **patch14·merge2=28px 그리드 버킷**이 바뀔 때만 재컴파일한다.
 
@@ -197,7 +197,15 @@ for region in regions:
 - **manga-ocr `recognize_batch` — 보류 쪽으로 기움.** 실이득 1.27x(B=8)로 작고 멀티워커(1.8x)보다 못하다. 저위험 국소 변경이라 값이 0은 아니나, **translate-bound면 end-to-end엔 안 드러난다** → 구현 전 recognize의 end-to-end 비중부터 로그로 확인(§다음).
 - **기각 — PaddleOCR-VL 배치.** GPU(ROCm)로 측정 완료(§PaddleOCR-VL GPU 배치): B=2 2.04x가 최대고 절대속도가 manga-ocr CPU의 1/8, B≥8은 후퇴 + correctness 깨짐. ragged/position_ids 우려가 실측으로 확인됐다. 후속(2026-07-08): **AOTriton flash는 3.7x 레버**(당시 "무효" 판정은 오류 — §후속), 2.9s/crop은 그 flash-ON 값이다. 작은 배치의 correctness는 측정 착시라 여전히 미보장.
 
-> **재평가 (2026-07-12) — recognize-bound 맥락에선 재측정 대상.** 위 "기각"의 핵심 근거는 **절대속도가 manga-ocr CPU의 1/8**이었는데, **PaddleOCR-VL을 프로덕션 recognizer로 채택**(정확도)하면 그 비교 대상이 사라진다 — manga-ocr를 안 쓴다. recognize-bound(전체의 64.7%, [recognize-gpu-speed.md](recognize-gpu-speed.md) 판정 전환) 맥락에선 B=2~4의 **2.04x/1.75x가 멀티워커 1.38x보다 큰 레버**다(둘은 곱 안 됨 — 같은 GPU 자원). 유일한 장애물은 correctness(B≥8 silently-wrong)인데, 근본 원인이 배치 *크기*가 아니라 **배치 내 길이 편차**(ragged vision 토큰 → left-pad → position_ids 오프셋)라 — 안전 조건은 "작은 배치"가 아니라 **길이 균일**(§어려운-건-dynamic-res). **vision-token 버킷팅**(비슷한 크롭끼리 배치, 캡이 이미 편차 축소)으로 회피 가능성이 있다. → **길이 버킷팅 + correctness 게이트(배치 출력==per-crop)로 재측정 대상.** 잡히면 배치가 주 레버, 멀티워커가 안전 폴백. PaddleOCR-VL 단독은 9060 XT 하나로 GPU 구동되므로 MI50 없이도 규명 가능.
+> **최종 실측 (2026-07-12) — 배치 폐기 확정.** 위 2026-07-07 표의 2.04x/1.75x는 **stale**이고, 파이프라인에 실제로 배선해 재보니 PaddleOCR-VL 배치는 per-crop보다 **느리다**. 확정까지 네 개의 측정 결함을 걷어냈다:
+> 1. **옛 수치가 stale** — 2026-07-07 이후 AOTriton flash(07-08)·해상도 캡(07-10)이 per-crop을 1.71x 빠르게(0.34→0.58 crops/sec) 만들어 배치의 *상대* 이득이 사라졌다. 배치 절대속도는 그대로(0.70→0.71 crops/sec)인데 baseline만 좋아진 것.
+> 2. **bench probe의 캡 비대칭** — baseline은 `rec.recognize`(내부 캡)인데 batch probe는 `proc(원본 크롭)`이라 캡 미적용. baseline만 빨라 speedup이 부풀었다.
+> 3. **bench의 크롭 셋 불공정** — baseline은 큰 크롭 24개 평균, 배치는 작은 앞 b개. 다른 표본이라 배치가 나아 보였다.
+> 4. **`no_grad` 누락** — 파이프라인 `recognize_batch`와 첫 [diag_batch.py](diag_batch.py)가 `generate`를 `torch.no_grad()`로 안 감싸 배치 forward가 autograd 그래프를 쌓았다(단일 크롭엔 안 보이지만 배치는 activation N배라 폭발). 이게 파이프라인 5.5x·첫 diag 10.5x의 정체였다.
+>
+> **공정 측정**(같은 크롭 · 캡 대칭 · no_grad, [diag_batch.py](diag_batch.py) `--n 4`): per-crop 합 4184ms vs 배치 5346ms = **배치 1.3x 느림(0.78x)**. `input_ids(4,223)` 진짜 배치 + `pixel_values` concat(패딩 없음)이라 패딩은 무관 — 순수 **straggler**다. 배치 forward는 gen-step당 오히려 약간 빠르나(53.5 vs 59.8ms), 짧은 `ぶくっ`(4토큰)이 배치 최장 25토큰까지 헛돌아 gen-step이 100 vs 70으로 는다. vision-prefill 지배라 배치 효율 이득이 애초에 작고(1.12x), straggler(1.43x)가 그걸 넘는다.
+>
+> **→ 배치 폐기 확정.** recognize 처리량 레버는 vision을 직접 줄이는 flash(3.7x)·캡(1.66x)과, straggler가 원천 없는 **멀티워커([recognize-gpu-speed.md](recognize-gpu-speed.md), 1.38x)**다. correctness(B≥8 깨짐)까지 고려하면 배치는 어느 축으로도 못 이긴다. (대조: 번역기 gemma는 메모리-바운드 텍스트 LLM이라 `translate_batch`가 유효 — 배치가 안 통하는 건 recognize의 VLM 아키텍처(짧은 출력 + vision-prefill 지배) 때문이지 배치 일반이 아니다.)
 - **완료 — registry 안전성을 `gpu_lock`에서 분리.** 커밋 2c7e38e; 자체 lock으로 `gpu_lock`과 무관하게 thread-safe. (§gpu_lock 1번이 요구한 전제.)
 - **CPU recognize를 정말 빠르게 할 거면 배치보다 멀티워커(동시성)가 우선** — 1.8x > 1.27x 실측. 단 `gpu_lock`→semaphore 필요하고, 역시 recognize 비중 확인이 선행. translate-bound면 둘 다 가려진다.
 - **방향 전환 — 처리량은 배치가 아니다. 단 동시성도 GPU 엔진엔 약하다.** 세 recognize 경로 다 배치가 신통찮다(manga-ocr 1.27x, PaddleOCR-VL 기각). manga-ocr은 CPU 멀티워커가 레버(1.8x)지만 **GPU 멀티워커는 실측 천장 1.31x**다 — ROCm엔 MPS가 없어 커널이 타임슬라이스되고, 벌 수 있는 건 W=1의 GPU 유휴(~24%)뿐이다([recognize-gpu-speed.md](recognize-gpu-speed.md)). **GPU 쪽 진짜 레버는 flash attention(AOTriton, 3.7x)이었다.** 하드웨어 확장(9060 XT + MI50) 시 **GPU별 역할 분리** — 한 GPU는 recognize(PaddleOCR-VL), 다른 GPU는 translate(Gemma) — 는 한 GPU를 나눠 쓰는 게 아니라 물리적 분리라 이 천장과 무관하고, `gpu_lock` 경합을 없애는 다음 설계 후보로 유효하다(별도 검토).
