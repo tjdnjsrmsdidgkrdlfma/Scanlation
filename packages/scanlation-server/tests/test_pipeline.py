@@ -133,51 +133,6 @@ def test_no_batch_method_falls_back_to_per_text():
     assert result[0]["destination"] == "[ja->ko] REGION-0"  # dummy per-text echo
 
 
-class _RecognizerBatchRecorder:
-    """Recognizer exposing recognize_batch — records which path the pipeline took
-    and returns one string per crop, aligned to input order."""
-    name = "batchrec"
-
-    def __init__(self):
-        self.batch_calls = 0
-        self.single_calls = 0
-
-    def recognize(self, crop, region, options):
-        self.single_calls += 1
-        return f"one-{region.order}"
-
-    def recognize_batch(self, crops, regions, options):
-        self.batch_calls += 1
-        return [f"batch-{r.order}" for r in regions]
-
-
-def test_recognize_batch_path_used_when_available_and_order_preserved():
-    # A recognizer with recognize_batch must be driven via ONE batch call (not the
-    # per-crop loop), and the result must stay aligned to reading order.
-    img = Image.new("RGB", (400, 300), (255, 255, 255))
-    rec = _RecognizerBatchRecorder()
-    result = run_pipeline(
-        img,
-        detector=DummyDetector(), recognizer=rec, translator=DummyTranslator(),
-        src="ja", dst="ko", opt_detect={}, opt_recognize={}, opt_translate={},
-    )
-    assert len(result) == 2
-    assert rec.batch_calls == 1 and rec.single_calls == 0  # one batch, no per-crop
-    assert result[0]["source"] == "batch-0" and result[1]["source"] == "batch-1"
-
-
-def test_no_recognize_batch_falls_back_to_per_crop():
-    # DummyRecognizer has no recognize_batch -> pipeline uses the per-crop loop.
-    assert not hasattr(DummyRecognizer(), "recognize_batch")
-    img = Image.new("RGB", (400, 300), (255, 255, 255))
-    result = run_pipeline(
-        img,
-        detector=DummyDetector(), recognizer=DummyRecognizer(), translator=DummyTranslator(),
-        src="ja", dst="ko", opt_detect={}, opt_recognize={}, opt_translate={},
-    )
-    assert result[0]["source"] == "REGION-0"  # dummy per-crop echo
-
-
 TESTS = [
     test_reading_order_is_right_to_left_top_to_bottom,
     test_reading_order_is_left_to_right_for_ltr_sources,
@@ -187,8 +142,6 @@ TESTS = [
     test_dummy_pipeline_golden,
     test_batch_path_used_when_available_and_order_preserved,
     test_no_batch_method_falls_back_to_per_text,
-    test_recognize_batch_path_used_when_available_and_order_preserved,
-    test_no_recognize_batch_falls_back_to_per_crop,
 ]
 
 if __name__ == "__main__":

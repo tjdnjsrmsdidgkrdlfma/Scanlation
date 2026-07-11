@@ -104,45 +104,16 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
         self._proc = None
 
     # --- inference ---
-    def _prompt(self) -> str:
-        """The chat-template prompt string (image placeholder + PROMPT), shared by the
-        single- and batch-recognize paths."""
-        messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": self.PROMPT}]}]
-        return self._proc.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-
-    def _cap(self, crop: Image.Image, options: dict[str, Any]) -> Image.Image:
-        """Downscale a crop to the vision-token cap (max_pixels / downscale_mode)."""
-        mode = options["downscale_mode"] if options["downscale_mode"] in _MODES else "pow2"
-        return downscale_to_cap(to_rgb(crop), options["max_pixels"], mode)
-
     def recognize(self, crop: Image.Image, region: Region, options: dict[str, Any]) -> str:
         options = self.resolve_options(options)
-        crop = self._cap(crop, options)
-        inputs = self._proc(text=[self._prompt()], images=[crop], return_tensors="pt").to(self._model.device)
-        out = self._model.generate(**inputs, max_new_tokens=options["max_new_tokens"], do_sample=False)
+        crop = to_rgb(crop)
+        mode = options["downscale_mode"] if options["downscale_mode"] in _MODES else "pow2"
+        crop = downscale_to_cap(crop, options["max_pixels"], mode)
+        messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": self.PROMPT}]}]
+        text = self._proc.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+        inputs = self._proc(text=[text], images=[crop], return_tensors="pt").to(self._model.device)
+        out = self._model.generate(
+            **inputs, max_new_tokens=options["max_new_tokens"], do_sample=False,
+        )
         gen = out[0][inputs["input_ids"].shape[1]:]
         return self._proc.decode(gen, skip_special_tokens=True).strip()
-
-    def recognize_batch(self, crops: list[Image.Image], regions: list[Region],
-                        options: dict[str, Any]) -> list[str]:
-        """Read a whole page's crops in ONE batched generate (the BatchRecognizer
-        seam the pipeline uses). Caps each crop, then buckets largest-first so the
-        ragged vision-token lengths need the least left-pad — a padding/position_ids
-        mismatch is the 'silently wrong' failure mode for a dynamic-res VLM, and
-        least-pad minimises it (packages/scanlation-server/tools/recognize-crop-batching.md).
-        Decodes back to input order; one string per crop."""
-        if not crops:
-            return []
-        options = self.resolve_options(options)
-        capped = [self._cap(c, options) for c in crops]
-        order = sorted(range(len(capped)), key=lambda i: capped[i].width * capped[i].height, reverse=True)
-        self._proc.tokenizer.padding_side = "left"  # gen frontier aligns at the right edge
-        inputs = self._proc(text=[self._prompt()] * len(capped), images=[capped[i] for i in order],
-                            padding=True, return_tensors="pt").to(self._model.device)
-        out = self._model.generate(**inputs, max_new_tokens=options["max_new_tokens"], do_sample=False)
-        gen = out[:, inputs["input_ids"].shape[1]:]
-        decoded = [self._proc.decode(g, skip_special_tokens=True).strip() for g in gen]
-        result = [""] * len(crops)
-        for k, i in enumerate(order):
-            result[i] = decoded[k]
-        return result
