@@ -58,6 +58,17 @@ class Settings:
         default_factory=lambda: max(1, int(_env("SCANLATION_TRANSLATE_CONCURRENCY", "1")))
     )
 
+    # First-run default for the recognize worker-pool size (per-engine, overridable
+    # in /admin plugin options). Floor 1: 1 = no pool (the in-process per-crop loop,
+    # byte-identical to the pre-pool path); >1 fans a page's crops across N worker
+    # PROCESSES (each B=1) to fill the GPU idle a single request leaves. It's a
+    # per-engine LOAD-TIME setting (pool built with N workers), so it lives in
+    # Selection.recognize_concurrency (a dict, like devices), NOT as an OPTION_SCHEMA
+    # option; this is only the global fallback when an engine has no override.
+    recognize_concurrency: int = field(
+        default_factory=lambda: max(1, int(_env("SCANLATION_RECOGNIZE_CONCURRENCY", "1")))
+    )
+
     # First-run default for idle model unload (MINUTES): a local torch engine
     # (detector/recognizer) not used for this long is dropped from VRAM by a
     # background sweep, so it stops holding the GPU between reading sessions — the

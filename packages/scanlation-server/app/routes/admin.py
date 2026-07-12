@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 from .. import __version_array__
 from scanlation_sdk.context import LANGUAGES
 from ..cache import cache
+from ..config import settings
 from ..catalog import catalog
 from ..engine_meta import class_meta, safe_is_installed, serialize_schema
 from ..gpus import detect_gpu_vendor, installed_torch_build, list_gpus
@@ -53,6 +54,9 @@ def _engine_entries(role: str) -> list[dict]:
             "schema": serialize_schema(cls),
             "options": dict(state.selection.options.get(name, {})),
             "device": state.selection.devices.get(name, ""),
+            # per-engine recognize worker-pool override ("" = the global default);
+            # the admin UI shows this field only for recognizers that load onto a device
+            "recognize_concurrency": state.selection.recognize_concurrency.get(name, ""),
         })
     installed_names = {e["name"] for e in entries}
     for name, entry in catalog().items():
@@ -71,6 +75,7 @@ def _engine_entries(role: str) -> list[dict]:
             "schema": {},
             "options": {},
             "device": "",
+            "recognize_concurrency": "",
         })
     return entries
 
@@ -98,6 +103,9 @@ def get_settings() -> dict:
             "torch_index": sel.torch_index,
         },
         "languages": LANGUAGES,
+        # Global fallback the per-engine recognize-worker field shows as its placeholder
+        # (an engine with no override runs this many workers; 1 = no pool).
+        "recognize_concurrency_default": settings.recognize_concurrency,
         "gpus": list_gpus(),                # [{index, name}] for the per-engine device picker
         "gpu_vendor": detect_gpu_vendor(),  # amd/nvidia/both/None from device nodes (torch backend auto-pick)
         "torch_build": installed_torch_build(),  # cpu/cuda/rocm/None — for the backend-mismatch warning

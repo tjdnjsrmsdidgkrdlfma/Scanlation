@@ -47,10 +47,34 @@ def test_set_engine_device_validates():
         state.set_engine_device("dummy", None)
 
 
+def test_set_recognize_concurrency_validates():
+    """Per-engine recognize worker-pool size: set it, reset it (null -> global
+    default), reject an unknown engine. A real change invalidates the pool under the
+    GPU lock (no-op here — dummy is never pooled)."""
+    from app.state import state
+
+    c = client()
+    try:
+        r = c.post("/set_recognize_concurrency/", json={"engine": "dummy", "concurrency": 4})
+        assert r.status_code == 200 and r.json()["concurrency"] == 4
+        assert state.resolve_recognize_concurrency("dummy") == 4
+        # a sub-1 value is floored to 1 (forces 'no pool' for this engine)
+        r = c.post("/set_recognize_concurrency/", json={"engine": "dummy", "concurrency": 0})
+        assert r.status_code == 200 and r.json()["concurrency"] == 1
+        # null resets to the global default -> the override is removed
+        assert c.post("/set_recognize_concurrency/", json={"engine": "dummy", "concurrency": None}).status_code == 200
+        assert "dummy" not in state.selection.recognize_concurrency
+        # unknown engine -> 400
+        assert c.post("/set_recognize_concurrency/", json={"engine": "nope", "concurrency": 2}).status_code == 400
+    finally:
+        state.set_recognize_concurrency("dummy", None)
+
+
 TESTS = [
     test_set_engines_validates,
     test_set_languages_validates,
     test_set_engine_device_validates,
+    test_set_recognize_concurrency_validates,
 ]
 
 if __name__ == "__main__":

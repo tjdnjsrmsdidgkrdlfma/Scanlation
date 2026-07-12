@@ -1,4 +1,5 @@
-"""Selection endpoints: /set_engines/, /set_languages/, /set_engine_device/.
+"""Selection endpoints: /set_engines/, /set_languages/, /set_engine_device/,
+/set_recognize_concurrency/.
 
 Selection is validated (name must exist / language must be known) but engines
 are NOT eagerly loaded — that happens lazily on first run_pipeline.
@@ -10,8 +11,14 @@ import re
 from fastapi import APIRouter, HTTPException
 
 from scanlation_sdk.context import LANGUAGES
+from ..recognize_pool import recognize_pool
 from ..registry import ROLE_NAMES, registry
-from ..schemas import SetEngineDeviceRequest, SetLanguagesRequest, SetEnginesRequest
+from ..schemas import (
+    SetEngineDeviceRequest,
+    SetLanguagesRequest,
+    SetEnginesRequest,
+    SetRecognizeConcurrencyRequest,
+)
 from ..state import state
 
 router = APIRouter()
@@ -59,4 +66,20 @@ async def set_engine_device(req: SetEngineDeviceRequest) -> dict:
             for role in ROLE_NAMES:
                 if registry.has(role, req.engine):
                     registry.unload_one(role, req.engine)
+            recognize_pool.invalidate(req.engine)  # rebuild on the new device (no-op if not the pooled engine)
     return {"status": "success", "device": state.resolve_device_for(req.engine) or ""}
+
+
+@router.post("/set_recognize_concurrency/")
+async def set_recognize_concurrency(req: SetRecognizeConcurrencyRequest) -> dict:
+    """Per-engine recognize worker-pool size (null resets to the global default).
+    On a real change, invalidate the pool under the GPU lock so the next run rebuilds
+    at the new size and no run is torn down mid-flight."""
+    if not any(registry.has(role, req.engine) for role in ROLE_NAMES):
+        raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
+    new = None if req.concurrency is None else max(1, int(req.concurrency))
+    if new != state.selection.recognize_concurrency.get(req.engine):
+        async with state.gpu_lock:      # no inference mid-flight while we tear the pool down
+            state.set_recognize_concurrency(req.engine, new)
+            recognize_pool.invalidate(req.engine)
+    return {"status": "success", "concurrency": state.resolve_recognize_concurrency(req.engine)}

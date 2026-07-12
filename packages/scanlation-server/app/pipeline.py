@@ -61,19 +61,45 @@ def detect_and_recognize(
     img: Image.Image,
     *,
     detector: Detector,
-    recognizer: Recognizer,
+    recognizer: Recognizer | None,
     src: str,
     opt_detect: dict[str, Any],
     opt_recognize: dict[str, Any],
+    pool: Any = None,
+    rec_name: str | None = None,
 ) -> tuple[list[tuple[str, Region]], dict[str, float]]:
     """Detect regions, order them, deskew+recognize each. Returns ``(pairs, timing)``:
     non-empty (text, region) pairs in reading order, plus ``{detect_ms, recognize_ms}``
     (the two halves, also logged — the caller surfaces them in the run response). This
     is the GPU/model half of the pipeline — the route runs it under the GPU lock.
-    assign_reading_order is called exactly once here (it assigns region.order)."""
+    assign_reading_order is called exactly once here (it assigns region.order).
+
+    Recognition takes one of two paths — the same optional-capability seam as
+    ``_translate_all``: with a ``pool`` (a RecognizePool) a page's crops fan out
+    across worker processes (each B=1) and ``recognizer`` is unused (the workers own
+    it — pass its name as ``rec_name`` for the log); without one, the in-process
+    per-crop loop runs on ``recognizer`` directly (the default; tests and CPU
+    engines)."""
     t0 = time.perf_counter()
     regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
     t_det = time.perf_counter()
+    out = (_recognize_via_pool(img, regions, opt_recognize, pool) if pool is not None
+           else _recognize_per_crop(img, regions, recognizer, opt_recognize))
+    t_rec = time.perf_counter()
+    logger.info(
+        "detect %s: %d regions %.0fms | recognize %s: %d texts %.0fms",
+        getattr(detector, "name", "?"), len(regions), (t_det - t0) * 1000,
+        rec_name or getattr(recognizer, "name", "?"), len(out), (t_rec - t_det) * 1000,
+    )
+    return out, {"detect_ms": round((t_det - t0) * 1000, 1),
+                 "recognize_ms": round((t_rec - t_det) * 1000, 1)}
+
+
+def _recognize_per_crop(
+    img: Image.Image, regions: list[Region], recognizer: Recognizer, opt_recognize: dict
+) -> list[tuple[str, Region]]:
+    """In-process path: deskew + recognize one crop at a time (the default, and the
+    fallback for CPU/test engines)."""
     out: list[tuple[str, Region]] = []
     for region in regions:
         crop = deskew_crop(img, region)
@@ -90,14 +116,25 @@ def detect_and_recognize(
         )
         if text:
             out.append((text, region))
-    t_rec = time.perf_counter()
-    logger.info(
-        "detect %s: %d regions %.0fms | recognize %s: %d texts %.0fms",
-        getattr(detector, "name", "?"), len(regions), (t_det - t0) * 1000,
-        getattr(recognizer, "name", "?"), len(out), (t_rec - t_det) * 1000,
-    )
-    return out, {"detect_ms": round((t_det - t0) * 1000, 1),
-                 "recognize_ms": round((t_rec - t_det) * 1000, 1)}
+    return out
+
+
+def _recognize_via_pool(
+    img: Image.Image, regions: list[Region], opt_recognize: dict, pool: Any
+) -> list[tuple[str, Region]]:
+    """Worker-pool path: deskew every crop in-process (CPU), then recognize them all
+    across the pool's worker processes (each B=1). Order is preserved by pool.run, so
+    the results zip straight back onto ``regions`` in reading order."""
+    crops = [deskew_crop(img, region) for region in regions]
+    texts = pool.run([(crop, opt_recognize) for crop in crops])
+    out: list[tuple[str, Region]] = []
+    for text, region in zip(texts, regions):
+        logger.debug("  #%d %s bbox=%s%s -> %r", region.order,
+                     getattr(region, "label", "") or "?", region.bbox,
+                     " vert" if region.vertical else "", text)
+        if text:
+            out.append((text, region))
+    return out
 
 
 def _translate_all(

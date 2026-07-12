@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from app.pipeline import assign_reading_order, run_pipeline
+from app.pipeline import assign_reading_order, detect_and_recognize, run_pipeline
 from scanlation_sdk.contracts import Region
 from tests.fake_engines import DummyDetector, DummyRecognizer, DummyTranslator
 
@@ -133,6 +133,64 @@ def test_no_batch_method_falls_back_to_per_text():
     assert result[0]["destination"] == "[ja->ko] REGION-0"  # dummy per-text echo
 
 
+class _FakePool:
+    """Stand-in for RecognizePool: records that the pool path ran and echoes
+    POOL-<i> per crop in input order (so we can assert order is preserved without
+    spawning real worker processes — the real multiprocess run is bench-validated).
+    ``boom`` makes run() raise BrokenProcessPool to exercise the propagate path."""
+    def __init__(self, boom=False):
+        self.calls = 0
+        self.boom = boom
+
+    def run(self, items):  # items = [(crop, options), ...]
+        self.calls += 1
+        if self.boom:
+            from concurrent.futures.process import BrokenProcessPool
+            raise BrokenProcessPool("boom")
+        return [f"POOL-{i}" for i in range(len(items))]
+
+
+def test_recognize_pool_path_used_and_order_preserved():
+    # With a pool, detect_and_recognize fans crops out via pool.run (not the per-crop
+    # loop) and zips the results back onto regions in reading order. recognizer is None.
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    pool = _FakePool()
+    recognized, timing = detect_and_recognize(
+        img, detector=DummyDetector(), recognizer=None, src="ja",
+        opt_detect={}, opt_recognize={}, pool=pool, rec_name="fake",
+    )
+    assert pool.calls == 1
+    assert [t for t, _ in recognized] == ["POOL-0", "POOL-1"]   # order preserved
+    assert [r.order for _, r in recognized] == [0, 1]           # reading order intact
+    assert "recognize_ms" in timing
+
+
+def test_no_pool_uses_per_crop_loop():
+    # Without a pool, the in-process per-crop loop runs on the recognizer directly.
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    recognized, _timing = detect_and_recognize(
+        img, detector=DummyDetector(), recognizer=DummyRecognizer(), src="ja",
+        opt_detect={}, opt_recognize={},
+    )
+    assert [t for t, _ in recognized] == ["REGION-0", "REGION-1"]
+
+
+def test_recognize_pool_broken_propagates():
+    # A pool that stays broken (after its own internal rebuild+retry) propagates:
+    # the request fails rather than the pipeline silently loading the model in-process
+    # (which would double the VRAM the pool exists to isolate). See RecognizePool.run.
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    raised = False
+    try:
+        detect_and_recognize(
+            img, detector=DummyDetector(), recognizer=None, src="ja",
+            opt_detect={}, opt_recognize={}, pool=_FakePool(boom=True), rec_name="fake",
+        )
+    except Exception as exc:  # noqa: BLE001
+        raised = type(exc).__name__ == "BrokenProcessPool"
+    assert raised
+
+
 TESTS = [
     test_reading_order_is_right_to_left_top_to_bottom,
     test_reading_order_is_left_to_right_for_ltr_sources,
@@ -142,6 +200,9 @@ TESTS = [
     test_dummy_pipeline_golden,
     test_batch_path_used_when_available_and_order_preserved,
     test_no_batch_method_falls_back_to_per_text,
+    test_recognize_pool_path_used_and_order_preserved,
+    test_no_pool_uses_per_crop_loop,
+    test_recognize_pool_broken_propagates,
 ]
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@
 |---|---|---|---|
 | **AOTriton flash attention** (env 한 줄) | **3.7x** | 없음 | **채택 — `docker-compose.rocm.yml`에 반영됨** |
 | 해상도 캡 150k + `pow2` | 1.66x | 24개 중 3개가 뭉개진 말줄임/작은 가나(줄 소실 없음), 나머지는 표기 차 | **채택 — 구현 완료(`3503181`)** |
-| 멀티워커 (W=4) | **1.38x** (정점 W=3 1.41x) | VRAM 4배, per-crop 지연 | **채택 확정** — recognize-bound + MI50 GPU분리, 2의 배수 정렬로 W=4 (§동시성 판정) |
+| 멀티워커 (W=4) | **1.38x** (정점 W=3 1.41x) | VRAM 4배, per-crop 지연 | **채택 확정 · 린 코어 구현 완료(W=1 off 기본)** — recognize-bound + MI50 GPU분리, 2의 배수 정렬로 W=4 (§동시성 판정) |
 
 병목은 **vision attention**이 맞다 — 큰 crop이 수백 개 vision 토큰을 만들고 attention이 그걸 매 스텝 문다. **그런데 해법이 막힌 게 아니었다:** `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`이 sdpa를 flash/mem-efficient 커널로 태운다.
 
@@ -107,7 +107,7 @@ flash 없는 sdpa(math 폴백)는 이 둘을 O(n²)로 문다. **AOTriton이 그
 - **VRAM 천장 W=6** — 캡을 써도 per-worker ~1.9GB × 7 + activation/HIP 오버헤드가 16GB를 넘어 W=7이 OOM.
 - **→ W=4 채택.** 정점은 W=3(1.41x)이나 W=4(1.38x)와 사실상 동일하고, **2의 배수 정렬**(설정·확장 일관성)로 W=4를 택한다. `chars max 62`가 전 W 동일 → 동시성은 배치와 달리 correctness가 온전.
 
-> **판정 전환 (2026-07-12) — 재고조건 충족.** 위 "안 넣음"은 **manga-ocr가 기본**이라 파이프라인이 translate-bound(recognize가 전체의 18.7%)이던 전제였다. **PaddleOCR-VL로 전환하면 recognize가 병목**이 된다 — recognize-only 68.6s = translate 31.7s의 **2.2배**, 전체의 **64.7%**(run_report 2건 실측, manga-ocr는 18.7% ↔ PaddleOCR-VL는 64.7%로 역전). 그리고 **MI50 32GB 도입으로 translate(Gemma)를 별 GPU로 분리**하면 이 절이 든 반대가 다 사라진다: VRAM 4배 → 9060 XT 16GB를 recognize가 전용, per-crop 지연 → 처리량 워크로드라 무관, `gpu_lock` 경합 → GPU 물리 분리로 0. correctness는 배치와 달리 원래 안전. **→ W=4 채택 확정**(정점 W=3 1.41x이나 2의 배수 정렬로 W=4 1.38x, 위 full 스윕 표). 구현(`gpu_lock`→semaphore + 프로세스풀)은 하드웨어 도착 후. [배치](recognize-crop-batching.md)는 2026-07-12 공정 실측(같은 크롭·캡 대칭·no_grad)에서 per-crop보다 **1.3x 느려 폐기**됐다(옛 2.04x는 stale) — 멀티워커가 recognize 동시성의 유일한 레버다.
+> **판정 전환 (2026-07-12) — 재고조건 충족.** 위 "안 넣음"은 **manga-ocr가 기본**이라 파이프라인이 translate-bound(recognize가 전체의 18.7%)이던 전제였다. **PaddleOCR-VL로 전환하면 recognize가 병목**이 된다 — recognize-only 68.6s = translate 31.7s의 **2.2배**, 전체의 **64.7%**(run_report 2건 실측, manga-ocr는 18.7% ↔ PaddleOCR-VL는 64.7%로 역전). 그리고 **MI50 32GB 도입으로 translate(Gemma)를 별 GPU로 분리**하면 이 절이 든 반대가 다 사라진다: VRAM 4배 → 9060 XT 16GB를 recognize가 전용, per-crop 지연 → 처리량 워크로드라 무관, `gpu_lock` 경합 → GPU 물리 분리로 0. correctness는 배치와 달리 원래 안전. **→ W=4 채택 확정**(정점 W=3 1.41x이나 2의 배수 정렬로 W=4 1.38x, 위 full 스윕 표). 구현: **린 코어(프로세스풀 + crop fan-out + per-engine W 배관)** — env `SCANLATION_RECOGNIZE_CONCURRENCY`(기본 1 = off, 기존 per-crop 경로와 동일) + `/admin` 플러그인별 설정, [`recognize_pool.py`](../app/recognize_pool.py). W>1이면 한 페이지의 crop을 W개 워커 프로세스(각 B=1)로 fan-out. `gpu_lock`→semaphore 전환·크로스이미지 오버랩은 MI50 GPU 분리 후. [배치](recognize-crop-batching.md)는 2026-07-12 공정 실측(같은 크롭·캡 대칭·no_grad)에서 per-crop보다 **1.3x 느려 폐기**됐다(옛 2.04x는 stale) — 멀티워커가 recognize 동시성의 유일한 레버다.
 
 ## 해상도 캡 (flash-ON 실측 — 판정 보류)
 

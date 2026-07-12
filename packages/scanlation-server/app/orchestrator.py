@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .cache import cache, opt_hash
 from .pipeline import detect_and_recognize, recognized_to_result, translate_regions
+from .recognize_pool import recognize_pool
 from .registry import registry
 from .state import state
 
@@ -74,8 +75,8 @@ def cached_result(plan: RunPlan, md5: str) -> list | None:
 
 
 def _read_sync(img, plan: RunPlan):
-    """Read the image = detect + recognize (the GPU/model half). Resolves all three
-    engines (loads weights on first use); returns (recognized pairs, translator,
+    """Read the image = detect + recognize (the GPU/model half). Resolves detector +
+    translator (loads weights on first use); returns (recognized pairs, translator,
     sub-timing) where sub-timing is {detect_ms, recognize_ms} from the two halves.
 
     Runs in the threadpool UNDER the GPU lock: registry.get is not thread-safe
@@ -83,14 +84,30 @@ def _read_sync(img, plan: RunPlan):
     translator is resolved here too — cheap (just its httpx client) — so the
     concurrent translate path never touches registry.get and the lazily-created
     client is ready before any concurrent request uses it.
+
+    Recognize takes the worker pool when this engine's per-engine concurrency is >1
+    (a page's crops fan out across processes; the recognizer is NOT registry-loaded
+    here so its VRAM lives only in the workers, not also in this process); otherwise
+    the registry-loaded engine runs the in-process per-crop loop (the default). A
+    pool that stays broken after its own rebuild+retry propagates — the request fails
+    rather than doubling the VRAM by loading the model here.
     """
     detector = registry.get("detector", plan.detector)
-    recognizer = registry.get("recognizer", plan.recognizer)
     translator = registry.get("translator", plan.translator)
-    recognized, sub = detect_and_recognize(
-        img, detector=detector, recognizer=recognizer,
-        src=plan.src, opt_detect=plan.opt_detect, opt_recognize=plan.opt_recognize,
-    )
+    workers = state.resolve_recognize_concurrency(plan.recognizer)
+    if workers > 1:
+        recognize_pool.ensure(plan.recognizer, state.resolve_device_for(plan.recognizer), workers)
+        recognized, sub = detect_and_recognize(
+            img, detector=detector, recognizer=None, src=plan.src,
+            opt_detect=plan.opt_detect, opt_recognize=plan.opt_recognize,
+            pool=recognize_pool, rec_name=plan.recognizer,
+        )
+    else:
+        recognizer = registry.get("recognizer", plan.recognizer)
+        recognized, sub = detect_and_recognize(
+            img, detector=detector, recognizer=recognizer,
+            src=plan.src, opt_detect=plan.opt_detect, opt_recognize=plan.opt_recognize,
+        )
     return recognized, translator, sub
 
 

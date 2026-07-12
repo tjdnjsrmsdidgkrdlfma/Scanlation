@@ -41,6 +41,12 @@ class SetEngineDeviceRequest(BaseModel):
     device: str = ""                     # "cpu"/"cuda"/"cuda:N"; "" removes the override -> DEFAULT_DEVICE
 
 
+# --- /set_recognize_concurrency/ --------------------------------------------
+class SetRecognizeConcurrencyRequest(BaseModel):
+    engine: str
+    concurrency: Optional[int] = None    # worker-pool size (>=1); null resets to the global default
+
+
 # --- /install_plugins/ ------------------------------------------------------
 class InstallPluginsRequest(BaseModel):
     plugins: dict[str, bool]

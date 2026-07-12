@@ -30,6 +30,12 @@ class Selection:
     # in-process engines (detector + recognizer) honor it; LLM engines are separate
     # processes and ignore it.
     devices: dict[str, str] = field(default_factory=dict)
+    # {engine_name: N} per-engine recognize worker-pool size (process count). Like
+    # ``devices`` this is a LOAD-TIME property (the pool is built with N workers, not
+    # changed per crop), so it lives here rather than in OPTION_SCHEMA. Absent -> the
+    # global default (settings.recognize_concurrency); N=1 -> no pool (in-process
+    # per-crop loop). Only recognizers use it (the pipeline fans a page's crops out).
+    recognize_concurrency: dict[str, int] = field(default_factory=dict)
     # Active LLM system-prompt preset name (see app.prompts) + user-saved presets.
     prompt_active: str = "default"
     prompts: dict[str, str] = field(default_factory=dict)
@@ -130,6 +136,24 @@ class AppState:
         """The per-engine device override, or None to let the engine use its
         DEFAULT_DEVICE (there is no global device)."""
         return self.selection.devices.get(engine_name)
+
+    def set_recognize_concurrency(self, engine_name: str, workers: int | None) -> None:
+        """Persist a per-engine recognize worker-pool size. ``None`` removes the
+        override (falls back to the global default); an explicit int is stored (incl.
+        1, which forces 'no pool' for this engine even if the global default is
+        higher). Floored at 1. The caller invalidates the pool so the next run
+        rebuilds at the new size."""
+        if workers is None:
+            self.selection.recognize_concurrency.pop(engine_name, None)
+        else:
+            self.selection.recognize_concurrency[engine_name] = max(1, int(workers))
+        self.save()
+
+    def resolve_recognize_concurrency(self, engine_name: str) -> int:
+        """The per-engine recognize worker-pool size, or the global default. Floor 1
+        (1 = no pool). Read on every run to pick the in-process loop vs the pool."""
+        return max(1, int(self.selection.recognize_concurrency.get(
+            engine_name, settings.recognize_concurrency)))
 
     def set_client_config(
         self, *, min_image_dim: int | None = None, verbose_log: bool | None = None,
