@@ -8,7 +8,7 @@
 |---|---|---|---|
 | **AOTriton flash attention** (env 한 줄) | **3.7x** | 없음 | **채택 — `docker-compose.rocm.yml`에 반영됨** |
 | 해상도 캡 150k + `pow2` | 1.66x | 24개 중 3개가 뭉개진 말줄임/작은 가나(줄 소실 없음), 나머지는 표기 차 | **채택 — 구현 완료(`3503181`)** |
-| 멀티워커 (W=4) | 1.31x (캡 후 1.38x) | VRAM 4배, per-crop 지연 | **채택 방향** — PaddleOCR-VL recognize-bound + MI50 GPU분리로 재고조건 충족 (§동시성 판정) |
+| 멀티워커 (W=4) | **1.38x** (정점 W=3 1.41x) | VRAM 4배, per-crop 지연 | **채택 확정** — recognize-bound + MI50 GPU분리, 2의 배수 정렬로 W=4 (§동시성 판정) |
 
 병목은 **vision attention**이 맞다 — 큰 crop이 수백 개 vision 토큰을 만들고 attention이 그걸 매 스텝 문다. **그런데 해법이 막힌 게 아니었다:** `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`이 sdpa를 flash/mem-efficient 커널로 태운다.
 
@@ -88,22 +88,26 @@ flash 없는 sdpa(math 폴백)는 이 둘을 O(n²)로 문다. **AOTriton이 그
 
 > 즉 *"처리량은 배치가 아니라 동시성"*은 **CPU 엔진엔 맞지만 GPU 엔진엔 안 맞는다.** GPU 쪽 진짜 레버는 flash attention이었다. (하드웨어 확장 시의 "GPU별 역할 분리"는 한 GPU를 나눠 쓰는 게 아니라 물리적 분리라 이 천장과 무관하다.)
 
-### 후속 — 캡 켠 현재 스택 재측정 (2026-07-10, torch 2.10+rocm7.0)
+### 후속 — 캡 켠 현재 스택, 워커 1~8 full 스윕 (2026-07-12)
 
-해상도 캡(150k + `pow2`)을 프로덕션에 넣은 뒤 같은 챕터로 재측정. 캡이 duty를 바꿔 천장이 살짝 오르지만 판정은 그대로다.
+해상도 캡(150k + `pow2`)을 넣은 프로덕션 스택에서 워커 1~8을 다 재측정(2026-07-10의 W=1,2,4,6 부분 측정을 W=3,5,7까지 채운 것).
 
 | W | crops/sec | speedup | per-crop med | est VRAM |
 |---|---|---|---|---|
-| 1 | 0.58 | 1.00x | 1614ms | ~1.9GB |
-| 2 | 0.53 | 0.92x | 3465ms | ~3.9GB |
-| 4 | 0.80 | **1.38x** | 4569ms | ~7.7GB |
-| 6 | 0.77 | 1.33x | 7193ms | ~11.6GB |
+| 1 | 0.58 | 1.00x | 1612ms | ~1.9GB |
+| 2 | 0.52 | **0.91x** ↓ | 3500ms | ~3.9GB |
+| **3** | 0.81 | **1.41x** (정점) | 2968ms | ~5.8GB |
+| 4 | 0.80 | **1.38x** | 4369ms | ~7.7GB |
+| 5 | 0.78 | 1.35x | 5886ms | ~9.7GB |
+| 6 | 0.76 | 1.31x | 7148ms | ~11.6GB |
+| 7 | — | OOM (BrokenProcessPool) | | >16GB |
 
-- **W=1 baseline 0.34→0.58(1.71x)** — 이건 동시성이 아니라 **캡의 처리량 이득**이다(run_report의 1.75x와 교차 검증).
-- **천장 1.31x→1.38x**: 캡이 vision prefill(GPU 집약)을 줄여 crop이 decode-bound 쪽으로 이동 → W=1 GPU 점유율 ~76%→~72% → 늘어난 유휴를 동시성이 회수. 구조적 천장(ROCm MPS 없음)은 그대로다.
-- **판정 유지 — 안 넣는다.** 1.38x에 VRAM 4배 + per-crop 지연 2.8배(1614→4569ms), W=6은 후퇴. **캡은 공짜(VRAM 0)로 1.71x**를 주는데 멀티워커는 그 위에서 4배 VRAM으로 1.38x만 더한다. `chars max 62`가 전 W 동일 → 동시성은 배치와 달리 correctness가 온전(재확인).
+- **W=1 baseline 0.34→0.58(1.71x)** — 동시성이 아니라 **캡의 처리량 이득**이다(run_report의 1.75x와 교차 검증).
+- **정점 W=3(1.41x), 이후 완만한 하락**(W=4 1.38 · W=6 1.31). W=2는 **딥(0.91x)** — 큐 깊이가 낮아 유휴를 못 채우고 경합 오버헤드만 먹는다. 구조적 천장(~1.4x)은 ROCm MPS 부재로 GPU 유휴(~28%) 회수가 상한이라, 캡 전(1.31x)보다 살짝 오른 것뿐.
+- **VRAM 천장 W=6** — 캡을 써도 per-worker ~1.9GB × 7 + activation/HIP 오버헤드가 16GB를 넘어 W=7이 OOM.
+- **→ W=4 채택.** 정점은 W=3(1.41x)이나 W=4(1.38x)와 사실상 동일하고, **2의 배수 정렬**(설정·확장 일관성)로 W=4를 택한다. `chars max 62`가 전 W 동일 → 동시성은 배치와 달리 correctness가 온전.
 
-> **판정 전환 (2026-07-12) — 재고조건 충족.** 위 "안 넣음"은 **manga-ocr가 기본**이라 파이프라인이 translate-bound(recognize가 전체의 18.7%)이던 전제였다. **PaddleOCR-VL로 전환하면 recognize가 병목**이 된다 — recognize-only 68.6s = translate 31.7s의 **2.2배**, 전체의 **64.7%**(run_report 2건 실측, manga-ocr는 18.7% ↔ PaddleOCR-VL는 64.7%로 역전). 그리고 **MI50 32GB 도입으로 translate(Gemma)를 별 GPU로 분리**하면 이 절이 든 반대가 다 사라진다: VRAM 4배 → 9060 XT 16GB를 recognize가 전용, per-crop 지연 → 처리량 워크로드라 무관, `gpu_lock` 경합 → GPU 물리 분리로 0. correctness는 배치와 달리 원래 안전. **→ 채택 방향.** 구현(`gpu_lock`→semaphore + 프로세스풀)은 하드웨어 도착 후. [배치](recognize-crop-batching.md)는 2026-07-12 공정 실측(같은 크롭·캡 대칭·no_grad)에서 per-crop보다 **1.3x 느려 폐기**됐다(옛 2.04x는 stale) — 멀티워커가 recognize 동시성의 유일한 레버다.
+> **판정 전환 (2026-07-12) — 재고조건 충족.** 위 "안 넣음"은 **manga-ocr가 기본**이라 파이프라인이 translate-bound(recognize가 전체의 18.7%)이던 전제였다. **PaddleOCR-VL로 전환하면 recognize가 병목**이 된다 — recognize-only 68.6s = translate 31.7s의 **2.2배**, 전체의 **64.7%**(run_report 2건 실측, manga-ocr는 18.7% ↔ PaddleOCR-VL는 64.7%로 역전). 그리고 **MI50 32GB 도입으로 translate(Gemma)를 별 GPU로 분리**하면 이 절이 든 반대가 다 사라진다: VRAM 4배 → 9060 XT 16GB를 recognize가 전용, per-crop 지연 → 처리량 워크로드라 무관, `gpu_lock` 경합 → GPU 물리 분리로 0. correctness는 배치와 달리 원래 안전. **→ W=4 채택 확정**(정점 W=3 1.41x이나 2의 배수 정렬로 W=4 1.38x, 위 full 스윕 표). 구현(`gpu_lock`→semaphore + 프로세스풀)은 하드웨어 도착 후. [배치](recognize-crop-batching.md)는 2026-07-12 공정 실측(같은 크롭·캡 대칭·no_grad)에서 per-crop보다 **1.3x 느려 폐기**됐다(옛 2.04x는 stale) — 멀티워커가 recognize 동시성의 유일한 레버다.
 
 ## 해상도 캡 (flash-ON 실측 — 판정 보류)
 
