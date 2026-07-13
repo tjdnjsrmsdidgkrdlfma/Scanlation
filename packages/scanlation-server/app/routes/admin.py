@@ -224,3 +224,23 @@ def clear_stats() -> dict:
     """Drop all processing-stats history (both tables). Separate from /clear_cache/ —
     clearing the page cache means 'recompute', not 'forget the stats'."""
     return {"status": "success", "cleared": cache.clear_stats()}
+
+
+# --- TEMP occupancy bench (revert via git) -----------------------------------
+# Measures how full the recognize worker pool was during a batch, to verify the
+# "gate+K is an image bundle -> workers idle when crops sum < W" claim directly.
+# Workflow: POST /bench_occupancy_reset/ -> fire a --parallel --no-translate batch ->
+# GET /bench_occupancy/ (see tools/bench_occupancy.py, which does all three per K).
+@router.post("/bench_occupancy_reset/")
+def bench_occupancy_reset() -> dict:
+    from ..recognize_pool import reset_occupancy
+
+    reset_occupancy()
+    return {"status": "success"}
+
+
+@router.get("/bench_occupancy/")
+def bench_occupancy() -> dict:
+    from ..recognize_pool import active_workers, occupancy_stats
+
+    return occupancy_stats(active_workers())

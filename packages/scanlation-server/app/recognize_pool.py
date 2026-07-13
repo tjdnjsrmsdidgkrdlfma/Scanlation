@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import threading
+import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool  # not re-exported by the package top-level
 
@@ -34,6 +35,17 @@ logger = logging.getLogger("scanlation.recognize_pool")
 
 # --- per-worker process globals (set once by the pool initializer) -----------
 _REC = None
+
+# --- TEMP occupancy bench (revert via git) -----------------------------------
+# Every worker crop reports its wall-clock execution window (time.time(), which IS
+# comparable across the spawned worker processes) into this main-process sink, so a
+# controlled batch can measure how full the W-worker pool actually was. This is the
+# direct test of the "gate+K is an image bundle -> workers idle when a page's crops
+# sum < W" claim: utilization ~1.0 means the pool was never starved for crops (image
+# boundaries cost ~nothing -> stage separation can't help); <1.0 is the worker
+# capacity lost to starvation. Reset before a batch, read after (see bench routes).
+_OCC_LOCK = threading.Lock()
+_OCC: list[tuple[float, float]] = []
 
 
 def _worker_init(group: str, name: str, device: str | None) -> None:
@@ -64,21 +76,89 @@ def _worker_init(group: str, name: str, device: str | None) -> None:
     _REC = rec
 
 
-def _recognize_one(item) -> tuple[str, float]:
+def _recognize_one(item) -> tuple[str, float, float, float]:
     """One B=1 recognize in the worker. ``item`` is ``(crop, options)``; the crop is
-    already deskewed upright by the caller. Returns ``(text, elapsed_ms)`` — the
-    per-crop recognize time lets the pipeline record it as a stat. The recognizer's
+    already deskewed upright by the caller. Returns ``(text, elapsed_ms, t_start,
+    t_end)`` — ``elapsed_ms`` (perf_counter) is the per-crop recognize stat; the two
+    ``time.time()`` wall stamps are the execution window for the TEMP occupancy bench
+    (perf_counter isn't comparable across processes; time.time() is). The recognizer's
     ``region`` arg is a throwaway (recognize reads the crop pixels, not the geometry —
     same as the bench), so it isn't shipped across the process boundary."""
-    import time
-
     crop, options = item
     from scanlation_sdk.contracts import Region
 
     region = Region.from_bbox(0, 0, crop.width, crop.height)
+    t_start = time.time()
     t0 = time.perf_counter()
     text = _REC.recognize(crop, region, options).strip()
-    return text, (time.perf_counter() - t0) * 1000
+    ms = (time.perf_counter() - t0) * 1000
+    return text, ms, t_start, time.time()
+
+
+# --- TEMP occupancy bench helpers (revert via git) ---------------------------
+def _split_occ(raw: list) -> list:
+    """Peel ``(t_start, t_end)`` off the 4-tuple worker results into the occupancy
+    sink and return the ``(text, ms)`` pairs the pipeline expects. Non-tuple results
+    (the unit-test fake executor's placeholder strings) pass through untouched, so the
+    pool's locking tests stay green without knowing about this instrumentation."""
+    out, occ = [], []
+    for r in raw:
+        if isinstance(r, tuple) and len(r) == 4:
+            text, ms, ts, te = r
+            out.append((text, ms))
+            occ.append((ts, te))
+        else:
+            out.append(r)
+    if occ:
+        with _OCC_LOCK:
+            _OCC.extend(occ)
+    return out
+
+
+def reset_occupancy() -> None:
+    """Clear the sink before a measured batch."""
+    with _OCC_LOCK:
+        _OCC.clear()
+
+
+def active_workers() -> int:
+    """W of the live pool (0 if none built) — the denominator for utilization."""
+    key = recognize_pool._key
+    return key[2] if key else 0
+
+
+def occupancy_stats(workers: int) -> dict:
+    """From the collected per-crop wall execution windows, how full the W-worker pool
+    was during the batch. Sweep-line over interval starts/ends gives the time-weighted
+    distribution of concurrently-executing workers; utilization = avg_busy / W. Robust
+    to GPU time-slicing (a worker holding a slow time-sliced crop still counts as busy
+    — only crop STARVATION shows as idle, which is exactly the claim under test)."""
+    with _OCC_LOCK:
+        intervals = [iv for iv in _OCC if iv[1] > iv[0]]
+    if not intervals:
+        return {"crops": 0, "workers": workers}
+    start = min(s for s, _ in intervals)
+    end = max(e for _, e in intervals)
+    wall = end - start
+    busy = sum(e - s for s, e in intervals)
+    events = sorted([(s, 1) for s, _ in intervals] + [(e, -1) for _, e in intervals])
+    hist: dict[int, float] = {}
+    cur, prev = 0, start
+    for t, d in events:
+        hist[cur] = hist.get(cur, 0.0) + (t - prev)
+        cur += d
+        prev = t
+    avg = busy / wall if wall else 0.0
+    return {
+        "crops": len(intervals),
+        "workers": workers,
+        "wall_s": round(wall, 3),
+        "busy_worker_s": round(busy, 3),
+        "avg_busy_workers": round(avg, 3),
+        "utilization": round(avg / workers, 4) if workers else None,
+        "pct_wall_by_busy_count": {str(c): round(100 * s / wall, 1)
+                                   for c, s in sorted(hist.items())},
+    }
 
 
 class RecognizePool:
@@ -155,12 +235,12 @@ class RecognizePool:
         broken executor (no drain — a broken map has no live run to wait for, so this
         can't deadlock on this run's own _inflight) and retry once."""
         try:
-            return list(ex.map(_recognize_one, items))
+            return _split_occ(list(ex.map(_recognize_one, items)))
         except BrokenProcessPool:
             logger.warning("recognize pool broke (worker died/OOM); rebuilding + retrying once")
         ex2 = self._rebuild_broken(ex, key)
         try:
-            return list(ex2.map(_recognize_one, items))
+            return _split_occ(list(ex2.map(_recognize_one, items)))
         except BrokenProcessPool:
             self._drop_if_current(ex2)   # retry broke too -> drop so the next request rebuilds
             raise
