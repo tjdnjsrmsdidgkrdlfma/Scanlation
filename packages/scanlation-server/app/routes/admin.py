@@ -209,3 +209,18 @@ def clear_cache() -> dict:
     """Drop all cached data (page results + translation log) so every page re-runs
     the full pipeline next time."""
     return {"status": "success", "cleared": cache.clear()}
+
+
+@router.get("/get_stats/")
+def get_stats(engines: str | None = None) -> dict:
+    """Per-page + per-crop processing stats: count + mean/min/max/median/p90/p99 per
+    numeric column, for the 통계 tab. Benchmark (skip_translate) pages are excluded.
+    Optional ``?engines=`` filters to one pipeline config."""
+    return cache.stats_summary(engines)
+
+
+@router.post("/clear_stats/")
+def clear_stats() -> dict:
+    """Drop all processing-stats history (both tables). Separate from /clear_cache/ —
+    clearing the page cache means 'recompute', not 'forget the stats'."""
+    return {"status": "success", "cleared": cache.clear_stats()}

@@ -88,58 +88,77 @@ def detect_and_recognize(
     with detect_lock or nullcontext():  # shared torch detector: one forward at a time
         regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
     t_det = time.perf_counter()
-    out = (_recognize_via_pool(img, regions, opt_recognize, pool) if pool is not None
-           else _recognize_per_crop(img, regions, recognizer, opt_recognize))
+    out, details = (_recognize_via_pool(img, regions, opt_recognize, pool) if pool is not None
+                    else _recognize_per_crop(img, regions, recognizer, opt_recognize))
     t_rec = time.perf_counter()
     logger.info(
         "detect %s: %d regions %.0fms | recognize %s: %d texts %.0fms",
         getattr(detector, "name", "?"), len(regions), (t_det - t0) * 1000,
         rec_name or getattr(recognizer, "name", "?"), len(out), (t_rec - t_det) * 1000,
     )
+    # region_details/raw_regions ride the timing dict (signature stays (out, timing));
+    # the orchestrator pops them for the stats DB. raw_regions = detected boxes (incl.
+    # ones recognized empty); len(out) = the non-empty ones.
     return out, {"detect_ms": round((t_det - t0) * 1000, 1),
-                 "recognize_ms": round((t_rec - t_det) * 1000, 1)}
+                 "recognize_ms": round((t_rec - t_det) * 1000, 1),
+                 "raw_regions": len(regions), "region_details": details}
+
+
+def _region_detail(region: Region, text: str, ms: float) -> dict:
+    """One crop's stat row: box w/h (area·aspect·vertical all derive from these),
+    detection score, recognized-text length, and this crop's recognize time. dest_len
+    is filled in later (post-translate), so it's not here."""
+    x0, y0, x1, y1 = region.bbox
+    return {"crop_w": x1 - x0, "crop_h": y1 - y0, "score": region.score,
+            "source_len": len(text), "recognize_ms": round(ms, 1)}
 
 
 def _recognize_per_crop(
     img: Image.Image, regions: list[Region], recognizer: Recognizer, opt_recognize: dict
-) -> list[tuple[str, Region]]:
+) -> tuple[list[tuple[str, Region]], list[dict]]:
     """In-process path: deskew + recognize one crop at a time (the default, and the
-    fallback for CPU/test engines)."""
+    fallback for CPU/test engines). Returns (non-empty (text, region) pairs, per-crop
+    stat details for every detected region)."""
     out: list[tuple[str, Region]] = []
+    details: list[dict] = []
     for region in regions:
         crop = deskew_crop(img, region)
         t_crop = time.perf_counter()
         text = recognizer.recognize(crop, region, opt_recognize).strip()
+        ms = (time.perf_counter() - t_crop) * 1000
+        details.append(_region_detail(region, text, ms))
         # One line per region (verbose/DEBUG): what was detected, where, its class,
         # per-crop recognize time, and what the recognizer read — logged even when empty
         # ("detected but recognized nothing" is itself a signal). See /admin 동작.
         logger.debug(
             "  #%d %s bbox=%s%s score=%.2f %.0fms -> %r",
             region.order, getattr(region, "label", "") or "?", region.bbox,
-            " vert" if region.vertical else "", region.score,
-            (time.perf_counter() - t_crop) * 1000, text,
+            " vert" if region.vertical else "", region.score, ms, text,
         )
         if text:
             out.append((text, region))
-    return out
+    return out, details
 
 
 def _recognize_via_pool(
     img: Image.Image, regions: list[Region], opt_recognize: dict, pool: Any
-) -> list[tuple[str, Region]]:
+) -> tuple[list[tuple[str, Region]], list[dict]]:
     """Worker-pool path: deskew every crop in-process (CPU), then recognize them all
-    across the pool's worker processes (each B=1). Order is preserved by pool.run, so
-    the results zip straight back onto ``regions`` in reading order."""
+    across the pool's worker processes (each B=1, returning (text, ms)). Order is
+    preserved by pool.run, so results zip back onto ``regions`` in reading order.
+    Returns (non-empty pairs, per-crop stat details for every detected region)."""
     crops = [deskew_crop(img, region) for region in regions]
-    texts = pool.run([(crop, opt_recognize) for crop in crops])
+    results = pool.run([(crop, opt_recognize) for crop in crops])
     out: list[tuple[str, Region]] = []
-    for text, region in zip(texts, regions):
-        logger.debug("  #%d %s bbox=%s%s -> %r", region.order,
+    details: list[dict] = []
+    for (text, ms), region in zip(results, regions):
+        details.append(_region_detail(region, text, ms))
+        logger.debug("  #%d %s bbox=%s%s %.0fms -> %r", region.order,
                      getattr(region, "label", "") or "?", region.bbox,
-                     " vert" if region.vertical else "", text)
+                     " vert" if region.vertical else "", ms, text)
         if text:
             out.append((text, region))
-    return out
+    return out, details
 
 
 def _translate_all(

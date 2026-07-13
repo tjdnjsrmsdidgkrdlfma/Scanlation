@@ -147,7 +147,7 @@ class _FakePool:
         if self.boom:
             from concurrent.futures.process import BrokenProcessPool
             raise BrokenProcessPool("boom")
-        return [f"POOL-{i}" for i in range(len(items))]
+        return [(f"POOL-{i}", 1.0) for i in range(len(items))]  # (text, elapsed_ms)
 
 
 def test_recognize_pool_path_used_and_order_preserved():
@@ -163,6 +163,9 @@ def test_recognize_pool_path_used_and_order_preserved():
     assert [t for t, _ in recognized] == ["POOL-0", "POOL-1"]   # order preserved
     assert [r.order for _, r in recognized] == [0, 1]           # reading order intact
     assert "recognize_ms" in timing
+    assert timing["raw_regions"] == 2                           # both detected regions
+    assert len(timing["region_details"]) == 2                   # one stat row per crop
+    assert timing["region_details"][0]["recognize_ms"] == 1.0   # per-crop ms from _FakePool
 
 
 def test_no_pool_uses_per_crop_loop():

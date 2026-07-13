@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 
 from tests import (
+    test_cache,
     test_catalog,
     test_contracts,
     test_geometry,
@@ -39,6 +40,7 @@ if __name__ == "__main__":
         test_recognize_pool,
         test_pipeline,
         test_state,
+        test_cache,
         test_catalog,
         test_registry,
         test_gpus,

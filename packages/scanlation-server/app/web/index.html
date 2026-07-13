@@ -25,6 +25,7 @@
       <button class="tab" data-view="options" data-i18n="tab.options">플러그인 옵션</button>
       <button class="tab" data-view="plugins" data-i18n="tab.plugins">플러그인 설치</button>
       <button class="tab" data-view="behavior" data-i18n="tab.behavior">동작</button>
+      <button class="tab" data-view="stats" data-i18n="tab.stats">통계</button>
       <button class="tab" data-view="maintenance" data-i18n="tab.maintenance">유지보수</button>
     </nav>
   </div>
@@ -141,6 +142,19 @@
       </div>
       <p class="note" id="torch-note"></p>
       <p class="note" data-i18n="behavior.backend.desc">torch 엔진(탐지·인식)을 CPU로 돌릴지 GPU로 돌릴지. GPU면 패스스루된 장치로 벤더(AMD ROCm / NVIDIA CUDA)를 자동 판별해 맞는 torch를 깝니다. 설치 전에 정하세요 — 바꾸면 엔진 재설치(또는 /plugins 리셋 후 재설치)해야 적용됩니다. GPU 패스스루는 docker-compose 오버라이드로 따로 설정.</p>
+    </section>
+
+    <!-- 통계 -->
+    <section class="card view" data-view="stats">
+      <h2><span data-i18n="stats.h2">통계</span> <span class="hint" data-i18n="stats.hint">페이지·crop 처리 통계 (벤치 제외)</span></h2>
+      <h3 data-i18n="stats.pages">페이지 지표</h3>
+      <div id="stats-pages"></div>
+      <h3 data-i18n="stats.regions">crop(말풍선) 지표</h3>
+      <div id="stats-regions"></div>
+      <div class="row">
+        <div class="grow"><p class="note" data-i18n="stats.clear.desc">저장된 처리 통계를 모두 지웁니다(페이지 캐시와 별개).</p></div>
+        <button class="btn danger" id="clear-stats" data-i18n="stats.clear.btn">통계 비우기</button>
+      </div>
     </section>
 
     <!-- 유지보수 -->

@@ -217,6 +217,20 @@ async def run_page(plan: RunPlan, md5: str, contents: str, *, skip_translate: bo
             "total_ms": round((t_tsl - t0) * 1000, 1),
             "regions": len(recognized),
         }
+        # Persist raw per-page + per-crop stats. region_details/raw_regions ride `sub`
+        # (the recognize timing); dest_len pairs to result's translations in non-empty
+        # reading order (empty-recognition crops get 0). skip_translate is marked and
+        # default-filtered out of the summary.
+        _dests = iter(len(it["destination"]) for it in result)
+        region_rows = [{**d, "dest_len": (next(_dests) if d["source_len"] else 0)}
+                       for d in sub.get("region_details", [])]
+        cache.record_stats(
+            page={"engines": plan.engines, "src": plan.src, "dst": plan.dst, "md5": md5,
+                  "regions": timing["regions"], "raw_regions": sub.get("raw_regions"),
+                  **{k: timing[k] for k in ("decode_ms", "lockwait_ms", "detect_ms",
+                     "recognize_ms", "semwait_ms", "translate_ms", "total_ms")}},
+            regions=region_rows, skip_translate=skip_translate,
+        )
         return result, timing
 
     # skip_translate in the dedup key so a recognize-only run never joins (or is joined

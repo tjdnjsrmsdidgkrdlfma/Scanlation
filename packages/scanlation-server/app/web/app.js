@@ -714,6 +714,34 @@ async function clearCache() {
     toast(t("toast.cacheCleared", { n: r.cleared }), "ok");
   } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
 }
+
+// --- stats tab ------------------------------------------------------------
+async function renderStats() {
+  try {
+    const s = await api("/get_stats/");
+    $("stats-pages").innerHTML = statsTable(s.pages);
+    $("stats-regions").innerHTML = statsTable(s.regions);
+  } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
+}
+// summary = {count, metrics: {colName: {mean,median,min,max,p90,p99}}}. Metric names
+// are the raw server keys (recognize_ms, crop_w, …). Empty -> a friendly note.
+function statsTable(summary) {
+  if (!summary || !summary.count) return `<p class="opt-empty">${t("stats.empty")}</p>`;
+  const cols = ["mean", "median", "min", "max", "p90", "p99"];
+  const head = `<tr><th>${t("stats.metric")}</th>` + cols.map((c) => `<th>${t("stats.col." + c)}</th>`).join("") + "</tr>";
+  const body = Object.entries(summary.metrics).map(([name, m]) =>
+    `<tr><td>${name}</td>` + cols.map((c) => `<td>${m[c] ?? "—"}</td>`).join("") + "</tr>").join("");
+  return `<p class="note">${t("stats.count")}: ${summary.count}</p>`
+    + `<table class="stats"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+async function clearStats() {
+  if (!confirm(t("confirm.clearStats"))) return;
+  try {
+    const r = await postJSON("/clear_stats/", {});
+    toast(t("toast.statsCleared", { n: r.cleared }), "ok");
+    renderStats();
+  } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
+}
 async function saveBehavior() {
   try {
     const n = parseInt($("min-image-dim").value, 10);
@@ -738,6 +766,7 @@ async function saveBehavior() {
 function showView(name) {
   document.querySelectorAll(".view").forEach((el) => el.classList.toggle("active", el.dataset.view === name));
   document.querySelectorAll(".tab").forEach((el) => el.classList.toggle("active", el.dataset.view === name));
+  if (name === "stats") renderStats();   // fetch fresh each time the tab opens
 }
 
 // --- wire up --------------------------------------------------------------
@@ -774,6 +803,7 @@ $("plugins").addEventListener("click", (ev) => {
   if (btn) enqueueInstall(btn.dataset.install);
 });
 $("clear-cache").addEventListener("click", clearCache);
+$("clear-stats").addEventListener("click", clearStats);
 $("save-behavior").addEventListener("click", saveBehavior);
 $("torch-backend").addEventListener("change", syncTorchRows);
 // Custom −/+ number steppers (native spinners are hidden in CSS). Each .stepper

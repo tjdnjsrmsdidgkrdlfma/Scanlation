@@ -64,16 +64,21 @@ def _worker_init(group: str, name: str, device: str | None) -> None:
     _REC = rec
 
 
-def _recognize_one(item) -> str:
-    """One B=1 recognize in the worker. ``item`` is ``(crop, options)``; the crop
-    is already deskewed upright by the caller. The recognizer's ``region`` arg is a
-    throwaway (recognize reads the crop pixels, not the geometry — same as the
-    bench), so it isn't shipped across the process boundary."""
+def _recognize_one(item) -> tuple[str, float]:
+    """One B=1 recognize in the worker. ``item`` is ``(crop, options)``; the crop is
+    already deskewed upright by the caller. Returns ``(text, elapsed_ms)`` — the
+    per-crop recognize time lets the pipeline record it as a stat. The recognizer's
+    ``region`` arg is a throwaway (recognize reads the crop pixels, not the geometry —
+    same as the bench), so it isn't shipped across the process boundary."""
+    import time
+
     crop, options = item
     from scanlation_sdk.contracts import Region
 
     region = Region.from_bbox(0, 0, crop.width, crop.height)
-    return _REC.recognize(crop, region, options).strip()
+    t0 = time.perf_counter()
+    text = _REC.recognize(crop, region, options).strip()
+    return text, (time.perf_counter() - t0) * 1000
 
 
 class RecognizePool:
@@ -105,9 +110,10 @@ class RecognizePool:
             self._teardown_locked()   # waits for in-flight runs, then shuts the old ex
             self._build_locked(key)
 
-    def run(self, items: list) -> list[str]:
-        """Recognize every ``(crop, options)`` in ``items``, results aligned to input
-        order. Registers as in-flight so a concurrent teardown waits for it. On
+    def run(self, items: list) -> list[tuple[str, float]]:
+        """Recognize every ``(crop, options)`` in ``items``, ``(text, elapsed_ms)``
+        aligned to input order. Registers as in-flight so a concurrent teardown waits
+        for it. On
         ``BrokenProcessPool`` (a worker died/OOMed) rebuild the broken executor once
         and retry; if the retry also breaks, drop the pool (next request rebuilds
         fresh) and propagate — this request fails rather than silently loading the
@@ -144,7 +150,7 @@ class RecognizePool:
             self._teardown_locked()
 
     # --- internals ---
-    def _map_with_retry(self, ex: ProcessPoolExecutor, key, items: list) -> list[str]:
+    def _map_with_retry(self, ex: ProcessPoolExecutor, key, items: list) -> list[tuple[str, float]]:
         """Map OUTSIDE the lock (long GPU work). On a broken pool, rebuild only the
         broken executor (no drain — a broken map has no live run to wait for, so this
         can't deadlock on this run's own _inflight) and retry once."""
