@@ -82,9 +82,23 @@ def _measure(server: str, token: str, imgs: list, k: int | None, rec: str | None
     return {"k": k, "ok": ok, "failed": failed, "wall_ms": wall, "occ": occ}
 
 
+def _current_k(settings: dict, rec: str | None):
+    """Effective gpu_concurrency (K) for the active recognizer from /get_settings/:
+    the per-engine override if set, else the server default. So a no-sweep run can
+    still label which K it measured at instead of a bare '-'."""
+    if not settings:
+        return None
+    default = settings.get("gpu_concurrency_default")
+    for e in (settings.get("engines") or {}).get("recognizer", []):
+        if e.get("name") == rec:
+            ov = e.get("gpu_concurrency")
+            return int(ov) if ov not in (None, "") else default
+    return default
+
+
 def _fmt(row: dict) -> str:
     occ = row["occ"]
-    k = "-" if row["k"] is None else row["k"]
+    k = "-" if row.get("eff_k") is None else row["eff_k"]
     wall = f"{row['wall_ms']:.0f}ms" if row["wall_ms"] is not None else "n/a"
     if not occ.get("crops"):
         return f"K={k:>3} | imgs ok {row['ok']} fail {row['failed']} | wall {wall} | pool: no crops (CPU recognizer? no pool)"
@@ -112,16 +126,20 @@ def main() -> int:
         print("no images found", file=sys.stderr)
         return 1
 
-    rec = None
-    if a.k:
-        settings = get_settings(server, a.token) or {}
-        rec = (settings.get("selection") or {}).get("recognizer")
+    # Always fetch settings: recognizer name (needed to set K) + current effective K
+    # (so a no-sweep run is still labelled with the K it ran at). W is auto-detected
+    # server-side from the live pool and comes back in each occupancy read.
+    settings = get_settings(server, a.token) or {}
+    rec = (settings.get("selection") or {}).get("recognizer")
+    cur_k = _current_k(settings, rec)
     ks: list = a.k if a.k else [None]
 
-    print(f"server {server}  ·  {len(imgs)} images  ·  recognizer {rec or '(current)'}", file=sys.stderr)
+    print(f"server {server}  ·  {len(imgs)} images  ·  recognizer {rec or '(unknown)'}  ·  current K {cur_k}",
+          file=sys.stderr)
     rows = []
     for k in ks:
         row = _measure(server, a.token, imgs, k, rec)
+        row["eff_k"] = k if k is not None else cur_k     # which K this row actually ran at
         rows.append(row)
         print(_fmt(row))
 
