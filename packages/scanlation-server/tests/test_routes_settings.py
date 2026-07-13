@@ -70,11 +70,34 @@ def test_set_recognize_concurrency_validates():
         state.set_recognize_concurrency("dummy", None)
 
 
+def test_set_gpu_concurrency_validates():
+    """Per-recognizer gate size: set it, floor a sub-1 value, reset (null -> global
+    default), reject an unknown engine. Mirrors /set_recognize_concurrency/."""
+    from app.state import state
+
+    c = client()
+    try:
+        r = c.post("/set_gpu_concurrency/", json={"engine": "dummy", "concurrency": 4})
+        assert r.status_code == 200 and r.json()["concurrency"] == 4
+        assert state.resolve_gpu_concurrency("dummy") == 4
+        # a sub-1 value is floored to 1 (serial)
+        r = c.post("/set_gpu_concurrency/", json={"engine": "dummy", "concurrency": 0})
+        assert r.status_code == 200 and r.json()["concurrency"] == 1
+        # null resets to the global default -> the override is removed
+        assert c.post("/set_gpu_concurrency/", json={"engine": "dummy", "concurrency": None}).status_code == 200
+        assert "dummy" not in state.selection.gpu_concurrency
+        # unknown engine -> 400
+        assert c.post("/set_gpu_concurrency/", json={"engine": "nope", "concurrency": 2}).status_code == 400
+    finally:
+        state.set_gpu_concurrency("dummy", None)
+
+
 TESTS = [
     test_set_engines_validates,
     test_set_languages_validates,
     test_set_engine_device_validates,
     test_set_recognize_concurrency_validates,
+    test_set_gpu_concurrency_validates,
 ]
 
 if __name__ == "__main__":

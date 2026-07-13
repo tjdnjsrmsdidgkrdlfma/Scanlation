@@ -42,7 +42,7 @@ async def sweep_once(now: float) -> list[tuple[str, str]]:
     if not registry.idle_candidates(ttl, now):  # cheap lock-free early-out
         return []
     unloaded: list[tuple[str, str]] = []
-    async with state.gpu_lock:  # no detect/recognize mid-flight while we drop a model
+    async with state.gpu_gate.writer():  # exclusive vs in-flight inference while we drop a model
         for role, name in registry.idle_candidates(ttl, now):  # re-check under the lock
             registry.unload_one(role, name)
             unloaded.append((role, name))

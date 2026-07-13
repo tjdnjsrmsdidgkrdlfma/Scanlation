@@ -47,6 +47,12 @@ class SetRecognizeConcurrencyRequest(BaseModel):
     concurrency: Optional[int] = None    # worker-pool size (>=1); null resets to the global default
 
 
+# --- /set_gpu_concurrency/ --------------------------------------------------
+class SetGpuConcurrencyRequest(BaseModel):
+    engine: str
+    concurrency: Optional[int] = None    # gate size / max concurrent images (>=1); null resets to the global default
+
+
 # --- /install_plugins/ ------------------------------------------------------
 class InstallPluginsRequest(BaseModel):
     plugins: dict[str, bool]

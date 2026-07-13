@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import nullcontext
 from typing import Any, TypedDict
 
 from PIL import Image
@@ -67,6 +68,7 @@ def detect_and_recognize(
     opt_recognize: dict[str, Any],
     pool: Any = None,
     rec_name: str | None = None,
+    detect_lock: Any = None,
 ) -> tuple[list[tuple[str, Region]], dict[str, float]]:
     """Detect regions, order them, deskew+recognize each. Returns ``(pairs, timing)``:
     non-empty (text, region) pairs in reading order, plus ``{detect_ms, recognize_ms}``
@@ -79,9 +81,12 @@ def detect_and_recognize(
     across worker processes (each B=1) and ``recognizer`` is unused (the workers own
     it — pass its name as ``rec_name`` for the log); without one, the in-process
     per-crop loop runs on ``recognizer`` directly (the default; tests and CPU
-    engines)."""
+    engines). ``detect_lock`` (optional) serializes ``detector.detect`` across
+    concurrent readers — the detector is a shared in-process torch model; None = no
+    serialization (single-reader path, tests)."""
     t0 = time.perf_counter()
-    regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
+    with detect_lock or nullcontext():  # shared torch detector: one forward at a time
+        regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
     t_det = time.perf_counter()
     out = (_recognize_via_pool(img, regions, opt_recognize, pool) if pool is not None
            else _recognize_per_crop(img, regions, recognizer, opt_recognize))

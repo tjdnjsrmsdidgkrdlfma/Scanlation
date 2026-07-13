@@ -15,6 +15,7 @@ from ..recognize_pool import recognize_pool
 from ..registry import ROLE_NAMES, registry
 from ..schemas import (
     SetEngineDeviceRequest,
+    SetGpuConcurrencyRequest,
     SetLanguagesRequest,
     SetEnginesRequest,
     SetRecognizeConcurrencyRequest,
@@ -61,7 +62,7 @@ async def set_engine_device(req: SetEngineDeviceRequest) -> dict:
     if not any(registry.has(role, req.engine) for role in ROLE_NAMES):
         raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
     if (dev or None) != state.resolve_device_for(req.engine):
-        async with state.gpu_lock:      # no inference mid-flight while we swap
+        async with state.gpu_gate.writer():  # exclusive vs all in-flight inference while we swap
             state.set_engine_device(req.engine, dev or None)
             for role in ROLE_NAMES:
                 if registry.has(role, req.engine):
@@ -79,7 +80,24 @@ async def set_recognize_concurrency(req: SetRecognizeConcurrencyRequest) -> dict
         raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
     new = None if req.concurrency is None else max(1, int(req.concurrency))
     if new != state.selection.recognize_concurrency.get(req.engine):
-        async with state.gpu_lock:      # no inference mid-flight while we tear the pool down
+        async with state.gpu_gate.writer():  # exclusive vs all in-flight inference while we tear the pool down
             state.set_recognize_concurrency(req.engine, new)
             recognize_pool.invalidate(req.engine)
     return {"status": "success", "concurrency": state.resolve_recognize_concurrency(req.engine)}
+
+
+@router.post("/set_gpu_concurrency/")
+def set_gpu_concurrency(req: SetGpuConcurrencyRequest) -> dict:
+    """Per-recognizer gate size — max images running the detect+recognize half at once
+    (null resets to the global default). On a real change to the ACTIVE recognizer,
+    rebuild the gate: in-flight inference finishes on the old gate, new requests use
+    the new size. This resizes only the gate (no pool/model teardown), so it's the
+    same runtime swap as translate_sem — no writer/drain needed."""
+    if not any(registry.has(role, req.engine) for role in ROLE_NAMES):
+        raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
+    new = None if req.concurrency is None else max(1, int(req.concurrency))
+    if new != state.selection.gpu_concurrency.get(req.engine):
+        state.set_gpu_concurrency(req.engine, new)
+        if req.engine == state.selection.recognizer:
+            state.rebuild_gpu_gate()
+    return {"status": "success", "concurrency": state.resolve_gpu_concurrency(req.engine)}

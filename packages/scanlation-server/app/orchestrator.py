@@ -79,11 +79,12 @@ def _read_sync(img, plan: RunPlan):
     translator (loads weights on first use); returns (recognized pairs, translator,
     sub-timing) where sub-timing is {detect_ms, recognize_ms} from the two halves.
 
-    Runs in the threadpool UNDER the GPU lock: registry.get is not thread-safe
-    (check-then-set on _instances) and model loads must be serialized. The
-    translator is resolved here too — cheap (just its httpx client) — so the
-    concurrent translate path never touches registry.get and the lazily-created
-    client is ready before any concurrent request uses it.
+    Runs in the threadpool as a gate READER (up to K = the active recognizer's
+    gpu_concurrency at once). registry.get is self-thread-safe (its own lock +
+    double-checked load), so concurrent readers resolving detector/translator don't
+    race. detect() is serialized by state.detect_lock (the detector is a shared
+    in-process torch model); recognize fans out to separate worker processes (pool)
+    and is safe to run concurrently.
 
     Recognize takes the worker pool when this engine's per-engine concurrency is >1
     (a page's crops fan out across processes; the recognizer is NOT registry-loaded
@@ -100,13 +101,14 @@ def _read_sync(img, plan: RunPlan):
         recognized, sub = detect_and_recognize(
             img, detector=detector, recognizer=None, src=plan.src,
             opt_detect=plan.opt_detect, opt_recognize=plan.opt_recognize,
-            pool=recognize_pool, rec_name=plan.recognizer,
+            pool=recognize_pool, rec_name=plan.recognizer, detect_lock=state.detect_lock,
         )
     else:
         recognizer = registry.get("recognizer", plan.recognizer)
         recognized, sub = detect_and_recognize(
             img, detector=detector, recognizer=recognizer,
             src=plan.src, opt_detect=plan.opt_detect, opt_recognize=plan.opt_recognize,
+            detect_lock=state.detect_lock,
         )
     return recognized, translator, sub
 
@@ -166,16 +168,16 @@ async def run_page(plan: RunPlan, md5: str, contents: str, *, skip_translate: bo
     with an empty destination, skips the LLM half (semwait/translate stay 0), and does
     NOT cache — a translation-less result must never shadow a real one."""
     async def compute():
-        # Timed per stage so the log shows where the time goes. lockwait = time
-        # spent waiting for the GPU lock (surfaces contention when images overlap).
+        # Timed per stage so the log shows where the time goes. lockwait = time spent
+        # waiting for a gate reader permit (surfaces contention when images overlap).
         logger.info("run md5=%s engines=%s %s->%s", md5[:8], plan.engines, plan.src, plan.dst)
         t0 = time.perf_counter()
         img = _decode_image(contents)
         t_dec = time.perf_counter()
-        # GPU/model half under the lock (single device); translate half outside it
-        # (ollama is a separate process), bounded so concurrent images don't
-        # overrun the backend's parallel slots.
-        async with state.gpu_lock:
+        # GPU/model half under the gate (reader; up to K concurrent = cross-image
+        # overlap); translate half outside it (ollama is a separate process), bounded
+        # so concurrent images don't overrun the backend's parallel slots.
+        async with state.gpu_gate.reader():
             t_lock = time.perf_counter()
             recognized, translator, sub = await run_in_threadpool(_read_sync, img, plan)
         t_det = time.perf_counter()

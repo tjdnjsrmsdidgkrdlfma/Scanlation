@@ -57,6 +57,8 @@ def _engine_entries(role: str) -> list[dict]:
             # per-engine recognize worker-pool override ("" = the global default);
             # the admin UI shows this field only for recognizers that load onto a device
             "recognize_concurrency": state.selection.recognize_concurrency.get(name, ""),
+            # per-recognizer gate size (max concurrent images); same UI condition as above
+            "gpu_concurrency": state.selection.gpu_concurrency.get(name, ""),
         })
     installed_names = {e["name"] for e in entries}
     for name, entry in catalog().items():
@@ -76,6 +78,7 @@ def _engine_entries(role: str) -> list[dict]:
             "options": {},
             "device": "",
             "recognize_concurrency": "",
+            "gpu_concurrency": "",
         })
     return entries
 
@@ -106,6 +109,8 @@ def get_settings() -> dict:
         # Global fallback the per-engine recognize-worker field shows as its placeholder
         # (an engine with no override runs this many workers; 1 = no pool).
         "recognize_concurrency_default": settings.recognize_concurrency,
+        # Global fallback for the per-recognizer gate-size field (1 = serial images).
+        "gpu_concurrency_default": settings.gpu_concurrency,
         "gpus": list_gpus(),                # [{index, name}] for the per-engine device picker
         "gpu_vendor": detect_gpu_vendor(),  # amd/nvidia/both/None from device nodes (torch backend auto-pick)
         "torch_build": installed_torch_build(),  # cpu/cuda/rocm/None — for the backend-mismatch warning

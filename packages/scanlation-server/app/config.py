@@ -69,6 +69,16 @@ class Settings:
         default_factory=lambda: max(1, int(_env("SCANLATION_RECOGNIZE_CONCURRENCY", "1")))
     )
 
+    # First-run default for the gate size (per-recognizer, overridable in /admin plugin
+    # options). Floor 1: 1 = serial detect+recognize (today's behavior, byte-identical);
+    # >1 lets that many images run the GPU half at once so their crops fill the SHARED
+    # recognize pool together (cross-image overlap), lifting the per-image crop ceiling.
+    # Like recognize_concurrency it's a per-recognizer LOAD-TIME setting (sizes the
+    # InferenceGate) stored in Selection.gpu_concurrency; this is only the global fallback.
+    gpu_concurrency: int = field(
+        default_factory=lambda: max(1, int(_env("SCANLATION_GPU_CONCURRENCY", "1")))
+    )
+
     # First-run default for idle model unload (MINUTES): a local torch engine
     # (detector/recognizer) not used for this long is dropped from VRAM by a
     # background sweep, so it stops holding the GPU between reading sessions — the

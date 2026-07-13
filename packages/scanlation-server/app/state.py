@@ -9,11 +9,55 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .config import settings
+
+
+class InferenceGate:
+    """Bounded-concurrency reader/writer gate over the detect+recognize half.
+
+    Replaces the single ``gpu_lock`` mutex. Up to K *readers* (inference halves)
+    run at once, so several images' crops fan out into the shared RecognizePool
+    together (cross-image overlap) instead of one image at a time. A *writer*
+    (lifecycle mutation: device/worker-count change, idle-unload) drains all K
+    permits for exclusivity against every in-flight reader — the invariant the old
+    single lock provided. K=1 is byte-identical to a single mutex (one reader at a
+    time; a writer takes the lone permit). K is per-recognizer (see
+    ``resolve_gpu_concurrency``); the gate is rebuilt when it changes.
+
+    asyncio primitives bind to the loop that first awaits them, so a fresh gate is
+    created per event loop where needed (tests; the live server is one loop)."""
+
+    def __init__(self, k: int) -> None:
+        self._k = max(1, int(k))
+        self._slots = asyncio.Semaphore(self._k)   # reader permits
+        self._writer = asyncio.Lock()              # writer serialization + new-reader gate
+
+    @asynccontextmanager
+    async def reader(self):
+        # Hold _writer only long enough to grab a slot, so "no writer AND a permit"
+        # is atomic; release it immediately so K readers run concurrently.
+        async with self._writer:
+            await self._slots.acquire()
+        try:
+            yield
+        finally:
+            self._slots.release()
+
+    @asynccontextmanager
+    async def writer(self):
+        async with self._writer:                   # serialize writers (no deadlock)
+            for _ in range(self._k):
+                await self._slots.acquire()         # drain every in-flight reader
+            try:
+                yield
+            finally:
+                for _ in range(self._k):
+                    self._slots.release()
 
 
 @dataclass
@@ -36,6 +80,13 @@ class Selection:
     # global default (settings.recognize_concurrency); N=1 -> no pool (in-process
     # per-crop loop). Only recognizers use it (the pipeline fans a page's crops out).
     recognize_concurrency: dict[str, int] = field(default_factory=dict)
+    # {engine_name: K} per-recognizer max concurrent images through the detect+recognize
+    # half (the InferenceGate size). Like recognize_concurrency this is per-recognizer and
+    # LOAD-TIME (the gate is rebuilt when the active recognizer or its K changes, not per
+    # crop). Absent -> the global default (settings.gpu_concurrency); K=1 -> serial (today's
+    # behavior). K>1 lets several images' crops fill the SHARED worker pool together
+    # (cross-image overlap), so it only pays off with a pool (recognize_concurrency > 1).
+    gpu_concurrency: dict[str, int] = field(default_factory=dict)
     # Active LLM system-prompt preset name (see app.prompts) + user-saved presets.
     prompt_active: str = "default"
     prompts: dict[str, str] = field(default_factory=dict)
@@ -82,10 +133,17 @@ class AppState:
         self._path: Path = settings.data_dir / "state.json"
         self._lock = threading.Lock()
         self.selection = self._load()
-        # Single GPU lock: detect + recognize share one device. Translation
-        # (ollama) is a separate process and runs outside this lock so one image's
-        # translate overlaps the next image's detect+recognize.
-        self.gpu_lock = asyncio.Lock()
+        # Bounded-concurrency gate over the detect+recognize half (one device).
+        # readers = inference (up to K=active recognizer's gpu_concurrency at once);
+        # writers = lifecycle mutations (device/W change, idle-unload) drain all
+        # permits. K=1 = single mutex. Translation (ollama) is a separate process and
+        # runs off the gate, so one image's translate overlaps the next's recognize.
+        self.gpu_gate = InferenceGate(self.resolve_gpu_concurrency(self.selection.recognizer))
+        # Serializes detect(): the detector is a SHARED in-process torch model, so
+        # concurrent readers must not forward through it at once (recognize fans out
+        # to separate worker processes and is safe; detect stays serial — it's a small
+        # slice of the half, so serializing it costs little overlap).
+        self.detect_lock = threading.Lock()
         # Bound concurrent translations (they run off the GPU lock) so many
         # in-flight images don't overrun the ollama backend's parallel slots.
         # Seeded from the persisted selection; swapped at runtime by set_client_config.
@@ -108,6 +166,7 @@ class AppState:
 
     # --- mutations (validated against the registry by the caller) ---
     def set_engines(self, detector: str | None, recognizer: str | None, translator: str | None) -> None:
+        rec_changed = bool(recognizer) and recognizer != self.selection.recognizer
         if detector:
             self.selection.detector = detector
         if recognizer:
@@ -115,6 +174,8 @@ class AppState:
         if translator:
             self.selection.translator = translator
         self.save()
+        if rec_changed:
+            self.rebuild_gpu_gate()  # the new recognizer's K sizes the gate
 
     def set_languages(self, lang_src: str, lang_dst: str) -> None:
         self.selection.lang_src = lang_src
@@ -154,6 +215,28 @@ class AppState:
         (1 = no pool). Read on every run to pick the in-process loop vs the pool."""
         return max(1, int(self.selection.recognize_concurrency.get(
             engine_name, settings.recognize_concurrency)))
+
+    def set_gpu_concurrency(self, engine_name: str, k: int | None) -> None:
+        """Persist a per-recognizer gate size (max concurrent images). ``None``
+        removes the override (falls back to the global default); an explicit int is
+        stored (incl. 1 = serial). Floored at 1. The caller rebuilds the gate when
+        this is the active recognizer so the new size takes effect."""
+        if k is None:
+            self.selection.gpu_concurrency.pop(engine_name, None)
+        else:
+            self.selection.gpu_concurrency[engine_name] = max(1, int(k))
+        self.save()
+
+    def resolve_gpu_concurrency(self, engine_name: str) -> int:
+        """The per-recognizer gate size, or the global default. Floor 1 (1 = serial)."""
+        return max(1, int(self.selection.gpu_concurrency.get(
+            engine_name, settings.gpu_concurrency)))
+
+    def rebuild_gpu_gate(self) -> None:
+        """Swap in a fresh gate sized for the ACTIVE recognizer's K. In-flight readers
+        finish on the old gate; new requests use the new one (run_page reads
+        state.gpu_gate each call) — the same runtime-swap pattern as translate_sem."""
+        self.gpu_gate = InferenceGate(self.resolve_gpu_concurrency(self.selection.recognizer))
 
     def set_client_config(
         self, *, min_image_dim: int | None = None, verbose_log: bool | None = None,

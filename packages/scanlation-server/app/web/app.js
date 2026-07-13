@@ -261,6 +261,16 @@ function concurrencyField(role, e) {
   return `<label class="opt-device"><span>${t("optconc.label")}</span> <span class="desc">${t("optconc.desc")}</span>
     <input type="number" min="1" step="1" data-recognize-concurrency value="${cur}" placeholder="${t("field.default")} (${dflt})"/></label>`;
 }
+// Per-recognizer gate size — max images running detect+recognize at once, so their
+// crops fill the SHARED worker pool together (cross-image overlap). Same UI condition
+// as concurrencyField; saveEngineOptions posts it to /set_gpu_concurrency/ separately.
+function gpuConcurrencyField(role, e) {
+  if (role !== "recognizer" || !e.uses_device) return "";
+  const cur = (e.gpu_concurrency === "" || e.gpu_concurrency == null) ? "" : String(e.gpu_concurrency);
+  const dflt = (DATA && DATA.gpu_concurrency_default) || 1;
+  return `<label class="opt-device"><span>${t("optgpuconc.label")}</span> <span class="desc">${t("optgpuconc.desc")}</span>
+    <input type="number" min="1" step="1" data-gpu-concurrency value="${cur}" placeholder="${t("field.default")} (${dflt})"/></label>`;
+}
 function optBlock(role, e) {
   // The selection can resolve to a catalog-only entry (its package was uninstalled):
   // that carries an empty schema, so don't imply "no options" — say it's not installed.
@@ -275,16 +285,17 @@ function optBlock(role, e) {
   const keys = Object.keys(schema);
   const dev = deviceField(e);
   const conc = concurrencyField(role, e);
+  const gconc = gpuConcurrencyField(role, e);
   const fieldsHtml = keys.length
     ? `<div class="opt-fields">` +
         keys.map((k) => fieldInput(e.name, k, schema[k], e.options[k])).join("") + `</div>`
-    : (dev || conc ? "" : `<p class="opt-empty">${t("options.none")}</p>`);
-  const saveBtn = (keys.length || dev || conc)
+    : (dev || conc || gconc ? "" : `<p class="opt-empty">${t("options.none")}</p>`);
+  const saveBtn = (keys.length || dev || conc || gconc)
     ? `<button class="btn primary sm" data-save-engine="${e.name}">${t("btn.save")}</button>` : "";
   return `<div class="opt-block" data-engine="${e.name}">
       <span class="role">${role}</span>
       <h3>${e.display_name}</h3>
-      ${dev}${conc}${fieldsHtml}${saveBtn}
+      ${dev}${conc}${gconc}${fieldsHtml}${saveBtn}
     </div>`;
 }
 function renderEngineOptions() {
@@ -472,6 +483,11 @@ async function saveEngineOptions(engine, blockEl) {
     if (concEl) {
       const raw = concEl.value.trim();  // "" -> null resets to the server default
       await postJSON("/set_recognize_concurrency/", { engine, concurrency: raw === "" ? null : parseInt(raw, 10) });
+    }
+    const gconcEl = blockEl.querySelector("[data-gpu-concurrency]");
+    if (gconcEl) {
+      const raw = gconcEl.value.trim();  // "" -> null resets to the server default
+      await postJSON("/set_gpu_concurrency/", { engine, concurrency: raw === "" ? null : parseInt(raw, 10) });
     }
     toast(t("toast.optionsSaved", { engine }), "ok");
     await load();

@@ -3,8 +3,8 @@ VRAM; the window at 0 disables the sweep; a recently-used engine survives; and
 translators (HTTP/out-of-process) are never touched.
 
 sweep_once takes a monotonic ``now`` so these tests are deterministic — they load a
-probe, backdate its registry._last_used, and assert what the sweep does. gpu_lock is
-reset to a fresh (unbound) asyncio.Lock per run so each asyncio.run() loop can bind
+probe, backdate its registry._last_used, and assert what the sweep does. gpu_gate is
+reset to a fresh (unbound) InferenceGate per run so each asyncio.run() loop can bind
 it without tripping asyncio's bound-to-a-different-loop guard.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from scanlation_sdk.contracts import EngineBase
 
 from app.idle_unload import sweep_once
 from app.registry import registry
-from app.state import state
+from app.state import InferenceGate, state
 
 from tests.helpers import run
 
@@ -54,13 +54,13 @@ def _cleanup(role: str, name: str) -> None:
 
 
 def _run(coro):
-    # Fresh unbound lock so this call's loop binds it; hand the next consumer a clean
-    # one on the way out (asyncio.Lock binds to the first loop that acquires it).
-    state.gpu_lock = asyncio.Lock()
+    # Fresh unbound gate so this call's loop binds it; hand the next consumer a clean
+    # one on the way out (asyncio primitives bind to the first loop that awaits them).
+    state.gpu_gate = InferenceGate(1)
     try:
         return asyncio.run(coro)
     finally:
-        state.gpu_lock = asyncio.Lock()
+        state.gpu_gate = InferenceGate(1)
 
 
 def test_sweep_unloads_idle_local_engine():

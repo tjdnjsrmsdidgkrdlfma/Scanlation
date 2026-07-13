@@ -28,6 +28,7 @@ def test_state_json_roundtrip():
         st.set_languages("en", "ja")
         st.set_engine_device("rec-x", "cuda")
         st.set_recognize_concurrency("rec-x", 4)
+        st.set_gpu_concurrency("rec-x", 3)
         st.set_options("x", {"a": 1})
         st.save_prompt("mine", "PROMPT")
         old_sem = st.translate_sem
@@ -38,6 +39,7 @@ def test_state_json_roundtrip():
         # a fresh instance reads state.json back; dataclass equality covers every field
         assert AppState().selection == st.selection
         assert AppState().selection.recognize_concurrency == {"rec-x": 4}  # per-engine pool size persisted
+        assert AppState().selection.gpu_concurrency == {"rec-x": 3}  # per-recognizer gate size persisted
         assert AppState().selection.verbose_log is True  # verbose toggle persisted
         assert AppState().selection.translate_concurrency == 8  # concurrency persisted
         assert AppState().selection.model_idle_unload_minutes == 20  # idle-unload window persisted
@@ -103,6 +105,34 @@ def test_recognize_concurrency_override():
         context.base_dir = saved_base
 
 
+def test_gpu_concurrency_override_and_gate_rebuild():
+    """Per-recognizer gate size mirrors recognize_concurrency (absent -> global
+    default; explicit int stored incl. 1; None resets). Rebuilding for the active
+    recognizer swaps in a fresh InferenceGate instance."""
+    from app.config import settings
+
+    saved_base = context.base_dir
+    try:
+        context.base_dir = Path(tempfile.mkdtemp())
+        st = AppState()
+        eng = "rec-y"
+        st.set_engines(None, eng, None)                         # make it the active recognizer
+        assert st.resolve_gpu_concurrency(eng) == max(1, settings.gpu_concurrency)  # no override
+        old_gate = st.gpu_gate
+        st.set_gpu_concurrency(eng, 4)
+        st.rebuild_gpu_gate()
+        assert st.resolve_gpu_concurrency(eng) == 4
+        assert st.gpu_gate is not old_gate                      # gate swapped for the new size
+        assert st.selection.gpu_concurrency[eng] == 4
+        st.set_gpu_concurrency(eng, 1)                          # explicit 1 = serial, kept
+        assert st.resolve_gpu_concurrency(eng) == 1
+        st.set_gpu_concurrency(eng, None)                       # None resets to the global default
+        assert eng not in st.selection.gpu_concurrency
+        assert st.resolve_gpu_concurrency(eng) == max(1, settings.gpu_concurrency)
+    finally:
+        context.base_dir = saved_base
+
+
 def test_config_env_seeds_settings_and_selection():
     """B-grade values now carry an env default: Settings() reads the env (with a
     floor-1 guard on translate_concurrency), and Selection seeds these fields from
@@ -135,6 +165,14 @@ def test_config_env_seeds_settings_and_selection():
     finally:
         os.environ.pop("SCANLATION_RECOGNIZE_CONCURRENCY", None)
 
+    os.environ["SCANLATION_GPU_CONCURRENCY"] = "4"
+    try:
+        assert Settings().gpu_concurrency == 4                 # env read per instance
+        os.environ["SCANLATION_GPU_CONCURRENCY"] = "0"
+        assert Settings().gpu_concurrency == 1                 # floor 1 (1 = serial)
+    finally:
+        os.environ.pop("SCANLATION_GPU_CONCURRENCY", None)
+
     # Selection defaults are seeded from the settings singleton (wiring, not literals)
     sel = Selection()
     assert sel.translate_concurrency == settings.translate_concurrency
@@ -143,6 +181,7 @@ def test_config_env_seeds_settings_and_selection():
     assert sel.torch_vendor == settings.torch_vendor
     assert sel.torch_index == settings.torch_index
     assert sel.recognize_concurrency == {}                 # per-engine overrides start empty
+    assert sel.gpu_concurrency == {}                       # per-recognizer overrides start empty
 
 
 TESTS = [
@@ -150,6 +189,7 @@ TESTS = [
     test_state_load_falls_back_on_bad_json,
     test_engine_device_override,
     test_recognize_concurrency_override,
+    test_gpu_concurrency_override_and_gate_rebuild,
     test_config_env_seeds_settings_and_selection,
 ]
 
