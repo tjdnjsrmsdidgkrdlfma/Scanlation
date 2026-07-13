@@ -3,7 +3,13 @@ from __future__ import annotations
 
 from PIL import Image
 
-from app.pipeline import assign_reading_order, detect_and_recognize, run_pipeline
+from app.pipeline import (
+    assign_reading_order,
+    detect_and_recognize,
+    detect_regions,
+    recognize_regions,
+    run_pipeline,
+)
 from scanlation_sdk.contracts import Region
 from tests.fake_engines import DummyDetector, DummyRecognizer, DummyTranslator
 
@@ -194,6 +200,53 @@ def test_recognize_pool_broken_propagates():
     assert raised
 
 
+# --- the split stages (detect off-gate, recognize under it) the orchestrator drives ---
+def test_detect_regions_orders_in_place_and_times():
+    # detect_regions is the only caller of assign_reading_order; it sets region.order
+    # in place so a later recognize_regions sees the same ordered Regions.
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    regions, detect_ms = detect_regions(img, detector=DummyDetector(), src="ja", opt_detect={})
+    assert [r.order for r in regions] == [0, 1]          # ja page: right-to-left order assigned
+    assert isinstance(detect_ms, float) and detect_ms >= 0
+
+
+def test_recognize_regions_pool_path_and_order_preserved():
+    # recognize_regions fans the already-detected regions out via pool.run and zips
+    # results back in reading order; timing carries the per-crop stat rows.
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    regions, _ = detect_regions(img, detector=DummyDetector(), src="ja", opt_detect={})
+    pool = _FakePool()
+    out, timing = recognize_regions(img, regions, recognizer=None, opt_recognize={},
+                                    pool=pool, rec_name="fake")
+    assert pool.calls == 1
+    assert [t for t, _ in out] == ["POOL-0", "POOL-1"]   # order preserved
+    assert [r.order for _, r in out] == [0, 1]
+    assert timing["raw_regions"] == 2 and len(timing["region_details"]) == 2
+    assert timing["region_details"][0]["recognize_ms"] == 1.0
+    assert "recognize_ms" in timing and "detect_ms" not in timing   # detect timed separately now
+
+
+def test_recognize_regions_inprocess_path():
+    # Without a pool, recognize_regions runs the in-process per-crop loop on the recognizer.
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    regions, _ = detect_regions(img, detector=DummyDetector(), src="ja", opt_detect={})
+    out, _timing = recognize_regions(img, regions, recognizer=DummyRecognizer(), opt_recognize={})
+    assert [t for t, _ in out] == ["REGION-0", "REGION-1"]
+
+
+def test_recognize_regions_broken_pool_propagates():
+    # Same propagate contract as the composed path, now on the split recognize stage.
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    regions, _ = detect_regions(img, detector=DummyDetector(), src="ja", opt_detect={})
+    raised = False
+    try:
+        recognize_regions(img, regions, recognizer=None, opt_recognize={},
+                          pool=_FakePool(boom=True), rec_name="fake")
+    except Exception as exc:  # noqa: BLE001
+        raised = type(exc).__name__ == "BrokenProcessPool"
+    assert raised
+
+
 TESTS = [
     test_reading_order_is_right_to_left_top_to_bottom,
     test_reading_order_is_left_to_right_for_ltr_sources,
@@ -206,6 +259,10 @@ TESTS = [
     test_recognize_pool_path_used_and_order_preserved,
     test_no_pool_uses_per_crop_loop,
     test_recognize_pool_broken_propagates,
+    test_detect_regions_orders_in_place_and_times,
+    test_recognize_regions_pool_path_and_order_preserved,
+    test_recognize_regions_inprocess_path,
+    test_recognize_regions_broken_pool_propagates,
 ]
 
 if __name__ == "__main__":

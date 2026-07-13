@@ -58,6 +58,57 @@ def assign_reading_order(regions: list[Region], *, rtl: bool) -> list[Region]:
     return ordered
 
 
+def detect_regions(
+    img: Image.Image,
+    *,
+    detector: Detector,
+    src: str,
+    opt_detect: dict[str, Any],
+    detect_lock: Any = None,
+) -> tuple[list[Region], float]:
+    """DETECT + reading order. Returns ``(regions, detect_ms)``. CPU work in the
+    3-device split, so the orchestrator runs it OFF the recognize gate. This is the
+    only place ``assign_reading_order`` is called — it sets ``region.order`` in place,
+    so a later ``recognize_regions`` sees the same ordered Regions even though detect
+    and recognize are split across the gate. ``detect_lock`` (optional) serializes the
+    shared in-process torch detector; None = no serialization (single-reader path, tests)."""
+    t0 = time.perf_counter()
+    with detect_lock or nullcontext():  # shared torch detector: one forward at a time
+        regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
+    detect_ms = round((time.perf_counter() - t0) * 1000, 1)
+    logger.info("detect %s: %d regions %.0fms", getattr(detector, "name", "?"), len(regions), detect_ms)
+    return regions, detect_ms
+
+
+def recognize_regions(
+    img: Image.Image,
+    regions: list[Region],
+    *,
+    recognizer: Recognizer | None,
+    opt_recognize: dict[str, Any],
+    pool: Any = None,
+    rec_name: str | None = None,
+) -> tuple[list[tuple[str, Region]], dict[str, float]]:
+    """RECOGNIZE the detected regions. Returns ``(pairs, timing)``: non-empty
+    (text, region) pairs in reading order + ``{recognize_ms, raw_regions,
+    region_details}``. GPU/model work — the orchestrator runs it UNDER the recognize
+    gate. Same optional-capability seam as ``_translate_all``: with a ``pool`` a page's
+    crops fan out across worker processes (each B=1) and ``recognizer`` is unused (the
+    workers own it — pass its name as ``rec_name`` for the log); without one, the
+    in-process per-crop loop runs on ``recognizer`` directly (the default; tests, CPU)."""
+    t0 = time.perf_counter()
+    out, details = (_recognize_via_pool(img, regions, opt_recognize, pool) if pool is not None
+                    else _recognize_per_crop(img, regions, recognizer, opt_recognize))
+    recognize_ms = round((time.perf_counter() - t0) * 1000, 1)
+    logger.info("recognize %s: %d texts %.0fms",
+                rec_name or getattr(recognizer, "name", "?"), len(out), recognize_ms)
+    # region_details/raw_regions ride the timing dict (signature stays (out, timing));
+    # the orchestrator pops them for the stats DB. raw_regions = detected boxes (incl.
+    # ones recognized empty); len(out) = the non-empty ones.
+    return out, {"recognize_ms": recognize_ms,
+                 "raw_regions": len(regions), "region_details": details}
+
+
 def detect_and_recognize(
     img: Image.Image,
     *,
@@ -70,38 +121,16 @@ def detect_and_recognize(
     rec_name: str | None = None,
     detect_lock: Any = None,
 ) -> tuple[list[tuple[str, Region]], dict[str, float]]:
-    """Detect regions, order them, deskew+recognize each. Returns ``(pairs, timing)``:
-    non-empty (text, region) pairs in reading order, plus ``{detect_ms, recognize_ms}``
-    (the two halves, also logged — the caller surfaces them in the run response). This
-    is the GPU/model half of the pipeline — the route runs it under the GPU lock.
-    assign_reading_order is called exactly once here (it assigns region.order).
-
-    Recognition takes one of two paths — the same optional-capability seam as
-    ``_translate_all``: with a ``pool`` (a RecognizePool) a page's crops fan out
-    across worker processes (each B=1) and ``recognizer`` is unused (the workers own
-    it — pass its name as ``rec_name`` for the log); without one, the in-process
-    per-crop loop runs on ``recognizer`` directly (the default; tests and CPU
-    engines). ``detect_lock`` (optional) serializes ``detector.detect`` across
-    concurrent readers — the detector is a shared in-process torch model; None = no
-    serialization (single-reader path, tests)."""
-    t0 = time.perf_counter()
-    with detect_lock or nullcontext():  # shared torch detector: one forward at a time
-        regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
-    t_det = time.perf_counter()
-    out, details = (_recognize_via_pool(img, regions, opt_recognize, pool) if pool is not None
-                    else _recognize_per_crop(img, regions, recognizer, opt_recognize))
-    t_rec = time.perf_counter()
-    logger.info(
-        "detect %s: %d regions %.0fms | recognize %s: %d texts %.0fms",
-        getattr(detector, "name", "?"), len(regions), (t_det - t0) * 1000,
-        rec_name or getattr(recognizer, "name", "?"), len(out), (t_rec - t_det) * 1000,
-    )
-    # region_details/raw_regions ride the timing dict (signature stays (out, timing));
-    # the orchestrator pops them for the stats DB. raw_regions = detected boxes (incl.
-    # ones recognized empty); len(out) = the non-empty ones.
-    return out, {"detect_ms": round((t_det - t0) * 1000, 1),
-                 "recognize_ms": round((t_rec - t_det) * 1000, 1),
-                 "raw_regions": len(regions), "region_details": details}
+    """Detect then recognize, composed — the reference path (``run_pipeline``, tests).
+    The route splits the two halves across the recognize gate by calling
+    ``detect_regions`` (off the gate) and ``recognize_regions`` (under it) directly;
+    this wrapper keeps the one-call shape + the combined ``{detect_ms, recognize_ms,
+    raw_regions, region_details}`` timing for callers that don't need the split."""
+    regions, detect_ms = detect_regions(img, detector=detector, src=src,
+                                        opt_detect=opt_detect, detect_lock=detect_lock)
+    out, timing = recognize_regions(img, regions, recognizer=recognizer,
+                                    opt_recognize=opt_recognize, pool=pool, rec_name=rec_name)
+    return out, {"detect_ms": detect_ms, **timing}
 
 
 def _region_detail(region: Region, text: str, ms: float) -> dict:

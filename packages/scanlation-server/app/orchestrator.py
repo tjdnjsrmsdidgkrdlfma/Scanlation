@@ -19,7 +19,7 @@ from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
 from .cache import cache, opt_hash
-from .pipeline import detect_and_recognize, recognized_to_result, translate_regions
+from .pipeline import detect_regions, recognize_regions, recognized_to_result, translate_regions
 from .recognize_pool import recognize_pool
 from .registry import registry
 from .state import state
@@ -74,43 +74,40 @@ def cached_result(plan: RunPlan, md5: str) -> list | None:
     return cache.get_run(md5, *plan.cache_key)
 
 
-def _read_sync(img, plan: RunPlan):
-    """Read the image = detect + recognize (the GPU/model half). Resolves detector +
-    translator (loads weights on first use); returns (recognized pairs, translator,
-    sub-timing) where sub-timing is {detect_ms, recognize_ms} from the two halves.
-
-    Runs in the threadpool as a gate READER (up to K = the active recognizer's
-    gpu_concurrency at once). registry.get is self-thread-safe (its own lock +
-    double-checked load), so concurrent readers resolving detector/translator don't
-    race. detect() is serialized by state.detect_lock (the detector is a shared
-    in-process torch model); recognize fans out to separate worker processes (pool)
-    and is safe to run concurrently.
-
-    Recognize takes the worker pool when this engine's per-engine concurrency is >1
-    (a page's crops fan out across processes; the recognizer is NOT registry-loaded
-    here so its VRAM lives only in the workers, not also in this process); otherwise
-    the registry-loaded engine runs the in-process per-crop loop (the default). A
-    pool that stays broken after its own rebuild+retry propagates — the request fails
-    rather than doubling the VRAM by loading the model here.
-    """
-    detector = registry.get("detector", plan.detector)
+def _detect_sync(img, plan: RunPlan):
+    """DETECT stage (CPU) — run OFF the recognize gate. Resolves the detector +
+    translator (both off-GPU: the translator is an ollama HTTP client and must not
+    hold a recognize permit while it instantiates). ``detect_lock`` spans BOTH the
+    detector resolve and the forward, so an /admin device change or idle-unload — which
+    can no longer be excluded by the gate WRITER now that detect is off the gate —
+    can't drop the detector mid-forward (see set_engine_device / idle_unload). Returns
+    (regions, translator, detect_ms). registry.get is self-thread-safe."""
+    with state.detect_lock:
+        detector = registry.get("detector", plan.detector)
+        regions, detect_ms = detect_regions(
+            img, detector=detector, src=plan.src,
+            opt_detect=plan.opt_detect, detect_lock=None,  # already held above
+        )
     translator = registry.get("translator", plan.translator)
+    return regions, translator, detect_ms
+
+
+def _recognize_sync(img, regions, plan: RunPlan):
+    """RECOGNIZE stage (GPU) — run UNDER the gate reader (up to K images' crops share
+    the pool). Takes the worker pool when this recognizer's concurrency is >1 (a page's
+    crops fan out across processes; the recognizer is NOT registry-loaded here so its
+    VRAM lives only in the workers, not also in this process); otherwise the
+    registry-loaded engine runs the in-process per-crop loop (the default). A pool that
+    stays broken after its own rebuild+retry propagates — the request fails rather than
+    doubling the VRAM by loading the model here. Returns (recognized pairs, rec-timing)
+    where rec-timing is {recognize_ms, raw_regions, region_details}."""
     workers = state.resolve_recognize_concurrency(plan.recognizer)
     if workers > 1:
         recognize_pool.ensure(plan.recognizer, state.resolve_device_for(plan.recognizer), workers)
-        recognized, sub = detect_and_recognize(
-            img, detector=detector, recognizer=None, src=plan.src,
-            opt_detect=plan.opt_detect, opt_recognize=plan.opt_recognize,
-            pool=recognize_pool, rec_name=plan.recognizer, detect_lock=state.detect_lock,
-        )
-    else:
-        recognizer = registry.get("recognizer", plan.recognizer)
-        recognized, sub = detect_and_recognize(
-            img, detector=detector, recognizer=recognizer,
-            src=plan.src, opt_detect=plan.opt_detect, opt_recognize=plan.opt_recognize,
-            detect_lock=state.detect_lock,
-        )
-    return recognized, translator, sub
+        return recognize_regions(img, regions, recognizer=None, opt_recognize=plan.opt_recognize,
+                                 pool=recognize_pool, rec_name=plan.recognizer)
+    recognizer = registry.get("recognizer", plan.recognizer)
+    return recognize_regions(img, regions, recognizer=recognizer, opt_recognize=plan.opt_recognize)
 
 
 def _translate_sync(recognized, translator, plan: RunPlan):
@@ -160,8 +157,8 @@ async def _run_deduped(id_, compute):
 
 async def run_page(plan: RunPlan, md5: str, contents: str, *, skip_translate: bool = False) -> tuple[list, dict]:
     """Compute (or join an in-flight computation of) the page result: decode ->
-    detect+recognize under the GPU lock -> translate off it -> cache. Returns
-    ``(result, timing)`` where timing is the per-stage ms breakdown (also logged).
+    detect (off the gate, CPU) -> recognize (under the gate) -> translate (off it) ->
+    cache. Returns ``(result, timing)`` — timing is the per-stage ms breakdown (also logged).
     Raises BadImageError on a bad image; other failures propagate to the caller.
 
     ``skip_translate`` is a recognize-only mode for benchmarks: it emits the source
@@ -174,59 +171,63 @@ async def run_page(plan: RunPlan, md5: str, contents: str, *, skip_translate: bo
         t0 = time.perf_counter()
         img = _decode_image(contents)
         t_dec = time.perf_counter()
-        # GPU/model half under the gate (reader; up to K concurrent = cross-image
-        # overlap); translate half outside it (ollama is a separate process), bounded
-        # so concurrent images don't overrun the backend's parallel slots.
+        # DETECT off the gate (CPU; serialized by detect_lock inside _detect_sync).
+        # Detect no longer holds a recognize permit, so the K gate slots feed recognize
+        # only — already-detected images' crops are what's resident in the pool.
+        regions, translator, detect_ms = await run_in_threadpool(_detect_sync, img, plan)
+        t_det = time.perf_counter()
+        # RECOGNIZE under the gate (reader; up to K images' crops share the pool =
+        # cross-image overlap). Translate runs off the gate (ollama is a separate
+        # process), bounded so concurrent images don't overrun its parallel slots.
         async with state.gpu_gate.reader():
             t_lock = time.perf_counter()
-            recognized, translator, sub = await run_in_threadpool(_read_sync, img, plan)
-        t_det = time.perf_counter()
+            recognized, rec_sub = await run_in_threadpool(_recognize_sync, img, regions, plan)
+        t_rec = time.perf_counter()
         if skip_translate:
             # recognize-only: source with no translation; leave the translate spans at 0
             # and don't cache (a translation-less result must not shadow a real one).
             result = recognized_to_result(recognized)
-            t_sem = t_tsl = t_det
+            t_sem = t_tsl = t_rec
         else:
             async with state.translate_sem:
                 t_sem = time.perf_counter()  # sem acquired: split our queue-wait from the actual call
                 result = await run_in_threadpool(_translate_sync, recognized, translator, plan)
             t_tsl = time.perf_counter()
             cache.put_run(md5, *plan.cache_key, result)
-        # semwait = time queued on translate_sem (our backpressure); translate = the
-        # actual backend call (ollama generate + any ollama-side queue). Splitting them
-        # tells whether OUR limit or the BACKEND is the bottleneck when translates pile up.
-        logger.info(
-            "md5=%s ok regions=%d decode=%.0f lockwait=%.0f detect+recognize=%.0f "
-            "semwait=%.0f translate=%.0f total=%.0fms",
-            md5[:8], len(recognized),
-            (t_dec - t0) * 1000, (t_lock - t_dec) * 1000, (t_det - t_lock) * 1000,
-            (t_sem - t_det) * 1000, (t_tsl - t_sem) * 1000, (t_tsl - t0) * 1000,
-        )
-        # Same spans as the log line, returned so the /run_pipeline/ response can carry
-        # them (headless tools/reports read this; the extension ignores the extra key).
+        # Per-stage spans, returned so the /run_pipeline/ response can carry them
+        # (headless tools/reports read this; the extension ignores the extra key).
+        # detect_ms/recognize_ms are the pure forwards (from the two sync helpers);
+        # lockwait = wait for a recognize gate permit (detect is off the gate now);
+        # semwait = queued on translate_sem, translate = the actual ollama call. These
+        # spans don't sum exactly to total (residual = engine resolve/first-load +
+        # threadpool handoff), which is fine for a breakdown.
         timing = {
             "decode_ms": round((t_dec - t0) * 1000, 1),
-            "lockwait_ms": round((t_lock - t_dec) * 1000, 1),
-            # detect_recognize_ms is the whole GPU half (t_det - t_lock): it also covers
-            # engine resolve/first-load + threadpool handoff, so it's >= detect + recognize.
-            "detect_recognize_ms": round((t_det - t_lock) * 1000, 1),
-            "detect_ms": sub["detect_ms"],
-            "recognize_ms": sub["recognize_ms"],
-            "semwait_ms": round((t_sem - t_det) * 1000, 1),
+            "detect_ms": detect_ms,
+            "lockwait_ms": round((t_lock - t_det) * 1000, 1),
+            "recognize_ms": rec_sub["recognize_ms"],
+            "semwait_ms": round((t_sem - t_rec) * 1000, 1),
             "translate_ms": round((t_tsl - t_sem) * 1000, 1),
             "total_ms": round((t_tsl - t0) * 1000, 1),
             "regions": len(recognized),
         }
-        # Persist raw per-page + per-crop stats. region_details/raw_regions ride `sub`
+        logger.info(
+            "md5=%s ok regions=%d decode=%.0f detect=%.0f lockwait=%.0f recognize=%.0f "
+            "semwait=%.0f translate=%.0f total=%.0fms",
+            md5[:8], len(recognized),
+            timing["decode_ms"], timing["detect_ms"], timing["lockwait_ms"], timing["recognize_ms"],
+            timing["semwait_ms"], timing["translate_ms"], timing["total_ms"],
+        )
+        # Persist raw per-page + per-crop stats. region_details/raw_regions ride `rec_sub`
         # (the recognize timing); dest_len pairs to result's translations in non-empty
         # reading order (empty-recognition crops get 0). skip_translate is marked and
         # default-filtered out of the summary.
         _dests = iter(len(it["destination"]) for it in result)
         region_rows = [{**d, "dest_len": (next(_dests) if d["source_len"] else 0)}
-                       for d in sub.get("region_details", [])]
+                       for d in rec_sub.get("region_details", [])]
         cache.record_stats(
             page={"engines": plan.engines, "src": plan.src, "dst": plan.dst, "md5": md5,
-                  "regions": timing["regions"], "raw_regions": sub.get("raw_regions"),
+                  "regions": timing["regions"], "raw_regions": rec_sub.get("raw_regions"),
                   **{k: timing[k] for k in ("decode_ms", "lockwait_ms", "detect_ms",
                      "recognize_ms", "semwait_ms", "translate_ms", "total_ms")}},
             regions=region_rows, skip_translate=skip_translate,

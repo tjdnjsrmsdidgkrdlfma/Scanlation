@@ -132,15 +132,15 @@ flash 없는 sdpa(math 폴백)는 이 둘을 O(n²)로 문다. **AOTriton이 그
 
 **단, recognize-only 실측이다.** translate까지 켠 end-to-end는 9060 XT에 gemma가 VRAM을 공유 못 해 여기선 못 잰다 — **MI50(translate 전용 GPU) 도입 후** 재측정해야 최종 그림(recognize-bound가 얼마나 풀리는지)이 나온다.
 
-### 다음 후보 — detect/recognize 스테이지 분리 (MI50 후)
+### detect 스테이지 분리 — 구현됨 (detect를 게이트 밖으로)
 
-게이트+K는 **이미지 묶음**이다: K장을 동시에 통과시키지만 각 이미지의 detect+recognize는 한 세트라, 그 K장의 crop **합**이 W보다 적으면 워커가 논다. W4·K2에서 두 이미지가 각 crop 2개면 4 crop으로 딱 차지만, **각 crop 1개면 2 crop뿐이라 워커 2개가 논다**(이 챕터는 crop 1개짜리가 21장 중 4장). 이미지 경계의 detect gap(다음 이미지 detect ~270ms 동안 풀이 덜 참)도 여기 겹친다.
+파이프라인은 이제 **decode → detect(게이트 밖, CPU) → recognize(게이트 안, GPU) → translate(게이트 밖)** 3-스테이지다([orchestrator.py](../app/orchestrator.py) `_detect_sync`/`_recognize_sync`, [pipeline.py](../app/pipeline.py) `detect_regions`/`recognize_regions`). 전엔 detect+recognize가 한 `gpu_gate` reader 슬롯을 공유해, detect(CPU, ~270ms)가 recognize용 슬롯을 점유했다 — 이제 **K개 게이트 슬롯은 recognize에만** 쓰이고, detect는 `detect_lock`으로 직렬화된 채 게이트 밖에서 앞서 돈다.
 
-**스테이지 분리**(detect → crop 큐 → recognize)는 이 편차를 **원천 봉쇄**한다: crop 큐가 이미지 경계를 지워, 워커가 페이지별 crop 수 편차·detect gap과 무관하게 항상 찬다. 즉 **스테이지 분리 = K=무한대의 게이트+K**다. K를 올리면 게이트+K도 편차를 흡수해(더 많은 이미지가 crop 합을 채움) 스테이지 분리에 수렴한다.
+**크로스이미지 crop 큐는 새로 안 만들었다** — 공유 `ProcessPoolExecutor`([recognize_pool.py](../app/recognize_pool.py))가 이미 그것이다: 동시 요청들의 crop이 한 작업 큐에 모여 W개 워커가 FIFO로 뽑는다. 남았던 결합은 detect가 recognize 슬롯을 먹는 것뿐이었고, 그걸 뗀 게 이 변경이다.
 
-**단 이 챕터에선 델타가 작다.** K=2→K=4가 **1.06x(정체)**인 게 방증 — K를 올려 편차를 흡수해도 안 빨라졌다는 건 이 워크로드의 편차 유휴가 작다는 뜻이다(crop 2개가 13/21장으로 균일). **이득은 crop 분포에 달렸다**: crop 1~5개가 뒤섞인 편차 큰 챕터라야 스테이지 분리(또는 큰 K)의 봉쇄가 값을 한다. 편차 여부는 [`region_stats`](../app/cache.py)의 페이지별 `raw_regions` 분포(median↔p90/p99 폭)로 숫자로 확인된다.
+**이 워크로드에서 throughput 이득은 작다.** 병목은 recognize 풀(W=4)이고 게이트+K가 K=2에서 이미 그 풀을 포화시켰다(compute-bound GPU — bench/pool-occupancy 실측: K=2 util 0.77=avg 3.07 busy=포화, K=4~21 벽시계 동일). detect를 슬롯에서 떼도 GPU가 이미 포화라 정상 챕터에선 몇 %다. **이 변경의 값은 성능이 아니라 3-디바이스 파이프라인의 구조적 정합성**이다 — detect가 recognize 슬롯을 안 먹는 깨끗한 스테이지. **실질 이득은 MI50로 translate를 9060에서 분리**해 detect(CPU)·recognize(9060)·translate(MI50)가 **서로 다른 물리 장치에서 실제 병렬**로 돌 때 나온다(translate는 이미 게이트 밖이라 그 병렬은 배포만으로 활성화).
 
-**성능만 보면 지금 하는 값이 낮다.** 병목은 recognize 풀(W=4)이고 게이트+K가 K=2에서 이미 그 풀을 포화시켰다 — 스테이지 분리도 같은 W=4 풀을 채우니 천장이 같다(델타 = 편차 유휴 + detect gap, 이 챕터엔 몇 %). `--no-translate`면 translate 제약 없이 지금 9060에서 구현·측정은 가능하나, **진짜 값은 성능이 아니라 K 조절값 제거**(detect가 crop을 자동 공급)이고 그건 통계로 `K≈W÷평균crop` 자동화해도 된다. **MI50 도입 후 translate까지 3-스테이지**(CPU·9060·MI50 각자 큐)로 통합하는 게 이 개편이 구조적으로 값을 하는 시점이다. 확정용 방증: K=6·8 스윕에서 정체가 이어지면 이 워크로드는 스테이지 분리도 이득이 작다.
+**TODO — 진행 표시 순서.** "20장이 앞에서부터 완성돼 한 장씩 보이게"는 서버 혼자 엄격 보장이 불가하다 — RunRequest에 페이지 순번이 없어(독립 HTTP N개) "앞"을 모른다. 현행은 detect 직렬(대략 도착순)+recognize FIFO라 **대략** 앞에서부터 완성된다. 엄격히 하려면 요청에 페이지 순번 필드(확장 변경) + detect·recognize 순번 우선 스케줄이 필요하다.
 
 ## 해상도 캡 (flash-ON 실측 — 판정 보류)
 

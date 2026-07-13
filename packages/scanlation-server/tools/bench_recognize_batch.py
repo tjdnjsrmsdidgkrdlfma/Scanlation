@@ -384,7 +384,6 @@ def bench_report(data: str, device: str) -> int:
                 "image": page.name, "ok": True, "regions": regions_out, "error": None,
                 "timing": {"decode_ms": 0.0, "lockwait_ms": 0.0,
                            "detect_ms": round(detect_ms, 1), "recognize_ms": round(batch_ms, 1),
-                           "detect_recognize_ms": round(detect_ms + batch_ms, 1),
                            "semwait_ms": 0.0, "translate_ms": 0.0,
                            "total_ms": round(detect_ms + batch_ms, 1), "regions": len(crops)},
                 "_percrop_ms": round(percrop_ms, 1), "_matches": matches, "_ref": ref})
@@ -436,7 +435,7 @@ def _report_selftest() -> int:
               "regions": [{"bounds": [1, 2, 3, 4], "source": "はぁ", "destination": ""}],
               "error": None,
               "timing": {"decode_ms": 0.0, "lockwait_ms": 0.0, "detect_ms": 300.0,
-                         "recognize_ms": 1400.0, "detect_recognize_ms": 1700.0,
+                         "recognize_ms": 1400.0,
                          "semwait_ms": 0.0, "translate_ms": 0.0, "total_ms": 1700.0, "regions": 1},
               "_percrop_ms": 2000.0, "_matches": [True], "_ref": ["はぁ"]}]
     settings = {"languages": "ja->ko", "prompt_active": None,

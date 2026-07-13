@@ -57,9 +57,10 @@ _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 # The per-stage timing keys the server returns (orchestrator.run_page), in report order.
-# detect_ms + recognize_ms are the two halves inside detect_recognize_ms (the whole GPU
-# span — it also covers engine resolve/first-load, so it stays >= detect + recognize).
-_STAGES = ["decode_ms", "lockwait_ms", "detect_recognize_ms", "detect_ms", "recognize_ms",
+# detect (CPU) now runs OFF the recognize gate as its own stage, so it's timed apart
+# from recognize (GPU); lockwait is the wait for a recognize gate permit. The spans
+# don't sum exactly to total (residual = engine resolve/first-load + threadpool handoff).
+_STAGES = ["decode_ms", "detect_ms", "lockwait_ms", "recognize_ms",
            "semwait_ms", "translate_ms", "total_ms"]
 # translate_ms is one span around a single translate_batch call and is not split further:
 # the batch-vs-per-text fallback lives inside the translator plugin and the backend's
@@ -185,8 +186,7 @@ def _fmt_timing(t: dict | None) -> str:
     if not t:
         return "(no timing — cache hit? use a fresh run)"
     return (f"total {t.get('total_ms')}ms  (decode {t.get('decode_ms')} / "
-            f"detect+recognize {t.get('detect_recognize_ms')} "
-            f"[detect {t.get('detect_ms')} + recognize {t.get('recognize_ms')}] / "
+            f"detect {t.get('detect_ms')} / recognize {t.get('recognize_ms')} / "
             f"translate {t.get('translate_ms')}"
             f"; lockwait {t.get('lockwait_ms')}, semwait {t.get('semwait_ms')})")
 
@@ -229,10 +229,11 @@ def build_markdown(report: dict) -> str:
             L.append(f"| {k} | {agg['timing_sum'].get(k)} | {mean.get(k)} "
                      f"| {med.get(k)} | {lo.get(k)} | {hi.get(k)} |")
         L.append("")
-        L.append("_detect_recognize_ms는 GPU 반쪽 전체(엔진 resolve·first-load 포함)라 "
-                 "detect_ms+recognize_ms보다 큼. recognize_ms가 엔진 교체·최적화 대상._")
-        dr, tr = mean.get("detect_recognize_ms"), mean.get("translate_ms")
-        if dr is not None and tr is not None:
+        L.append("_detect(CPU)·recognize(GPU)는 이제 별 스테이지라 따로 계측된다. "
+                 "recognize_ms가 엔진 교체·최적화 대상._")
+        det, rec, tr = mean.get("detect_ms"), mean.get("recognize_ms"), mean.get("translate_ms")
+        if det is not None and rec is not None and tr is not None:
+            dr = round(det + rec, 1)
             verdict = "translate-bound (번역이 지배)" if tr > dr else "detect+recognize-bound (인식이 지배)"
             L.append("")
             L.append(f"→ 평균 detect+recognize **{dr}ms** vs translate **{tr}ms** ⇒ **{verdict}**"
@@ -301,8 +302,8 @@ def _selftest() -> int:
         {"image": "p1.png", "ok": True,
          "regions": [{"bounds": [1, 2, 3, 4], "source": "こんにちは", "destination": "안녕하세요"},
                      {"bounds": [5, 6, 7, 8], "source": "a|b\nc", "destination": "표 | 안전"}],
-         "timing": {"decode_ms": 5.0, "lockwait_ms": 0.1, "detect_recognize_ms": 40.0,
-                    "detect_ms": 12.0, "recognize_ms": 26.0,  # sum 38 <= 40 (umbrella)
+         "timing": {"decode_ms": 5.0, "detect_ms": 12.0, "lockwait_ms": 0.1,
+                    "recognize_ms": 26.0,
                     "semwait_ms": 0.0, "translate_ms": 900.0, "total_ms": 945.1, "regions": 2},
          "error": None},
         {"image": "bad.png", "ok": False, "regions": [], "timing": None, "error": "HTTP 400 bad image"},
@@ -318,17 +319,17 @@ def _selftest() -> int:
     md = build_markdown(report)
     # invariants
     agg = report["aggregate"]
-    stage_vals = {"decode_ms": 5.0, "lockwait_ms": 0.1, "detect_recognize_ms": 40.0,
-                  "detect_ms": 12.0, "recognize_ms": 26.0,
+    stage_vals = {"decode_ms": 5.0, "detect_ms": 12.0, "lockwait_ms": 0.1,
+                  "recognize_ms": 26.0,
                   "semwait_ms": 0.0, "translate_ms": 900.0, "total_ms": 945.1}
     assert (agg["images"], agg["ok"], agg["failed"], agg["regions_total"]) == (2, 1, 1, 2), agg
     # one timed run → sum/mean/median/min/max all collapse to that single sample
     for key in ("timing_sum", "timing_mean", "timing_median", "timing_min", "timing_max"):
         assert agg[key] == stage_vals, (key, agg[key])
     assert "안녕하세요" in md and "こんにちは" in md          # OCR + translation rendered
-    assert "translate-bound" in md                          # 900 > 40 verdict
+    assert "translate-bound" in md                          # 900 > 38 verdict (detect+recognize)
     assert "중앙값" in md and "최소" in md and "최대" in md    # per-stage spread columns
-    assert "recognize_ms" in md and "detect 12.0 + recognize 26.0" in md  # detect/recognize split
+    assert "recognize_ms" in md and "detect 12.0 / recognize 26.0" in md  # detect/recognize split
     assert "케이스별 시간" in md                              # per-case timing list
     assert "표 \\| 안전" in md and "a\\|b ⏎ c" in md          # pipe/newline escaping in cells
     assert "manga-ocr" in md and "model=gemma" in md         # settings header
@@ -399,8 +400,9 @@ def main() -> int:
     mean = agg.get("timing_mean") or {}
     print(f"wrote {md_path}  and  {json_path}", file=sys.stderr)
     print(f"  images ok={agg['ok']}/{agg['images']}  regions={agg['regions_total']}", file=sys.stderr)
-    if mean.get("detect_recognize_ms") is not None:
-        print(f"  mean detect+recognize={mean['detect_recognize_ms']}ms  translate={mean['translate_ms']}ms",
+    if mean.get("recognize_ms") is not None:
+        dr = round((mean.get("detect_ms") or 0) + (mean.get("recognize_ms") or 0), 1)
+        print(f"  mean detect+recognize={dr}ms  translate={mean.get('translate_ms')}ms",
               file=sys.stderr)
     return 1 if agg["failed"] else 0
 

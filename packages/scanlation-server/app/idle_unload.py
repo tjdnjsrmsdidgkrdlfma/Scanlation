@@ -16,6 +16,8 @@ import asyncio
 import logging
 import time
 
+from starlette.concurrency import run_in_threadpool
+
 from .registry import registry
 from .state import state
 
@@ -41,8 +43,20 @@ async def sweep_once(now: float) -> list[tuple[str, str]]:
     ttl = minutes * 60
     if not registry.idle_candidates(ttl, now):  # cheap lock-free early-out
         return []
+    # writer() excludes in-flight RECOGNIZE; the threadpool'd helper also holds
+    # detect_lock to exclude an in-flight DETECT (which runs off the gate now).
+    async with state.gpu_gate.writer():
+        return await run_in_threadpool(_unload_idle_locked, ttl, now, minutes)
+
+
+def _unload_idle_locked(ttl: float, now: float, minutes: int) -> list[tuple[str, str]]:
+    """Re-check idleness and unload under detect_lock — so an in-flight DETECT isn't
+    dropped mid-forward (get() bumped its last-used to a monotonic >= now, so a key
+    used while we waited for the lock drops out of this second idle_candidates).
+    Runs in a threadpool: acquiring detect_lock may wait on a detect (~270ms) and must
+    not block the event loop."""
     unloaded: list[tuple[str, str]] = []
-    async with state.gpu_gate.writer():  # exclusive vs in-flight inference while we drop a model
+    with state.detect_lock:
         for role, name in registry.idle_candidates(ttl, now):  # re-check under the lock
             registry.unload_one(role, name)
             unloaded.append((role, name))

@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from scanlation_sdk.context import LANGUAGES
 from ..recognize_pool import recognize_pool
@@ -51,23 +52,34 @@ def set_languages(req: SetLanguagesRequest) -> dict:
     return {}
 
 
+def _apply_engine_device(engine: str, dev: str | None) -> None:
+    """Persist the device + drop the engine's cached instance so its next request
+    reloads on it. Holds ``detect_lock`` so an in-flight DETECT — which runs OFF the
+    gpu_gate now, so the writer around this doesn't exclude it — can't have the
+    detector torn out mid-forward. Runs in a threadpool (detect can take ~270ms, so
+    acquiring the lock must not block the event loop)."""
+    with state.detect_lock:
+        state.set_engine_device(engine, dev)
+        for role in ROLE_NAMES:
+            if registry.has(role, engine):
+                registry.unload_one(role, engine)
+        recognize_pool.invalidate(engine)  # rebuild on the new device (no-op if not the pooled engine)
+
+
 @router.post("/set_engine_device/")
 async def set_engine_device(req: SetEngineDeviceRequest) -> dict:
     """Per-engine compute-device override (empty device removes it -> the engine's
-    DEFAULT_DEVICE). On a real change, drop that engine's cached instance under the
-    GPU lock so its next request reloads on the resolved device."""
+    DEFAULT_DEVICE). On a real change, drop that engine's cached instance (under the
+    gate writer for recognize + detect_lock for the off-gate detector) so its next
+    request reloads on the resolved device."""
     dev = req.device.strip().lower()
     if dev and not _DEVICE_RE.match(dev):
         raise HTTPException(status_code=400, detail="device must be cpu, cuda, or cuda:<n>")
     if not any(registry.has(role, req.engine) for role in ROLE_NAMES):
         raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
     if (dev or None) != state.resolve_device_for(req.engine):
-        async with state.gpu_gate.writer():  # exclusive vs all in-flight inference while we swap
-            state.set_engine_device(req.engine, dev or None)
-            for role in ROLE_NAMES:
-                if registry.has(role, req.engine):
-                    registry.unload_one(role, req.engine)
-            recognize_pool.invalidate(req.engine)  # rebuild on the new device (no-op if not the pooled engine)
+        async with state.gpu_gate.writer():  # exclusive vs in-flight recognize while we swap
+            await run_in_threadpool(_apply_engine_device, req.engine, dev or None)
     return {"status": "success", "device": state.resolve_device_for(req.engine) or ""}
 
 

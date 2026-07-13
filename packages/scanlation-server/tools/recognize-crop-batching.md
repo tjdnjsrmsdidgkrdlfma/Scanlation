@@ -108,9 +108,9 @@ for region in regions:
 
 ## gpu_lock / detect·recognize 분리 (인접 설계 질문)
 
-배치와 별개로 "`gpu_lock`을 없앨까 / detect·recognize를 쪼갤까"가 나왔다. 정리:
+배치와 별개로 "`gpu_lock`을 없앨까 / detect·recognize를 쪼갤까"가 나왔다. **→ 구현됨**: `gpu_lock`은 `InferenceGate`(reader/writer K 게이트)가 됐고, detect·recognize는 별 스테이지로 쪼개졌다(detect=게이트 밖 CPU / recognize=게이트 안 / translate=게이트 밖, [orchestrator.py](../app/orchestrator.py) `_detect_sync`·`_recognize_sync`). 아래는 그 결정에 이른 분석이다:
 
-1. **`gpu_lock`은 두 가지를 한 자물쇠로 용접**한다([orchestrator.py `_read_sync`](../app/orchestrator.py#L76-L93) 주석): **① `registry.get` thread-safety**(`_instances` check-then-set + 모델 로드 직렬화)와 **② compute 직렬화**. 그냥 없애면 compute만 풀리는 게 아니라 **`_instances` 레이스**가 같이 터진다. 어떤 lock 변경이든 **1단계는 registry 안전성 분리**(전용 작은 lock, 또는 selection 시점 preload로 get을 순수 read화). translator를 lock 안에서 resolve하는 것도([orchestrator.py](../app/orchestrator.py#L88)) 이때 같이 챙긴다.
+1. **`gpu_lock`은 두 가지를 한 자물쇠로 용접**했다([orchestrator.py](../app/orchestrator.py) 참고): **① `registry.get` thread-safety**(`_instances` check-then-set + 모델 로드 직렬화)와 **② compute 직렬화**. 그냥 없애면 compute만 풀리는 게 아니라 **`_instances` 레이스**가 같이 터진다. 어떤 lock 변경이든 **1단계는 registry 안전성 분리**(전용 작은 lock, 또는 selection 시점 preload로 get을 순수 read화). translator를 lock 안에서 resolve하는 것도([orchestrator.py](../app/orchestrator.py#L88)) 이때 같이 챙긴다.
 2. **lock 제거만으로 end-to-end 이득은 지금 없다.** 파이프라인이 **translate-bound**라 detect+recognize를 이미지 간 겹쳐도 병목이 **`lockwait` → `semwait`로 자리만 옮긴다**(아티팩트 시뮬레이션 결론). 실측 레버는 **K(`translate_sem`)**이다. recognize 병렬화 1.85배가 end-to-end에 드러나려면 translate가 병목에서 빠져야 하고, 그건 K를 크게 올려야 하는데 `OLLAMA_NUM_PARALLEL`에 묶여 있다.
 3. **값어치 있는 "분리"는 위의 페이지 내 detect→batch-recognize다** — lock 무관, manga-ocr 배치 이득이 실제로 꽂히는 자리. detect/recognize를 아예 별도 stage(각자 pool)로 쪼개는 큰 개편은 그 뒤 로그의 `lockwait`/`semwait`을 보고 결정해도 늦지 않다.
 
