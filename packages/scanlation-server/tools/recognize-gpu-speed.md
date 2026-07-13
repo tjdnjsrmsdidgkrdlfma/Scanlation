@@ -107,7 +107,30 @@ flash 없는 sdpa(math 폴백)는 이 둘을 O(n²)로 문다. **AOTriton이 그
 - **VRAM 천장 W=6** — 캡을 써도 per-worker ~1.9GB × 7 + activation/HIP 오버헤드가 16GB를 넘어 W=7이 OOM.
 - **→ W=4 채택.** 정점은 W=3(1.41x)이나 W=4(1.38x)와 사실상 동일하고, **2의 배수 정렬**(설정·확장 일관성)로 W=4를 택한다. `chars max 62`가 전 W 동일 → 동시성은 배치와 달리 correctness가 온전.
 
-> **판정 전환 (2026-07-12) — 재고조건 충족.** 위 "안 넣음"은 **manga-ocr가 기본**이라 파이프라인이 translate-bound(recognize가 전체의 18.7%)이던 전제였다. **PaddleOCR-VL로 전환하면 recognize가 병목**이 된다 — recognize-only 68.6s = translate 31.7s의 **2.2배**, 전체의 **64.7%**(run_report 2건 실측, manga-ocr는 18.7% ↔ PaddleOCR-VL는 64.7%로 역전). 그리고 **MI50 32GB 도입으로 translate(Gemma)를 별 GPU로 분리**하면 이 절이 든 반대가 다 사라진다: VRAM 4배 → 9060 XT 16GB를 recognize가 전용, per-crop 지연 → 처리량 워크로드라 무관, `gpu_lock` 경합 → GPU 물리 분리로 0. correctness는 배치와 달리 원래 안전. **→ W=4 채택 확정**(정점 W=3 1.41x이나 2의 배수 정렬로 W=4 1.38x, 위 full 스윕 표). 구현: **린 코어(프로세스풀 + crop fan-out + per-engine W 배관)** — env `SCANLATION_RECOGNIZE_CONCURRENCY`(기본 1 = off, 기존 per-crop 경로와 동일) + `/admin` 플러그인별 설정, [`recognize_pool.py`](../app/recognize_pool.py). W>1이면 한 페이지의 crop을 W개 워커 프로세스(각 B=1)로 fan-out. `gpu_lock`→semaphore 전환·크로스이미지 오버랩은 MI50 GPU 분리 후. [배치](recognize-crop-batching.md)는 2026-07-12 공정 실측(같은 크롭·캡 대칭·no_grad)에서 per-crop보다 **1.3x 느려 폐기**됐다(옛 2.04x는 stale) — 멀티워커가 recognize 동시성의 유일한 레버다.
+> **판정 전환 (2026-07-12) — 재고조건 충족.** 위 "안 넣음"은 **manga-ocr가 기본**이라 파이프라인이 translate-bound(recognize가 전체의 18.7%)이던 전제였다. **PaddleOCR-VL로 전환하면 recognize가 병목**이 된다 — recognize-only 68.6s = translate 31.7s의 **2.2배**, 전체의 **64.7%**(run_report 2건 실측, manga-ocr는 18.7% ↔ PaddleOCR-VL는 64.7%로 역전). 그리고 **MI50 32GB 도입으로 translate(Gemma)를 별 GPU로 분리**하면 이 절이 든 반대가 다 사라진다: VRAM 4배 → 9060 XT 16GB를 recognize가 전용, per-crop 지연 → 처리량 워크로드라 무관, `gpu_lock` 경합 → GPU 물리 분리로 0. correctness는 배치와 달리 원래 안전. **→ W=4 채택 확정**(정점 W=3 1.41x이나 2의 배수 정렬로 W=4 1.38x, 위 full 스윕 표). 구현: **린 코어(프로세스풀 + crop fan-out + per-engine W 배관)** — env `SCANLATION_RECOGNIZE_CONCURRENCY`(기본 1 = off, 기존 per-crop 경로와 동일) + `/admin` 플러그인별 설정, [`recognize_pool.py`](../app/recognize_pool.py). W>1이면 한 페이지의 crop을 W개 워커 프로세스(각 B=1)로 fan-out. `gpu_lock`→gate 전환·크로스이미지 오버랩(K)은 `--no-translate` 벤치로 **MI50 전 구현·측정 완료**(§크로스이미지 오버랩, K=2 sweet spot); 프로덕션 상시(translate 포함)는 MI50 GPU 분리 후. [배치](recognize-crop-batching.md)는 2026-07-12 공정 실측(같은 크롭·캡 대칭·no_grad)에서 per-crop보다 **1.3x 느려 폐기**됐다(옛 2.04x는 stale) — 멀티워커가 recognize 동시성의 유일한 레버다.
+
+### 크로스이미지 오버랩 — 크롭 천장 회수 (K, 2026-07-13)
+
+위 멀티워커(W)는 **한 페이지의 crop만** 워커 풀에 fan-out한다 — `gpu_lock`이 detect+recognize를 이미지 단위로 직렬화하기 때문. 그래서 페이지 crop 수 < W면 워커가 논다(**크롭 천장**). 실제 챕터는 페이지당 말풍선이 대부분 2개라, W=4를 켜도 워커 절반이 항상 논다. bench의 W=4 1.38x는 crop 42개를 **이미지 경계 없이 한 스트림**으로 밀어넣은 값이라, 사실상 크롭 천장이 없는(= cross-image가 있는) 상한이다.
+
+**구현**: `gpu_lock`(단일 mutex) → `InferenceGate(K)` reader/writer 게이트 — K개 이미지가 detect+recognize를 동시에 통과해, 여러 페이지의 crop이 **공유 워커 풀을 함께 채운다**. K는 per-recognizer(`recognize_concurrency`(W)와 대칭), K=1 기본=직렬(기존과 byte-identical). detect는 공유 torch 모델이라 `detect_lock`으로 직렬, recognize(워커 프로세스)만 겹친다. RecognizePool은 in-flight refcount로 self-protected(gpu_lock 의존 제거). 커밋 `74ba94e`, [`state.py InferenceGate`](../app/state.py)·[`recognize_pool.py`](../app/recognize_pool.py).
+
+**실측** — `run_report.py --parallel --no-translate`, 21장(실제 챕터), W=4 고정, K 스윕. 지표는 **batch 전체 벽시계 = `total_ms`의 최대값**(21장이 다 끝나는 실제 시간):
+
+| 설정 | batch 벽시계 | lockwait 평균 | vs baseline |
+|---|---|---|---|
+| W1·K1 (baseline) | 79.7s | 36.9s | 1.00x |
+| W4·K1 | 71.5s | 33.4s | 1.11x |
+| **W4·K2** | **52.6s** | 21.2s | **1.52x** |
+| W4·K4 | 49.4s | 18.0s | 1.61x |
+
+- **W만 올림(W1K1→W4K1)은 1.11x뿐** — crop 2개 페이지가 W=4의 절반만 쓰니 크롭 천장 그대로.
+- **K를 켬(W4K1→W4K2)이 1.36x 점프** — 놀던 워커 2개가 옆 페이지 crop으로 채워진다. lockwait 33.4→21.2s로 붕괴(오버랩 동작 신호).
+- **K=2→K4는 1.06x뿐.** per-image recognize는 3배 폭증(3.2s→8.4s, ROCm MPS 부재로 GPU를 4장이 타임슬라이스)하는데 batch 이득은 미미 — 자원만 더 쓴다.
+
+**판정: K=2 sweet spot.** 이론 `K ≈ W ÷ 페이지당 평균 crop = 4 ÷ 2 = 2`와 일치(2 crop × 2 이미지 = W=4 풀 참). → **프로덕션 W=4·K2**, baseline 대비 1.5x. 최적 K는 W가 아니라 **crop 분포**에 달렸으므로(K=W로 자동 묶으면 crop-적은 챕터에서 오버) K는 별도 축으로 노출/기본 2가 낫다.
+
+**단, recognize-only 실측이다.** translate까지 켠 end-to-end는 9060 XT에 gemma가 VRAM을 공유 못 해 여기선 못 잰다 — **MI50(translate 전용 GPU) 도입 후** 재측정해야 최종 그림(recognize-bound가 얼마나 풀리는지)이 나온다.
 
 ## 해상도 캡 (flash-ON 실측 — 판정 보류)
 
