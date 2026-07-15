@@ -2,7 +2,7 @@
 
 작성 2026-07-14. LLM translator를 **MI50(AMD Instinct, gfx906/Vega20, 32GB HBM2)** 에서 돌리기까지의 기록 + 재현 레시피 + 남은 일. 배경(GPU 역할 분리)은 [SCANLATION_DESIGN.md](../../../SCANLATION_DESIGN.md), recognize 쪽 GPU 사정은 [recognize-gpu-speed.md](recognize-gpu-speed.md).
 
-> **상태 (2026-07-15):** **작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**, 조치 `--reasoning-budget 0`) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). 로드타임 ~84초는 Vulkan 특성(디스크 아님, §5), GPU hang(§4)은 콜드 부팅으로 복구. 남은 건 **systemd 영속화**([deploy/llama.cpp.service.example](../../../deploy/llama.cpp.service.example)). (어드민 `think` kwarg는 검증 완료 — gemma-4엔 no-op이라 서버 `--reasoning-budget 0`이 실질 제어, §3.) 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
+> **상태 (2026-07-15):** **작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). 로드타임 ~84초는 Vulkan 특성(디스크 아님, §5), GPU hang(§4)은 콜드 부팅으로 복구. **reasoning 제어는 Option B** — 서버 `--reasoning-budget 0` 대신 플러그인 `enable_thinking`(기본 off)으로 제어해 /admin 토글이 실제로 작동(§3). 남은 건 **systemd 영속화**([deploy/llama.cpp.service.example](../../../deploy/llama.cpp.service.example)) + **플러그인 재설치**(think 옵션). 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
 
 ## 배경 — 왜 MI50인가
 
@@ -154,7 +154,21 @@ raw 모델 검증(위) 이후 실제 파이프라인(`run_report` → 서버 →
 
 **어드민 reasoning 제어 — 플러그인에 `think` 옵션 추가 (2026-07-15).** [llama.cpp 플러그인](../../scanlation-llama-cpp/scanlation_llama_cpp/plugin.py)의 `strip_think`은 출력을 잘라낼 뿐이라, 생성 자체를 막는 **`think`(bool, 기본 False)** 옵션을 추가했다(ollama의 `think`와 대칭). 요청 body에 `chat_template_kwargs:{enable_thinking: think}`로 전달. 단위테스트(body shape) green.
 
-**검증 결과 (2026-07-15) — gemma-4에선 이 kwarg가 reasoning을 깔끔히 토글하지 못한다.** `reasoning_content`는 true/false 어느 쪽도 안 나오고, **schema(배치=주 경로)에선 완전 no-op**(`enable_thinking:true` 27토큰 ≈ `false` 29토큰 — schema가 terse JSON을 강제하니 thinking이 낄 자리가 없음). schema 없는 단일/폴백 경로에서만 생성량이 늘 뿐(true 202 vs false 139, 그것도 분리된 `<think>`가 아니라 inline 수다). **→ gemma-4의 실효 reasoning 제어는 서버 `--reasoning-budget 0` 하나다.** 플러그인 `think` 옵션은 유지한다(ollama와 대칭 + `enable_thinking`을 존중하는 다른 모델엔 유효) — 단 gemma-4엔 서버 플래그가 실질 레버.
+**검증 (2026-07-15) — 토글은 작동한다. 중간에 낸 "no-op" 결론은 오판이었고, 아래가 최종.**
+
+처음엔 `--reasoning-budget 0`을 켠 채 `enable_thinking`을 테스트해서 "gemma-4가 kwarg를 무시한다"고 잘못 결론냈다. 실은 **`--reasoning-budget 0`(하드 캡)이 per-request `enable_thinking`을 덮어써서** 가려진 것. **왜 ollama는 `think` 하나로 됐나**: ollama는 native `think` 필드를 각 모델 방식으로 내부 매핑(추상화)한다. llama.cpp는 raw **chat 템플릿 변수**(`enable_thinking`)를 그대로 노출하므로 모델 규약이 맞아야 한다(Qwen3·gemma=`enable_thinking`, Granite=`thinking`…). gemma-4는 `enable_thinking`을 쓴다([Google 문서](https://ai.google.dev/gemma/docs/capabilities/thinking): 기본 off).
+
+budget 플래그를 빼고 재검증(실측):
+
+| 요청 | reasoning? | tokens |
+|---|---|---|
+| free 프롬프트 · `enable_thinking:false` | False | 373 (본문 수다) |
+| free 프롬프트 · `enable_thinking:true` | **True** | 702 (+330 reasoning 블록) |
+| **schema · `enable_thinking:false`** | False | **27** (terse) |
+
+→ **gemma-4도 `enable_thinking`을 정상 존중한다.** free 프롬프트의 373은 reasoning이 아니라 본문 수다(스키마·시스템프롬프트 없어서)고, **파이프라인이 쓰는 schema 경로는 27토큰**으로 terse.
+
+**→ 채택: Option B.** 서버 `--reasoning-budget 0`(하드 캡, /admin 토글을 죽임)을 빼고, **플러그인 `think`(기본 False → `enable_thinking:false`)에 제어를 맡긴다.** 그러면 (1) **/admin 토글이 실제로 작동**, (2) 파이프라인은 스키마로 terse, (3) `enable_thinking` 쓰는 다른 모델도 대응. systemd 유닛에서 `--reasoning-budget 0` 제거함. **주의: 플러그인 재설치 필요** — `think` 옵션(=`enable_thinking:false` 명시 전송)이 든 최신 버전이라야 확실히 off(옛 플러그인은 kwarg 미전송).
 
 ### 4. GPU hang 사고 (미복구)
 - llama-server를 **GPU 작업 중 `pkill -9`로 반복 종료** → **amdgpu 컨텍스트 hang**. 프로세스가 D 상태(uninterruptible)로 안 죽고, **VRAM 16.8GB가 프로세스 킬 후에도 반납 안 됨**(`rocm-smi`).
