@@ -19,5 +19,5 @@ ollama처럼 /admin에서 여러 모델을 오가고 싶어지면 [llama-swap](h
 
 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md)의 "남은 일"/"복구 런북" 참조:
 
-- [ ] systemd 상주 전환([deploy/llama.cpp.service.example](deploy/llama.cpp.service.example)) — 현재 수동 `&` 서버.
+- [x] ~~systemd 상주 전환~~ **완료 (2026-07-15)** — `llama.cpp.service` active·enabled(재부팅 생존) + budget 플래그 없음(Option B). [deploy/llama.cpp.service.example](deploy/llama.cpp.service.example)
 - [ ] MI50 최종 토폴로지 — 9060 XT 재장착 후 recognize(9060)∥translate(MI50) 물리 병렬(translate는 이미 gate 밖이라 배포만으로 활성).
