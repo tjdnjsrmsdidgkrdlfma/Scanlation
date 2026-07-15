@@ -42,6 +42,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -156,10 +157,16 @@ def build_report(runs: list[dict], settings_summary: dict | None, meta: dict) ->
     timing_median = {k: _median(v) for k, v in vals.items()} if timed else {}
     timing_min = {k: round(min(v), 1) for k, v in vals.items()} if timed else {}
     timing_max = {k: round(max(v), 1) for k, v in vals.items()} if timed else {}
+    # Overall wall-clock of the whole run + throughput. In --parallel mode the per-stage
+    # means are contended (see mode note), so wall-clock/pages-per-sec is the honest metric
+    # for a concurrency A/B: it's the only number that reflects requests overlapping.
+    wall_ms = meta.get("wall_clock_ms")
+    throughput_pps = round(len(ok) / (wall_ms / 1000), 3) if wall_ms else None
     return {
         "generated_at": meta["generated_at"],
         "server": meta["server"],
         "mode": meta["mode"],          # "serial" | "parallel" (timing is contended when parallel)
+        "wall_clock_ms": wall_ms,      # elapsed for the whole run (None if caller didn't time it)
         "skip_translate": meta.get("skip_translate", False),  # recognize-only run (no translation)
         "settings": settings_summary,
         "images": runs,
@@ -168,6 +175,7 @@ def build_report(runs: list[dict], settings_summary: dict | None, meta: dict) ->
             "ok": len(ok),
             "failed": len(failed),
             "regions_total": sum(len(r.get("regions") or []) for r in ok),
+            "throughput_pps": throughput_pps,  # ok pages / wall-clock seconds (concurrency metric)
             "timing_sum": timing_sum,
             "timing_mean": timing_mean,
             "timing_median": timing_median,
@@ -200,6 +208,12 @@ def build_markdown(report: dict) -> str:
              + ("" if report["mode"] == "serial"
                 else "  ⚠ 병렬 실행이라 lockwait/semwait 등 단계별 시간은 이미지 간 경합으로 오염됨"))
     L.append(f"- 이미지: {agg['images']} (성공 {agg['ok']}, 실패 {agg['failed']})  ·  총 리전 {agg['regions_total']}")
+    if report.get("wall_clock_ms"):
+        tp = agg.get("throughput_pps")
+        L.append(f"- 전체 wall-clock: **{report['wall_clock_ms']}ms**"
+                 + (f"  ·  처리량 **{tp} pages/sec**" if tp else "")
+                 + ("  ← 병렬 처리량 지표(단계별 평균 대신 이 값으로 A/B 비교)"
+                    if report["mode"] != "serial" else ""))
     if report.get("skip_translate"):
         L.append("- ⚠ **번역 스킵(recognize-only)** — destination 비어 있고 translate_ms=0. detect/recognize 벤치용.")
 
@@ -315,7 +329,8 @@ def _selftest() -> int:
         "engines": {"recognizer": [{"name": "manga-ocr", "device": "cpu", "options": {}}],
                     "translator": [{"name": "Ollama", "device": None, "options": {"model": "gemma"}}]},
     })
-    report = build_report(runs, settings, {"generated_at": "SELFTEST", "server": "http://x", "mode": "serial"})
+    report = build_report(runs, settings, {"generated_at": "SELFTEST", "server": "http://x",
+                                           "mode": "serial", "wall_clock_ms": 1000.0})
     md = build_markdown(report)
     # invariants
     agg = report["aggregate"]
@@ -326,11 +341,13 @@ def _selftest() -> int:
     # one timed run → sum/mean/median/min/max all collapse to that single sample
     for key in ("timing_sum", "timing_mean", "timing_median", "timing_min", "timing_max"):
         assert agg[key] == stage_vals, (key, agg[key])
+    assert report["wall_clock_ms"] == 1000.0 and agg["throughput_pps"] == 1.0  # 1 ok page / 1.0s wall
     assert "안녕하세요" in md and "こんにちは" in md          # OCR + translation rendered
     assert "translate-bound" in md                          # 900 > 38 verdict (detect+recognize)
     assert "중앙값" in md and "최소" in md and "최대" in md    # per-stage spread columns
     assert "recognize_ms" in md and "detect 12.0 / recognize 26.0" in md  # detect/recognize split
     assert "케이스별 시간" in md                              # per-case timing list
+    assert "wall-clock" in md and "pages/sec" in md          # overall wall-clock + throughput surfaced
     assert "표 \\| 안전" in md and "a\\|b ⏎ c" in md          # pipe/newline escaping in cells
     assert "manga-ocr" in md and "model=gemma" in md         # settings header
     assert json.dumps(report, ensure_ascii=False)           # JSON-serialisable
@@ -375,6 +392,7 @@ def main() -> int:
 
     settings_summary = summarize_settings(get_settings(server, a.token))
 
+    t0 = time.perf_counter()
     if a.parallel:
         # Key futures by input index, not img.name: rglob can yield the same basename
         # from different folders, and a name-keyed dict would collide (one result lost,
@@ -386,9 +404,10 @@ def main() -> int:
         runs = [done[i] for i in range(len(imgs))]  # restore input order
     else:
         runs = [_run_one(server, a.token, img, force, skip_translate) for img in imgs]
+    wall_clock_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     meta = {"generated_at": datetime.now().isoformat(timespec="seconds"), "server": server,
-            "mode": mode, "skip_translate": skip_translate}
+            "mode": mode, "skip_translate": skip_translate, "wall_clock_ms": wall_clock_ms}
     report = build_report(runs, settings_summary, meta)
 
     prefix = a.out or f"run_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -400,6 +419,8 @@ def main() -> int:
     mean = agg.get("timing_mean") or {}
     print(f"wrote {md_path}  and  {json_path}", file=sys.stderr)
     print(f"  images ok={agg['ok']}/{agg['images']}  regions={agg['regions_total']}", file=sys.stderr)
+    print(f"  wall-clock={report['wall_clock_ms']}ms  throughput={agg.get('throughput_pps')} pages/sec"
+          f"  (mode={mode})", file=sys.stderr)
     if mean.get("recognize_ms") is not None:
         dr = round((mean.get("detect_ms") or 0) + (mean.get("recognize_ms") or 0), 1)
         print(f"  mean detect+recognize={dr}ms  translate={mean.get('translate_ms')}ms",
