@@ -2,7 +2,7 @@
 
 작성 2026-07-14. LLM translator를 **MI50(AMD Instinct, gfx906/Vega20, 32GB HBM2)** 에서 돌리기까지의 기록 + 재현 레시피 + 남은 일. 배경(GPU 역할 분리)은 [SCANLATION_DESIGN.md](../../../SCANLATION_DESIGN.md), recognize 쪽 GPU 사정은 [recognize-gpu-speed.md](recognize-gpu-speed.md).
 
-> **상태 (2026-07-15):** **작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**, 조치 `--reasoning-budget 0`) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). 로드타임 ~84초는 Vulkan 특성(디스크 아님, §5), GPU hang(§4)은 콜드 부팅으로 복구. 남은 건 **systemd 영속화**([deploy/llama-server.service.example](../../../deploy/llama-server.service.example)). (어드민 `think` kwarg는 검증 완료 — gemma-4엔 no-op이라 서버 `--reasoning-budget 0`이 실질 제어, §3.) 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
+> **상태 (2026-07-15):** **작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**, 조치 `--reasoning-budget 0`) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). 로드타임 ~84초는 Vulkan 특성(디스크 아님, §5), GPU hang(§4)은 콜드 부팅으로 복구. 남은 건 **systemd 영속화**([deploy/llama.cpp.service.example](../../../deploy/llama.cpp.service.example)). (어드민 `think` kwarg는 검증 완료 — gemma-4엔 no-op이라 서버 `--reasoning-budget 0`이 실질 제어, §3.) 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
 
 ## 배경 — 왜 MI50인가
 
@@ -181,7 +181,7 @@ raw 모델 검증(위) 이후 실제 파이프라인(`run_report` → 서버 →
 
 1. **스캔레이션 서버 연결.** 플러그인 설치·엔드포인트 배선은 됨(§통합 시도 1·2). 남은 건 §3의 **translate 느림 해결** — 그게 풀려야 실제 연결 완료. (plugin: [scanlation-llama-cpp](../../scanlation-llama-cpp/scanlation_llama_cpp/plugin.py), OpenAI 호환 `/v1/chat/completions`, 모델 `unsloth/gemma-4-26B-A4B-it-qat-GGUF`.)
 2. ~~**벤치.**~~ **완료 (2026-07-15)** — 이전 GPU 대비 translate **1.62x**(§3 파이프라인 벤치). 기준 `run_report_20260710_111941.md`(ollama, 이전 GPU) vs `run_report_mi50_translate.md`(llama.cpp, MI50). 참고: 20260710은 CPU가 아니라 **이전 GPU** 실행이었다.
-3. **영속화.** 유닛 파일 작성됨 → [deploy/llama-server.service.example](../../../deploy/llama-server.service.example)(`--reasoning-budget 0` 박음 + 핀 없음 + SIGTERM graceful). 서버에 복사 + `systemctl enable --now`만 하면 됨. **아직 미배포 — 현재는 `&` 백그라운드.**
+3. **영속화.** 유닛 파일 작성됨 → [deploy/llama.cpp.service.example](../../../deploy/llama.cpp.service.example)(`--reasoning-budget 0` 박음 + 핀 없음 + SIGTERM graceful). 서버에 복사 + `systemctl enable --now`만 하면 됨. **아직 미배포 — 현재는 `&` 백그라운드.**
 4. ~~**MI50 디바이스 핀 확정.**~~ **결정 (2026-07-15): 핀 없이 자동.** `GGML_VK_VISIBLE_DEVICES=0`이 오히려 lavapipe/iGPU를 잡아 10x 느렸다(§3 함정) — 기본 자동선택이 discrete(MI50)를 고른다.
 5. **최종 토폴로지(9060 XT 재장착 후).** detect=CPU / recognize=9060 XT / **translate=MI50** 물리 병렬. translate는 파이프라인상 이미 gate 밖이라 배포만으로 병렬 활성(코드 변경 불필요, [recognize-gpu-speed.md](recognize-gpu-speed.md) 참조).
 6. **하드코딩 회피 점검.** 엔드포인트·모델·포트 등 조절값은 env 기본 + `/admin` 노출 원칙을 따른다(신규 값 생기면).
