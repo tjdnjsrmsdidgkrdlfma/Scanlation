@@ -26,6 +26,7 @@ same chat_template_kwargs) straight to llama-server, then classifies the output:
     python tools/diag_runaway.py                      # pipeline shape: schema + think off
     python tools/diag_runaway.py --think              # flip enable_thinking
     python tools/diag_runaway.py --no-schema          # free generation (grammar A/B)
+    python tools/diag_runaway.py --single "text" ...  # per-text fallback path (free, one req/text)
     python tools/diag_runaway.py --body captured.json # replay a DEBUG-captured plugin body
 
 Run it where llama-server is reachable (the GPU host): --endpoint or LLAMACPP_ENDPOINT,
@@ -58,6 +59,7 @@ from scanlation_sdk.prompt import (  # noqa: E402
     DEFAULT_SYSTEM_PROMPT,
     batch_schema,
     build_batch_prompt,
+    build_prompt,
 )
 
 # A bubble-sized sample page: enough texts to exercise the batch schema (t0..t3).
@@ -92,6 +94,24 @@ def _pipeline_body(args: argparse.Namespace) -> dict:
             "json_schema": {"name": "translations", "schema": batch_schema(len(texts)), "strict": True},
         }
     return body
+
+
+def _single_body(text: str, args: argparse.Namespace) -> dict:
+    """The plugin's SINGLE-text body — translate()'s per-text path, which is also
+    what a failed batch falls back to: build_prompt user turn, NO response_format,
+    no output cap of its own (plugin._body + _translate)."""
+    return {
+        "model": args.model,
+        "messages": [
+            {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
+            {"role": "user", "content": build_prompt(text, args.src, args.dst, "")},
+        ],
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "seed": 42,
+        "stream": False,
+        "chat_template_kwargs": {"enable_thinking": args.think},
+    }
 
 
 def _stream(url: str, body: dict, deadline: float) -> tuple[dict, str | None, dict | None, dict | None, str]:
@@ -169,6 +189,9 @@ def main() -> int:
                     help="send enable_thinking:true (default false = the pipeline default)")
     ap.add_argument("--no-schema", action="store_true",
                     help="drop response_format (schema-vs-free A/B)")
+    ap.add_argument("--single", action="store_true",
+                    help="probe the per-text fallback path instead: one FREE request per text "
+                         "(build_prompt, no schema) — what a failed batch degrades into")
     ap.add_argument("--body", help="replay a captured request-body JSON file instead of composing one")
     ap.add_argument("--endpoint", default=os.getenv("LLAMACPP_ENDPOINT", "http://127.0.0.1:8080"),
                     help="llama-server base URL (default $LLAMACPP_ENDPOINT or http://127.0.0.1:8080)")
@@ -181,17 +204,32 @@ def main() -> int:
 
     if args.body:
         body = json.loads(Path(args.body).read_text(encoding="utf-8"))
-        if args.texts or args.think or args.no_schema:
-            print("(--body replay: texts/--think/--no-schema ignored — the captured body wins)")
+        if args.texts or args.think or args.no_schema or args.single:
+            print("(--body replay: texts/--think/--no-schema/--single ignored — the captured body wins)")
+        bodies: list[tuple[str | None, dict]] = [(None, body)]
+    elif args.single:
+        # The fallback fires one request per bubble — mirror that request-for-request.
+        bodies = [(t, _single_body(t, args)) for t in (args.texts or SAMPLE_TEXTS)]
     else:
-        body = _pipeline_body(args)
+        bodies = [(None, _pipeline_body(args))]
+
+    endpoint = args.endpoint.rstrip("/")
+    for i, (label, body) in enumerate(bodies):
+        if label is not None:
+            print(f"\n── 단일 텍스트 {i}: {label!r}")
+        dump = args.dump and (args.dump if len(bodies) == 1 else f"{args.dump}.{i}")
+        _probe_once(endpoint, body, args, dump)
+    return 0
+
+
+def _probe_once(endpoint: str, body: dict, args: argparse.Namespace, dump: str | None) -> None:
+    """Bound one request, stream it, classify the output."""
     # Bounds — the probe must never become the backlog it is diagnosing.
     prior_cap = body.get("max_tokens")
     body["max_tokens"] = min(prior_cap, args.max_tokens) if isinstance(prior_cap, int) else args.max_tokens
     body["stream"] = True
     body["stream_options"] = {"include_usage": True}
 
-    endpoint = args.endpoint.rstrip("/")
     schema_used = "response_format" in body
     think = (body.get("chat_template_kwargs") or {}).get("enable_thinking")
     print(f"POST {endpoint}/v1/chat/completions  "
@@ -248,14 +286,13 @@ def main() -> int:
         verdict = "본문 장황 — 생각·반복 아님, JSON 형태인데 김. 스키마·프롬프트 내용 점검."
     print(f"  → 판정: {verdict}")
 
-    if args.dump:
-        Path(args.dump).write_text(json.dumps({
+    if dump:
+        Path(dump).write_text(json.dumps({
             "endpoint": endpoint, "body": body, "finish_reason": finish, "aborted": aborted,
             "wall_s": round(wall, 1), "usage": usage, "timings": timings,
             "reasoning_content": r, "content": c,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"  덤프: {args.dump}")
-    return 0
+        print(f"  덤프: {dump}")
 
 
 if __name__ == "__main__":
