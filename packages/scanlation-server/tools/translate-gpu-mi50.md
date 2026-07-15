@@ -233,6 +233,35 @@ budget 플래그를 빼고 재검증(실측):
    - `completion_tokens`가 캡에 걸림 / `reasoning_content` 참 → 모델이 `enable_thinking:false` 무시 → `--reasoning-budget 0` 하드 캡.
 5. 폭주 잡힘 확인(llama 로그의 `n_decoded`가 수십대) 후에야 `run_report` 벤치 — **중간에 죽이지 말 것**(큐 오염). 동시성 스윕은 `run_report --concurrency 1/2/4`.
 
+## 진단 방법론 — 폭주(runaway) 잡기
+
+이 사태의 뿌리는 **번역 폭주(요청당 ~3300토큰, 정상 ~27)** 하나고, 백로그·SIGKILL·hang은 전부 downstream이다. **폭주만 잡으면 연쇄가 통째로 사라진다.** 여태 진단이 안 된 유일한 이유는 **측정 환경이 매번 오염**(백로그/hang)됐기 때문 — 그래서 방법론의 절반은 "깨끗한 측정 확보"다.
+
+**관통 원칙 (어기면 또 헤맨다):**
+1. **한 번에 한 변수** — 폭주 살아있는 채로 동시성·벤치를 건드리지 않는다.
+2. **매 측정 전 큐 비우기** — 백로그 뒤에 밀린 측정은 무효.
+3. **GPU 작업 중 kill/restart 금지** — 드레인하거나 기다린다(hang 방아쇠 제거, §4).
+4. **모든 진단 요청은 bound** — `max_tokens` 캡 + `--max-time`로 프로브 자체가 hang 안 되게.
+5. **레이어 이진탐색** — 모델(curl 직타) ↔ 파이프라인(plugin)을 갈라 어느 층인지 특정한다.
+
+**Phase 0 — 깨끗·안전한 베이스라인.** §복구 런북 그대로(콜드 부팅 → 쿨링 → fresh 기동 → `/health`=ok → `TimeoutStopSec=300`). 진단 중엔 **동시성 1**(한 요청씩).
+
+**Phase 1 — 폭주 격리 (핵심).** 먼저 **배포 drift 확인**(문서 검증 땐 terse였는데 지금 폭주 → 뭔가 바뀐 게 1순위 용의자): 실행 중 ExecStart에 `--reasoning-budget 0` 유무, 설치된 plugin이 `think` 옵션 든 **신버전**인지(옛버전은 `enable_thinking` kwarg 미전송). 그 다음 **이진탐색 2측정:**
+- **A (모델 층)** — llama-server에 직접 curl: schema + `enable_thinking:false` + `max_tokens:300` + `--max-time 120` → `completion_tokens`/`reasoning_content` 확인.
+- **B (파이프라인 층)** — `SCANLATION_LOG_LEVEL=DEBUG` + `run_report`로 **이미지 1장**(동시성1) → 플러그인이 실제 보내는 body + llama 로그 `n_decoded`.
+
+| A(모델) | B(파이프라인) | 결론 |
+|---|---|---|
+| terse | 폭주 | **플러그인 문제** — kwarg/schema 미전송 → 2a |
+| 폭주 | 폭주 | **모델이 `enable_thinking:false` 무시** → 2b |
+
+**Phase 2 — 층에 맞게 고침.**
+- **2a 플러그인**: 신버전 재설치(`think`=`enable_thinking:false` 명시 전송) → `docker restart`(§배포 검증).
+- **2b 모델/템플릿**: `--reasoning-budget 0` 하드 캡(단 /admin 토글 죽음 = Option A 수용).
+- **종료 조건**(공통): 실제 파이프라인 이미지 1장에서 **llama 로그 `n_decoded`가 수십대** = 폭주 죽음 확인.
+
+**Phase 3 — 폭주 잡힌 뒤에야 벤치.** 요청이 짧아지면 백로그·SIGKILL 위험이 사라진다 → llama `--parallel 4` + /admin 동시성 4 + `run_report --concurrency 1/2/4`, 부하 중 `rocm-smi --showtemp --showclocks`로 열·클럭 관찰(89 vs 33 t/s 의문도 여기서 갈림).
+
 ## 남은 일 (TODO)
 
 > 즉시 재개는 위 §복구 런북을 따른다. 아래는 그 외 남은 항목.
