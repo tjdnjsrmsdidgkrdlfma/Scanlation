@@ -168,7 +168,9 @@ budget 플래그를 빼고 재검증(실측):
 
 → **gemma-4도 `enable_thinking`을 정상 존중한다.** free 프롬프트의 373은 reasoning이 아니라 본문 수다(스키마·시스템프롬프트 없어서)고, **파이프라인이 쓰는 schema 경로는 27토큰**으로 terse.
 
-**→ 채택: Option B.** 서버 `--reasoning-budget 0`(하드 캡, /admin 토글을 죽임)을 빼고, **플러그인 `think`(기본 False → `enable_thinking:false`)에 제어를 맡긴다.** 그러면 (1) **/admin 토글이 실제로 작동**, (2) 파이프라인은 스키마로 terse, (3) `enable_thinking` 쓰는 다른 모델도 대응. systemd 유닛에서 `--reasoning-budget 0` 제거함. **주의: 플러그인 재설치 필요** — `think` 옵션(=`enable_thinking:false` 명시 전송)이 든 최신 버전이라야 확실히 off(옛 플러그인은 kwarg 미전송).
+**→ 채택: Option B.** 서버 `--reasoning-budget 0`(하드 캡, /admin 토글을 죽임)을 빼고, **플러그인 `think`(기본 False → `enable_thinking:false`)에 제어를 맡긴다.** 그러면 (1) **/admin 토글이 실제로 작동**, (2) 파이프라인은 스키마로 terse, (3) `enable_thinking` 쓰는 다른 모델도 대응. systemd 유닛에서 `--reasoning-budget 0` 제거함. **플러그인 재설치 필요** — `think` 옵션(=`enable_thinking:false` 명시 전송)이 든 최신 버전이라야 확실히 off(옛 플러그인은 kwarg 미전송).
+
+**배포 검증 (2026-07-15) — end-to-end 작동 확인.** 플러그인 재설치(+ `docker restart scanlation-server`) + budget 제거 후 파이프라인(00.jpg)으로 /admin 토글 확인: **`think`=False → translate 957.9ms, `think`=True → 26641ms(26.6초, 말풍선마다 reasoning)**. **~28배 차이 = 토글이 /admin에서 실제로 제어됨.** 프로덕션은 `think`=False(fast). 옛 플러그인이 깔려 있으면 llama.cpp만 삭제 후 재설치: `docker exec -u 0 scanlation-server rm -rf /plugins/scanlation_llama_cpp*` → /admin 재설치 → `docker restart scanlation-server`.
 
 ### 4. GPU hang 사고 (미복구)
 - llama-server를 **GPU 작업 중 `pkill -9`로 반복 종료** → **amdgpu 컨텍스트 hang**. 프로세스가 D 상태(uninterruptible)로 안 죽고, **VRAM 16.8GB가 프로세스 킬 후에도 반납 안 됨**(`rocm-smi`).
