@@ -2,7 +2,7 @@
 
 작성 2026-07-14. LLM translator를 **MI50(AMD Instinct, gfx906/Vega20, 32GB HBM2)** 에서 돌리기까지의 기록 + 재현 레시피 + 남은 일. 배경(GPU 역할 분리)은 [SCANLATION_DESIGN.md](../../../SCANLATION_DESIGN.md), recognize 쪽 GPU 사정은 [recognize-gpu-speed.md](recognize-gpu-speed.md).
 
-> **상태 (2026-07-14):** raw 모델이 MI50에서 도는 것은 **확인됨**(gemma-4 89 tok/s). 하지만 파이프라인 통합에서 **translate 느림(원인 미확정)** 이슈가 있고, 이후 **GPU hang 사고**(GPU 작업 중 `kill -9` 반복)로 머신이 다운돼 **현재 미완**이다. 상세·재개 순서는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
+> **상태 (2026-07-15):** **작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**, 조치 `--reasoning-budget 0`) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). 로드타임 ~84초는 Vulkan 특성(디스크 아님, §5), GPU hang(§4)은 콜드 부팅으로 복구. 남은 건 **systemd 영속화**([deploy/llama-server.service.example](../../../deploy/llama-server.service.example))와 **어드민 `think` 옵션 서버 검증**(§3). 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
 
 ## 배경 — 왜 MI50인가
 
@@ -132,10 +132,38 @@ raw 모델 검증(위) 이후 실제 파이프라인(`run_report` → 서버 →
 - **깨끗한 측정을 못 냈다.** 죽인 `run_report` 런들의 요청이 llama.cpp 큐에 남아 계속 처리(클라 타임아웃해도 서버는 안 멈춤) → 후속 측정이 백로그 뒤에 밀려 오염. grammar 가설을 확정할 **스키마 유/무 curl 비교**를 결국 못 냈다.
 - **→ 재개 시 1순위: fresh 서버에서 스키마-없는 자유생성 vs 스키마-있는(grammar) curl 시간 비교.** 후자가 수 배~수십 배 느리면 grammar+vocab 확정.
 
+**해결 (2026-07-15) — reasoning 과다생성이 범인. grammar는 무죄.**
+- 콜드 부팅 복구 후 fresh 서버(idle, 큐 깨끗)에서 스키마 유/무 curl: **①6.0s vs ②6.9s (~1s 차)** → **grammar 기각.**
+- 대신 응답 JSON: `completion_tokens: 313` + `reasoning_content` 필드가 가득. gemma-4-26B-A4B는 **reasoning 모델이고 thinking이 켜져 있어**, "2단어 번역"에도 번역 옵션(존댓말/반말/…)을 **300토큰씩 따진 뒤** 짧은 답을 낸다. `timings`: prompt 44ms(113 t/s)·decode 83 t/s로 **prefill·decode 둘 다 정상** → MI50는 빠르고 **모델이 말이 많았을 뿐**. 배치로 가면 말풍선마다 300토큰 → 페이지당 수천 토큰 → 타임아웃 폭발.
+- **플러그인 `strip_think=True`는 생성 뒤 잘라내는 것이라 속도엔 무효** — 생성 자체를 막아야 한다.
+- **조치**: llama-server에 `--reasoning-budget 0`으로 thinking 억제(서버 플래그라 코드 변경 없이 전역 적용). 모델 템플릿이 안 먹으면 요청에 `chat_template_kwargs:{enable_thinking:false}` 또는 `reasoning_effort:none`. **확인법**: 같은 요청의 `completion_tokens`가 300+ → ~5로 떨어지는지.
+- 부산물: 이걸로 **HTTP 타임아웃(10초)·큐 오염 문제도 대부분 해소** — 요청이 빨라지니 타임아웃에 안 걸리고 큐가 안 쌓인다.
+
+**⚠ 디바이스 핀 함정.** 재기동 때 `GGML_VK_VISIBLE_DEVICES=0`을 걸었더니 **MI50가 아니라 lavapipe(CPU Vulkan)/iGPU**를 잡아 **10배 느림**(decode 83→8.5 t/s). llama.cpp Vulkan 열거의 index 0이 MI50가 아니다. **핀 없이 두면 기본 로직이 discrete(MI50)를 자동 선택**한다 → **핀 걸지 말 것**(굳이 걸려면 로그의 디바이스 목록에서 MI50 인덱스 확인 후).
+
+**파이프라인 벤치 (2026-07-15) — 이전 GPU 대비 translate 1.62x.** reasoning off + MI50(핀 없이) 확정 후 같은 21장 챕터로 `run_report`:
+
+| translate | 이전 GPU (ollama, gemma4-26b) | MI50 (llama.cpp, gemma-4-26B-A4B) |
+|---|---|---|
+| 평균 ms | 1509.1 | **932.9** (1.62x) |
+| 중앙값 | 1513.0 | 886.3 (1.71x) |
+| 최대(무거운 페이지) | 2874.8 | 1431.0 (2.0x) |
+| total 평균 | 2505.3 | 1687.8 (1.48x) |
+
+21/21 성공, translate 최대 1431ms(타임아웃 여유 충분). detect+recognize는 양쪽 CPU manga-ocr로 동일(recognize 468→457ms) → **translate 백엔드 교체 효과만 분리**. **HBM2 대역폭이 그대로 숫자로** 나온다 — "decode는 대역폭 바운드"([recognize-gpu-speed.md](recognize-gpu-speed.md))가 translate에서도 재현, 무거운 페이지일수록 이득(최대 2x). 속도만이 아니라 **recognize GPU(9060 XT) 해방**이라는 아키텍처 목표도 달성.
+
+**어드민 reasoning 제어 — 플러그인에 `think` 옵션 추가 (2026-07-15).** [llama.cpp 플러그인](../../scanlation-llama-cpp/scanlation_llama_cpp/plugin.py)의 `strip_think`은 출력을 잘라낼 뿐이라, 생성 자체를 막는 **`think`(bool, 기본 False)** 옵션을 추가했다(ollama의 `think`와 대칭). 요청 body에 `chat_template_kwargs:{enable_thinking: think}`로 전달. **단 모델 chat 템플릿이 그 kwarg를 존중해야 실효** — gemma-4에서 실제 먹는지는 **서버 검증 필요**(플러그인 재설치 후 /admin에서 토글, `completion_tokens` 변하나 확인). 안 먹으면 서버 `--reasoning-budget 0`이 전역 폴백이라 무해. 단위테스트(body shape)는 green.
+
 ### 4. GPU hang 사고 (미복구)
 - llama-server를 **GPU 작업 중 `pkill -9`로 반복 종료** → **amdgpu 컨텍스트 hang**. 프로세스가 D 상태(uninterruptible)로 안 죽고, **VRAM 16.8GB가 프로세스 킬 후에도 반납 안 됨**(`rocm-smi`).
 - warm `reboot` 시도 → 부팅이 amdgpu init에서 멈춘 정황(SSH가 TCP는 받되 검은 화면, 웹 도메인 Cloudflare 521→523). **원격에 전원 제어 수단(스마트 플러그·IPMI)이 없어 콜드 부팅 불가 → 머신 다운 상태로 방치.** (WOL은 켜진 hang 머신을 리셋하지 못함.)
 - **교훈: llama-server를 GPU 작업 중 `kill -9` 금지.** 하드킬이 amdgpu 컨텍스트를 꼬아 **콜드 전원 순환 전까지 GPU가 안 풀린다.** 반드시 systemd로 올려 `systemctl stop`(graceful)만 쓸 것.
+
+### 5. 로드타임 ~84초 — Vulkan 특성(1회성), 디스크 아님
+- 서버 기동 시 모델 로드가 **~84초**(로그 타임스탬프 1.5s→1:24가 통째로 텐서 로드 구간).
+- **디스크가 범인 아님**: 모델은 **NVMe SSD**(`/`=cs-root, Solidigm 1.9TB)에 있어 raw 16GB 읽기면 ~3~5초. `lsblk`상 sda(TOSHIBA 14.6T)는 HDD지만 그건 별개 스토리지고, cs-root는 nvme.
+- **범인 = Vulkan 백엔드 오버헤드**: 가중치를 **스테이징 버퍼 경유로 VRAM 업로드**(ROCm/CUDA 직접 memcpy보다 느림) + 첫 로드 **셰이더/파이프라인 컴파일**. gfx906에서 ROCm이 안 돼 Vulkan을 쓰는 대가의 일부. 멀티모달 projector(`mmproj-BF16.gguf`)도 같이 로드돼 시간 일부 차지(텍스트 번역만이면 스킵 여지, 부차).
+- **핵심: per-request가 아니라 1회성 로드 비용.** 추론은 83 t/s로 빠르다. **systemd 상주면 부팅 때 한 번만** 낸다 → 파이프라인 처리량엔 무영향. (줄이려면: Vulkan 파이프라인 캐시 영속 + mmproj 스킵 — 둘 다 부차.)
 
 ### 복구 런북 (다운 상태에서 재개)
 1. **콜드 부팅**(warm reboot 아님): 전원 완전 차단 후 재투입 — amdgpu hang은 콜드 리셋만 확실히 푼다.
@@ -150,9 +178,9 @@ raw 모델 검증(위) 이후 실제 파이프라인(`run_report` → 서버 →
 > 즉시 재개는 위 §복구 런북을 따른다. 아래는 그 외 남은 항목.
 
 1. **스캔레이션 서버 연결.** 플러그인 설치·엔드포인트 배선은 됨(§통합 시도 1·2). 남은 건 §3의 **translate 느림 해결** — 그게 풀려야 실제 연결 완료. (plugin: [scanlation-llama-cpp](../../scanlation-llama-cpp/scanlation_llama_cpp/plugin.py), OpenAI 호환 `/v1/chat/completions`, 모델 `unsloth/gemma-4-26B-A4B-it-qat-GGUF`.)
-2. **벤치.** `run_report_20260710_111941.md`(전 CPU 실행)와 **같은 챕터 이미지**로 [run_report.py](run_report.py) → `translate_ms` 비교 = "MI50가 CPU 대비 얼마나 빠른가"의 end-to-end 답. (CPU 기준은 `VladimirGav/gemma4-26b`, 이번은 같은 26B-A4B 계열 unsloth QAT — 근사 동일 모델.)
-3. **영속화 (우선순위 상향).** 지금은 `&` 백그라운드라 셸/재부팅에 죽고, 하드킬 시 GPU hang 위험. `systemd` 유닛으로 굳혀 재부팅 생존 + `systemctl stop` graceful 종료(§4 사고 재발 방지).
-4. **MI50 디바이스 핀 확정.** Vulkan이 iGPU/lavapipe를 안 잡도록 `GGML_VK_VISIBLE_DEVICES` 고정 여부 결정.
+2. ~~**벤치.**~~ **완료 (2026-07-15)** — 이전 GPU 대비 translate **1.62x**(§3 파이프라인 벤치). 기준 `run_report_20260710_111941.md`(ollama, 이전 GPU) vs `run_report_mi50_translate.md`(llama.cpp, MI50). 참고: 20260710은 CPU가 아니라 **이전 GPU** 실행이었다.
+3. **영속화.** 유닛 파일 작성됨 → [deploy/llama-server.service.example](../../../deploy/llama-server.service.example)(`--reasoning-budget 0` 박음 + 핀 없음 + SIGTERM graceful). 서버에 복사 + `systemctl enable --now`만 하면 됨. **아직 미배포 — 현재는 `&` 백그라운드.**
+4. ~~**MI50 디바이스 핀 확정.**~~ **결정 (2026-07-15): 핀 없이 자동.** `GGML_VK_VISIBLE_DEVICES=0`이 오히려 lavapipe/iGPU를 잡아 10x 느렸다(§3 함정) — 기본 자동선택이 discrete(MI50)를 고른다.
 5. **최종 토폴로지(9060 XT 재장착 후).** detect=CPU / recognize=9060 XT / **translate=MI50** 물리 병렬. translate는 파이프라인상 이미 gate 밖이라 배포만으로 병렬 활성(코드 변경 불필요, [recognize-gpu-speed.md](recognize-gpu-speed.md) 참조).
 6. **하드코딩 회피 점검.** 엔드포인트·모델·포트 등 조절값은 env 기본 + `/admin` 노출 원칙을 따른다(신규 값 생기면).
 

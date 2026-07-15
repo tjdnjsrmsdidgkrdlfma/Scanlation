@@ -31,6 +31,7 @@ class LlamaCppTranslator(HttpTranslatorBase):
     OPTION_SCHEMA = {
         "model": {"type": str, "default": "", "description": "Model id (from the server's /v1/models). Required — pick it in /admin. (llama-server ignores it; other OpenAI servers require it.)"},
         **COMMON_LLM_OPTIONS,  # temperature, seed, top_p
+        "think": {"type": bool, "default": False, "description": "Enable model 'thinking'/reasoning (slower; off for speed). Sent as chat_template_kwargs.enable_thinking — the model's chat template must honor it; else disable globally via the server's --reasoning-budget 0."},
         "strip_think": {"type": bool, "default": True, "description": "Remove <think>...</think> from reasoning models."},
     }
 
@@ -56,6 +57,11 @@ class LlamaCppTranslator(HttpTranslatorBase):
             "top_p": options["top_p"],
             "seed": options["seed"],
             "stream": False,
+            # Thinking/reasoning toggle -> the model's chat template (Qwen3-style
+            # `enable_thinking`). Off by default: a reasoning model otherwise emits a
+            # long hidden <think> before the answer (much slower). Template-dependent;
+            # if ignored, disable globally with the server's --reasoning-budget 0.
+            "chat_template_kwargs": {"enable_thinking": options["think"]},
         }
 
     def _extract(self, data: dict, options: dict) -> str:

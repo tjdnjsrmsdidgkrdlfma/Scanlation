@@ -1,0 +1,44 @@
+# llama.cpp translate server on the MI50 (gfx906) via the Vulkan backend.
+# Rationale + the whole gfx906 story: packages/scanlation-server/tools/translate-gpu-mi50.md
+#
+# Install (as root on the MI50 host):
+#   cp deploy/llama-server.service.example /etc/systemd/system/llama-server.service
+#   # adjust ExecStart paths / -hf model if yours differ
+#   systemctl daemon-reload && systemctl enable --now llama-server
+#   systemctl status llama-server        # wait for "listening on ... 8080" (cold load ~80s)
+#
+# Stop GRACEFULLY — never `kill -9` a running llama-server: SIGKILL mid-GPU-op
+# hangs the amdgpu context (stuck VRAM, D-state) until a COLD power cycle.
+#   systemctl stop llama-server          # sends SIGTERM (clean GPU teardown)
+#
+# The scanlation server reaches this at LLAMACPP_ENDPOINT (docker-compose.yml:
+# http://host.docker.internal:8080). Pick the model in /admin.
+
+[Unit]
+Description=llama.cpp translate server (MI50/gfx906, Vulkan, gemma-4)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as root so HOME=/root and the -hf HuggingFace cache (/root/.cache/huggingface)
+# matches where the model was first downloaded. A non-root User= also needs the
+# render group (for /dev/dri) and a writable HOME for the HF cache.
+#
+# Notes baked into the flags (see translate-gpu-mi50.md):
+#  - Vulkan backend only needs /dev/dri; no ROCm/kfd (gfx906's ggml-hip/ROCm path
+#    segfaults, so we use Vulkan/RADV which is arch-agnostic).
+#  - NO GGML_VK_VISIBLE_DEVICES pin: llama.cpp auto-picks the discrete GPU (MI50).
+#    Pinning index 0 grabbed lavapipe/iGPU instead -> ~10x slower. Leave it to auto.
+#  - --reasoning-budget 0: gemma-4 is a reasoning model; thinking OFF = terse+fast
+#    translate (on, it emits ~300 hidden reasoning tokens per bubble -> timeouts).
+ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -hf unsloth/gemma-4-26B-A4B-it-qat-GGUF -ngl 99 -c 8192 --reasoning-budget 0 --host 0.0.0.0 --port 8080
+
+# Graceful stop: SIGTERM lets llama-server tear down the GPU context cleanly.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

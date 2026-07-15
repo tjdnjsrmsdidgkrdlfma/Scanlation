@@ -40,6 +40,14 @@ def test_builds_openai_chat_request():
     assert "max_tokens" not in b  # no explicit output cap; model stops at EOS
 
 
+def test_think_toggle_in_body():
+    tr = _translator()
+    tr.translate("こんにちは", "ja", "ko", {"model": "m"})  # default -> off
+    assert tr._captured["chat_template_kwargs"] == {"enable_thinking": False}
+    tr.translate("こんにちは", "ja", "ko", {"model": "m", "think": True})
+    assert tr._captured["chat_template_kwargs"] == {"enable_thinking": True}
+
+
 def test_keep_think_when_disabled():
     tr = LlamaCppTranslator()
     tr._post = lambda path, body: {"choices": [{"message": {"content": "<think>x</think>네"}}]}
@@ -80,6 +88,7 @@ def test_batch_falls_back_on_wrong_length():
 
 TESTS = [
     test_builds_openai_chat_request,
+    test_think_toggle_in_body,
     test_keep_think_when_disabled,
     *http_translator_contract(LlamaCppTranslator, {"choices": [{"message": {"content": "x"}}]}),
     test_batch_builds_response_format_and_aligns,
