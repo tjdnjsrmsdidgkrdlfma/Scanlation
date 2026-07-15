@@ -166,6 +166,7 @@ def build_report(runs: list[dict], settings_summary: dict | None, meta: dict) ->
         "generated_at": meta["generated_at"],
         "server": meta["server"],
         "mode": meta["mode"],          # "serial" | "parallel" (timing is contended when parallel)
+        "concurrency": meta.get("concurrency"),  # in-flight images at once (the A/B sweep label)
         "wall_clock_ms": wall_ms,      # elapsed for the whole run (None if caller didn't time it)
         "skip_translate": meta.get("skip_translate", False),  # recognize-only run (no translation)
         "settings": settings_summary,
@@ -204,7 +205,9 @@ def build_markdown(report: dict) -> str:
     agg = report["aggregate"]
     L.append(f"# 번역 실행 리포트 — {report['generated_at']}")
     L.append("")
+    conc = report.get("concurrency")
     L.append(f"- 서버: `{report['server']}`  ·  모드: **{report['mode']}**"
+             + (f" (동시 {conc})" if conc and conc > 1 else "")
              + ("" if report["mode"] == "serial"
                 else "  ⚠ 병렬 실행이라 lockwait/semwait 등 단계별 시간은 이미지 간 경합으로 오염됨"))
     L.append(f"- 이미지: {agg['images']} (성공 {agg['ok']}, 실패 {agg['failed']})  ·  총 리전 {agg['regions_total']}")
@@ -364,6 +367,11 @@ def main() -> int:
                     help="X-Auth-Token if the server requires one")
     ap.add_argument("--parallel", action="store_true",
                     help="fire all images at once (reproduces concurrent page load; pollutes per-stage timing)")
+    ap.add_argument("--concurrency", type=int, default=None, metavar="K",
+                    help="cap in-flight to K images at once, to sweep translate concurrency across runs "
+                         "(K=1 serial). K>1 only reaches the backend if /admin 동시 번역 이미지 수 >= K AND "
+                         "llama-server --parallel >= K, else the server sem / backend serializes below K. "
+                         "Overrides --parallel.")
     ap.add_argument("--use-cache", action="store_true",
                     help="honor the cache (default: force a fresh run so timing is present)")
     ap.add_argument("--no-translate", action="store_true",
@@ -382,32 +390,43 @@ def main() -> int:
     server = a.server.rstrip("/")
     force = not a.use_cache
     skip_translate = a.no_translate
-    mode = "parallel" if a.parallel else "serial"
     imgs = list(iter_images(a.images))
     if not imgs:
         print("no images found", file=sys.stderr)
         return 1
-    print(f"POST {server}/run_pipeline/  ({len(imgs)} images, {mode}, force={force}"
+    # Effective in-flight concurrency: --concurrency K caps at K images at once; --parallel
+    # = all at once; neither = serial. Clamp to the image count (can't outrun the inputs) —
+    # so a single-image input is always concurrency 1 regardless of the flag.
+    if a.concurrency is not None:
+        workers = max(1, a.concurrency)
+    elif a.parallel:
+        workers = len(imgs)
+    else:
+        workers = 1
+    concurrency = min(workers, len(imgs))
+    mode = "serial" if concurrency <= 1 else "parallel"
+    print(f"POST {server}/run_pipeline/  ({len(imgs)} images, concurrency={concurrency}, force={force}"
           f"{', no-translate' if skip_translate else ''})", file=sys.stderr)
 
     settings_summary = summarize_settings(get_settings(server, a.token))
 
     t0 = time.perf_counter()
-    if a.parallel:
+    if concurrency <= 1:
+        runs = [_run_one(server, a.token, img, force, skip_translate) for img in imgs]
+    else:
         # Key futures by input index, not img.name: rglob can yield the same basename
         # from different folders, and a name-keyed dict would collide (one result lost,
         # another duplicated) while the count still looked right.
-        with ThreadPoolExecutor(max_workers=len(imgs)) as ex:
+        with ThreadPoolExecutor(max_workers=concurrency) as ex:
             futs = {ex.submit(_run_one, server, a.token, img, force, skip_translate): i
                     for i, img in enumerate(imgs)}
             done = {futs[f]: f.result() for f in as_completed(futs)}
         runs = [done[i] for i in range(len(imgs))]  # restore input order
-    else:
-        runs = [_run_one(server, a.token, img, force, skip_translate) for img in imgs]
     wall_clock_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     meta = {"generated_at": datetime.now().isoformat(timespec="seconds"), "server": server,
-            "mode": mode, "skip_translate": skip_translate, "wall_clock_ms": wall_clock_ms}
+            "mode": mode, "concurrency": concurrency, "skip_translate": skip_translate,
+            "wall_clock_ms": wall_clock_ms}
     report = build_report(runs, settings_summary, meta)
 
     prefix = a.out or f"run_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
