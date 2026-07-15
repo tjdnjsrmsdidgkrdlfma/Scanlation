@@ -41,14 +41,19 @@ import json
 import os
 import sys
 import time
+import types
 import urllib.error
 import urllib.request
 from collections import Counter
 from pathlib import Path
 
-# prompt.py is stdlib-only; import it straight from the monorepo so the probe reuses
-# the plugin's real prompt builders + schema instead of a copy that could drift.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scanlation-sdk"))
+# prompt.py (and the context.py it pulls) are stdlib-only, but the package __init__
+# is not — it re-exports the whole SDK, dragging numpy in. Register a stub package
+# that skips __init__.py so the probe reuses the plugin's real prompt builders +
+# schema while staying runnable on a bare GPU host.
+_sdk_pkg = types.ModuleType("scanlation_sdk")
+_sdk_pkg.__path__ = [str(Path(__file__).resolve().parents[2] / "scanlation-sdk" / "scanlation_sdk")]
+sys.modules.setdefault("scanlation_sdk", _sdk_pkg)
 from scanlation_sdk.prompt import (  # noqa: E402
     DEFAULT_SYSTEM_PROMPT,
     batch_schema,
