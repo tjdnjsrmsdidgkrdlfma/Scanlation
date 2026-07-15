@@ -74,7 +74,8 @@ LOOP_SHINGLE, LOOP_TAIL, LOOP_MIN = 24, 2000, 5
 
 def _pipeline_body(args: argparse.Namespace) -> dict:
     """The llama.cpp plugin's request body, same shape as plugin._body() +
-    _translate_batch_call(). Sampling values match COMMON_LLM_OPTIONS defaults."""
+    _translate_batch_call(). Sampling values match the plugin's resolved defaults
+    (COMMON_LLM_OPTIONS + the plugin's dry_multiplier)."""
     texts = args.texts or SAMPLE_TEXTS
     body = {
         "model": args.model,
@@ -85,6 +86,7 @@ def _pipeline_body(args: argparse.Namespace) -> dict:
         "temperature": 0.0,
         "top_p": 1.0,
         "seed": 42,
+        "dry_multiplier": 0.8,
         "stream": False,  # overridden below; kept so a --dump of the body mirrors the plugin
         "chat_template_kwargs": {"enable_thinking": args.think},
     }
@@ -109,6 +111,7 @@ def _single_body(text: str, args: argparse.Namespace) -> dict:
         "temperature": 0.0,
         "top_p": 1.0,
         "seed": 42,
+        "dry_multiplier": 0.8,
         "stream": False,
         "chat_template_kwargs": {"enable_thinking": args.think},
     }

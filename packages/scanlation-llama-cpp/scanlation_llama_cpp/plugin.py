@@ -27,6 +27,7 @@ class LlamaCppTranslator(HttpTranslatorBase):
     OPTION_SCHEMA = {
         "model": {"type": str, "default": "", "description": "Model id (from the server's /v1/models). Required — pick it in /admin. (llama-server ignores it; other OpenAI servers require it.)"},
         **COMMON_LLM_OPTIONS,  # temperature, seed, top_p
+        "dry_multiplier": {"type": float, "default": 0.8, "description": "DRY repetition-penalty strength (0 = off). Stops runaway repetition loops (e.g. an SFX/moan translated as one endlessly repeated syllable under temperature 0) that neither EOS nor the batch JSON grammar can stop."},
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking'/reasoning (slower; off for speed). Sent as chat_template_kwargs.enable_thinking — the model's chat template must honor it; else disable globally via the server's --reasoning-budget 0."},
     }
 
@@ -39,9 +40,9 @@ class LlamaCppTranslator(HttpTranslatorBase):
     def _body(self, model: str, system: str, prompt: str, options: dict) -> dict:
         """The shared chat-completions body. Options arrive already resolved against
         OPTION_SCHEMA (defaults filled + typed) by resolve_options, so this just
-        reads them. No explicit max_tokens — the single path stops at EOS and the
-        batch's JSON grammar bounds its output, matching the ollama backend (which
-        sends no output cap either)."""
+        reads them. No explicit max_tokens (matching the ollama backend) — length
+        is bounded by EOS plus the DRY brake below; a server-side cap (llama-server
+        --n-predict) is the deployment's hard backstop."""
         return {
             "model": model,
             "messages": [
@@ -51,6 +52,12 @@ class LlamaCppTranslator(HttpTranslatorBase):
             "temperature": options["temperature"],
             "top_p": options["top_p"],
             "seed": options["seed"],
+            # DRY repetition brake: greedy decode can lock into one repeated sequence
+            # forever (moan/SFX -> endless "으으…" until the slot context fills); EOS
+            # never comes and the batch grammar can't stop it — in-string repetition
+            # is grammar-legal. DRY penalizes only re-extended repeats, leaving JSON
+            # structure tokens and normal prose intact.
+            "dry_multiplier": options["dry_multiplier"],
             "stream": False,
             # Thinking/reasoning toggle -> the model's chat template (Qwen3-style
             # `enable_thinking`). Off by default: a reasoning model otherwise emits a
@@ -67,7 +74,8 @@ class LlamaCppTranslator(HttpTranslatorBase):
 
     def _translate_batch_call(self, model: str, system: str, prompt: str, schema: dict, options: dict) -> str:
         """Batch: same body plus response_format=json_schema to force the exact
-        JSON shape (which also bounds the output length — no max_tokens needed)."""
+        JSON shape. (The grammar constrains structure, not length — repetition
+        inside a string field is grammar-legal, hence the DRY brake in _body.)"""
         body = self._body(model, system, prompt, options)
         body["response_format"] = {
             "type": "json_schema",

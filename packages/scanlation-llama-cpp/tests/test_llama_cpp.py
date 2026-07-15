@@ -48,6 +48,14 @@ def test_think_toggle_in_body():
     assert tr._captured["chat_template_kwargs"] == {"enable_thinking": True}
 
 
+def test_dry_multiplier_in_body():
+    tr = _translator()
+    tr.translate("こんにちは", "ja", "ko", {"model": "m"})  # default -> repetition brake on
+    assert tr._captured["dry_multiplier"] == 0.8
+    tr.translate("こんにちは", "ja", "ko", {"model": "m", "dry_multiplier": 0.0})  # admin off
+    assert tr._captured["dry_multiplier"] == 0.0
+
+
 def test_batch_builds_response_format_and_aligns():
     tr = LlamaCppTranslator()
     captured: dict = {}
@@ -82,6 +90,7 @@ def test_batch_falls_back_on_wrong_length():
 TESTS = [
     test_builds_openai_chat_request,
     test_think_toggle_in_body,
+    test_dry_multiplier_in_body,
     *http_translator_contract(LlamaCppTranslator, {"choices": [{"message": {"content": "x"}}]}),
     test_batch_builds_response_format_and_aligns,
     test_batch_falls_back_on_wrong_length,
