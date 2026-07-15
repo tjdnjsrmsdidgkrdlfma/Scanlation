@@ -172,6 +172,8 @@ budget 플래그를 빼고 재검증(실측):
 
 **배포 검증 (2026-07-15) — end-to-end 작동 확인.** 플러그인 재설치(+ `docker restart scanlation-server`) + budget 제거 후 파이프라인(00.jpg)으로 /admin 토글 확인: **`think`=False → translate 957.9ms, `think`=True → 26641ms(26.6초, 말풍선마다 reasoning)**. **~28배 차이 = 토글이 /admin에서 실제로 제어됨.** 프로덕션은 `think`=False(fast). 옛 플러그인이 깔려 있으면 llama.cpp만 삭제 후 재설치: `docker exec -u 0 scanlation-server rm -rf /plugins/scanlation_llama_cpp*` → /admin 재설치 → `docker restart scanlation-server`.
 
+**`strip_think` 제거 (2026-07-15).** reasoning 제어가 `think` 토글(생성 단계)로 옮겨졌고, llama.cpp는 reasoning을 `reasoning_content`로 분리해 `content`가 이미 깨끗하므로 사후 `<think>` 스트립(`strip_think`)이 no-op이라 옵션을 제거했다(생성을 못 막는 사후 청소는 무의미). 다른 OpenAI 서버가 `<think>`를 inline으로 흘리는 엣지케이스 방어는 잃지만, 실사용은 llama.cpp 하나라 순손실 없음.
+
 ### 4. GPU hang 사고 (미복구)
 - llama-server를 **GPU 작업 중 `pkill -9`로 반복 종료** → **amdgpu 컨텍스트 hang**. 프로세스가 D 상태(uninterruptible)로 안 죽고, **VRAM 16.8GB가 프로세스 킬 후에도 반납 안 됨**(`rocm-smi`).
 - warm `reboot` 시도 → 부팅이 amdgpu init에서 멈춘 정황(SSH가 TCP는 받되 검은 화면, 웹 도메인 Cloudflare 521→523). **원격에 전원 제어 수단(스마트 플러그·IPMI)이 없어 콜드 부팅 불가 → 머신 다운 상태로 방치.** (WOL은 켜진 hang 머신을 리셋하지 못함.)

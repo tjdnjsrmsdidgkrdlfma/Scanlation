@@ -7,18 +7,14 @@ the ollama backend (shared via scanlation_sdk.prompt), so translations are
 consistent regardless of which backend the GPU happens to like.
 
 Talks `/v1/chat/completions`, so it also works with any OpenAI-compatible server
-(vllm, LM Studio, ollama's own /v1, etc.). Reasoning-model `<think>...</think>`
-spans are stripped (llama.cpp has no ollama-style think:false toggle). The client
-lifecycle + guardrails live in HttpTranslatorBase; only the request body shape +
-response parsing are here.
+(vllm, LM Studio, ollama's own /v1, etc.). Reasoning is controlled by the `think`
+option (chat_template_kwargs.enable_thinking; off by default for speed) — the
+model's chat template must honor it. The client lifecycle + guardrails live in
+HttpTranslatorBase; only the request body shape + response parsing are here.
 """
 from __future__ import annotations
 
-import re
-
 from scanlation_sdk.http_translator import COMMON_LLM_OPTIONS, HttpTranslatorBase
-
-_THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 class LlamaCppTranslator(HttpTranslatorBase):
@@ -32,7 +28,6 @@ class LlamaCppTranslator(HttpTranslatorBase):
         "model": {"type": str, "default": "", "description": "Model id (from the server's /v1/models). Required — pick it in /admin. (llama-server ignores it; other OpenAI servers require it.)"},
         **COMMON_LLM_OPTIONS,  # temperature, seed, top_p
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking'/reasoning (slower; off for speed). Sent as chat_template_kwargs.enable_thinking — the model's chat template must honor it; else disable globally via the server's --reasoning-budget 0."},
-        "strip_think": {"type": bool, "default": True, "description": "Remove <think>...</think> from reasoning models."},
     }
 
     def _models_url(self) -> str:
@@ -64,14 +59,11 @@ class LlamaCppTranslator(HttpTranslatorBase):
             "chat_template_kwargs": {"enable_thinking": options["think"]},
         }
 
-    def _extract(self, data: dict, options: dict) -> str:
-        out = (data.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
-        if options["strip_think"]:
-            out = _THINK.sub("", out)
-        return out.strip()
+    def _extract(self, data: dict) -> str:
+        return ((data.get("choices") or [{}])[0].get("message", {}).get("content", "") or "").strip()
 
     def _translate(self, model: str, system: str, prompt: str, options: dict) -> str:
-        return self._extract(self._post("/v1/chat/completions", self._body(model, system, prompt, options)), options)
+        return self._extract(self._post("/v1/chat/completions", self._body(model, system, prompt, options)))
 
     def _translate_batch_call(self, model: str, system: str, prompt: str, schema: dict, options: dict) -> str:
         """Batch: same body plus response_format=json_schema to force the exact
@@ -81,4 +73,4 @@ class LlamaCppTranslator(HttpTranslatorBase):
             "type": "json_schema",
             "json_schema": {"name": "translations", "schema": schema, "strict": True},
         }
-        return self._extract(self._post("/v1/chat/completions", body), options)
+        return self._extract(self._post("/v1/chat/completions", body))

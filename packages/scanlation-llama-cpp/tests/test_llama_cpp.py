@@ -15,7 +15,7 @@ def _translator() -> LlamaCppTranslator:
     def fake_post(path, body):
         captured.clear()
         captured.update(body)
-        return {"choices": [{"message": {"content": "  <think>음...</think>안녕하세요  "}}]}
+        return {"choices": [{"message": {"content": "  안녕하세요  "}}]}
 
     tr._post = fake_post
     tr._captured = captured
@@ -25,7 +25,7 @@ def _translator() -> LlamaCppTranslator:
 def test_builds_openai_chat_request():
     translator = _translator()
     out = translator.translate("こんにちは", "ja", "ko", {"model": "local-test"})
-    assert out == "안녕하세요"  # stripped + <think> removed
+    assert out == "안녕하세요"  # content trimmed
 
     b = translator._captured
     assert b["model"] == "local-test"  # model from options (admin), no env fallback
@@ -46,13 +46,6 @@ def test_think_toggle_in_body():
     assert tr._captured["chat_template_kwargs"] == {"enable_thinking": False}
     tr.translate("こんにちは", "ja", "ko", {"model": "m", "think": True})
     assert tr._captured["chat_template_kwargs"] == {"enable_thinking": True}
-
-
-def test_keep_think_when_disabled():
-    tr = LlamaCppTranslator()
-    tr._post = lambda path, body: {"choices": [{"message": {"content": "<think>x</think>네"}}]}
-    out = tr.translate("テスト文章", "ja", "ko", {"model": "local-test", "strip_think": False})
-    assert "<think>" in out
 
 
 def test_batch_builds_response_format_and_aligns():
@@ -89,7 +82,6 @@ def test_batch_falls_back_on_wrong_length():
 TESTS = [
     test_builds_openai_chat_request,
     test_think_toggle_in_body,
-    test_keep_think_when_disabled,
     *http_translator_contract(LlamaCppTranslator, {"choices": [{"message": {"content": "x"}}]}),
     test_batch_builds_response_format_and_aligns,
     test_batch_falls_back_on_wrong_length,
