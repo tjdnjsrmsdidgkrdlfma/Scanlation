@@ -4,7 +4,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -hf unsloth/gemma-4-26B-A4B-it-qat-GGUF -ngl 99 -c 8192 --host 0.0.0.0 --port 8080
+ExecStartPre=/usr/bin/rocm-smi -d 0 --setpoweroverdrive 150
+ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -hf unsloth/gemma-4-26B-A4B-it-qat-GGUF -ngl 99 -c 16384 --parallel 4 --n-predict 1024 --host 0.0.0.0 --port 8080
 Restart=on-failure
 
 [Install]
