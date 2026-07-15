@@ -210,7 +210,7 @@ budget 플래그를 빼고 재검증(실측):
   2. unit에 **`TimeoutStopSec` 상향**(예 300)으로 SIGKILL 승격을 늦춘다. 단 백로그가 그보다 길면 여전히 SIGKILL이라 **보장은 아니다**.
   3. 진짜 방패는 **요청이 짧아 SIGTERM에 즉시 빠지는 것**(=폭주 제거) — 그러면 `TimeoutStopSec` 값과 무관하게 stop이 즉시 끝난다.
 
-**§폭주 재발 (2026-07-15) — 원인 미확정.** §3에서 reasoning으로 규명·해결했다고 봤으나, 이날 동시성 벤치 준비 중 **schema 경로인데도 요청당 ~3300토큰으로 다시 폭주**했다. `/admin` think 토글은 off였다. 원인 후보 둘인데 **매 시도가 백로그/hang이라 clean 측정을 못 해 확정 못 함**: (a) 플러그인이 `enable_thinking:false`를 실제로 안 보냄/모델이 무시, (b) `response_format`(schema/grammar)이 출력을 안 잡음. (Option B로 `--reasoning-budget 0` 하드 캡을 뺀 뒤라 per-request 억제가 안 먹으면 막을 게 없다 — 배포 유닛의 budget 플래그 유무도 확인 대상, 아래 TODO 3의 상태 불일치 참고.) **복구 후 최우선 확인**(아래 런북 4번).
+**§폭주 재발 (2026-07-15) — 원인 미확정.** §3에서 reasoning으로 규명·해결했다고 봤으나, 이날 동시성 벤치 준비 중 **schema 경로인데도 요청당 ~3300토큰으로 다시 폭주**했다. `/admin` think 토글은 off였다. 원인 후보 셋인데 **매 시도가 백로그/hang이라 clean 측정을 못 해 확정 못 함**: (a) thinking이 실제로 안 꺼짐 — 플러그인이 `enable_thinking:false`를 안 보내거나 모델이 무시(reasoning은 grammar **밖**에서 생성되므로 schema 경로여도 못 막는다), (b) `response_format`(schema/grammar)이 요청에 안 실림/미적용, (c) 문자열 필드 안 **반복 루프** — grammar는 JSON 구조만 강제하고 문자열 내용은 못 잡으므로 schema가 정상 적용돼도 폭주와 모순이 아니다. **폭주의 내용물은 아직 아무도 못 봤다** — 파이프라인은 최종 결과만 보이고, 안 끝나는 요청은 클라이언트에 아무것도 안 남긴다. 그래서 내용물 분류가 진단 1순위다([tools/diag_runaway.py](diag_runaway.py), §진단 방법론 Phase 1). (Option B로 `--reasoning-budget 0` 하드 캡을 뺀 뒤라 per-request 억제가 안 먹으면 막을 게 없다 — 배포 유닛의 budget 플래그 유무도 확인 대상, 아래 TODO 3의 상태 불일치 참고.) **복구 후 최우선 확인**(아래 런북 4번).
 
 **폭주 격리 — HTTP 타임아웃으론 못 막는다, 서버측 `max_tokens`라야.** `SCANLATION_HTTP_TIMEOUT`은 **클라만 포기시키지 llama-server의 생성을 안 멈춘다**(서버는 EOS나 슬롯 컨텍스트까지 계속 태움 — 클라 타임아웃 뒤에도 GPU는 요청당 ~120초를 태워 백로그가 쌓인다). 그래서 타임아웃 값(10초든 120초든)으로는 폭주의 GPU 소모·백로그를 격리 못 한다. 실제로 서버가 멈추는 건 요청의 **`max_tokens`**(현재 plugin 미전송)뿐이다. 단 이건 **`n_ctx_slot`보다 낮아야** 의미가 있다 — `-c 16384 --parallel 4`면 슬롯당 4096이라 **4096 캡은 무효**(어차피 4096까지 태움), **1024급**이라야 GPU 시간을 실제로 줄인다(약 32초). 대가는 텍스트 많은 정상 페이지 truncation이므로 **폭주 제거가 본선, 낮은 `max_tokens`는 보조 방어선**(넣으면 하드코딩 말고 env 기본+`/admin` — TODO 7). 한국어 출력은 대략 1토큰 ≈ 1.5~2.5글자라 1024 ≈ 2000자 수준(실측 권장: `completion_tokens ÷ 글자수`).
 
@@ -228,9 +228,10 @@ budget 플래그를 빼고 재검증(실측):
 2. `rocm-smi --showmeminfo vram`로 VRAM used ~0.2GB(깨끗) 확인.
    - ⚠ **쿨링부터 확보** — 재부하 전 케이스 팬 켜고/카드 팬 확인(§MI50 쿨링). 과열이 hang·스로틀링의 밑그림일 수 있어, 냉각 없이 다시 부하 주면 원인 규명이 오염되고 카드도 위험하다.
 3. **재기동 전 안전장치**: unit에 `TimeoutStopSec=300` 추가(SIGKILL 승격 지연, §4 2차). `--reasoning-budget 0`(폭주 하드 캡)은 /admin think 토글을 무력화하므로 **4번에서 원인을 가른 뒤** 결정.
-4. **폭주 원인 확정 (최우선)** — 큐 빈 fresh 서버에서 **schema + `enable_thinking:false` curl 하나**(`--max-time`·`max_tokens` 캡으로 안 매달리게):
+4. **폭주 원인 확정 (최우선)** — 큐 빈 fresh 서버에서 **schema + `enable_thinking:false` 프로브 하나**: [tools/diag_runaway.py](diag_runaway.py)(스트리밍 + `max_tokens` 캡 내장이라 안 매달리고, 폭주 내용물까지 분류):
    - `completion_tokens` 수십 + `reasoning_content` 빔 → 모델·스키마 정상 → **파이프라인(플러그인)이 kwarg/스키마를 안 보내는 것** → 플러그인 재설치(§배포 검증).
-   - `completion_tokens`가 캡에 걸림 / `reasoning_content` 참 → 모델이 `enable_thinking:false` 무시 → `--reasoning-budget 0` 하드 캡.
+   - `completion_tokens`가 캡에 걸림 + `reasoning_content` 참 → 모델이 `enable_thinking:false` 무시 → `--reasoning-budget 0` 하드 캡.
+   - content 안에서 같은 구절 반복(루프) → 샘플링 문제 → repeat/presence penalty 조절(§진단 방법론 2c).
 5. 폭주 잡힘 확인(llama 로그의 `n_decoded`가 수십대) 후에야 `run_report` 벤치 — **중간에 죽이지 말 것**(큐 오염). 동시성 스윕은 `run_report --concurrency 1/2/4`.
 
 ## 진단 방법론 — 폭주(runaway) 잡기
@@ -247,17 +248,20 @@ budget 플래그를 빼고 재검증(실측):
 **Phase 0 — 깨끗·안전한 베이스라인.** §복구 런북 그대로(콜드 부팅 → 쿨링 → fresh 기동 → `/health`=ok → `TimeoutStopSec=300`). 진단 중엔 **동시성 1**(한 요청씩).
 
 **Phase 1 — 폭주 격리 (핵심).** 먼저 **배포 drift 확인**(문서 검증 땐 terse였는데 지금 폭주 → 뭔가 바뀐 게 1순위 용의자): 실행 중 ExecStart에 `--reasoning-budget 0` 유무, 설치된 plugin이 `think` 옵션 든 **신버전**인지(옛버전은 `enable_thinking` kwarg 미전송). 그 다음 **이진탐색 2측정:**
-- **A (모델 층)** — llama-server에 직접 curl: schema + `enable_thinking:false` + `max_tokens:300` + `--max-time 120` → `completion_tokens`/`reasoning_content` 확인.
+- **A (모델 층)** — [tools/diag_runaway.py](diag_runaway.py)로 llama-server 직타(플러그인과 동일 body를 조립, `--body`로 캡처한 body 재생도 됨). **미완성 응답도 내용이 보인다**: ① `max_tokens` 캡이 "안 끝나는 요청"을 "잘렸지만 완료"(`finish_reason:length`)로 바꿔 부분 출력을 통째로 반환하고, ② `stream:true`라 생성되는 토큰이 실시간 출력된다(중단돼도 받은 만큼 남음). 스크립트가 내용물을 생각(`reasoning_content`)/반복(문자열 루프)/schema 미적용(content가 JSON 아님)으로 분류해 준다.
 - **B (파이프라인 층)** — `SCANLATION_LOG_LEVEL=DEBUG` + `run_report`로 **이미지 1장**(동시성1) → 플러그인이 실제 보내는 body + llama 로그 `n_decoded`.
 
 | A(모델) | B(파이프라인) | 결론 |
 |---|---|---|
 | terse | 폭주 | **플러그인 문제** — kwarg/schema 미전송 → 2a |
-| 폭주 | 폭주 | **모델이 `enable_thinking:false` 무시** → 2b |
+| 폭주 | 폭주 | **모델/샘플링 층** — 내용물로 가름: reasoning→2b, 반복→2c |
+
+A가 폭주면 내용물로 다시 가른다: `reasoning_content`가 크면 **생각**(→2b), content 안에서 같은 구절이 돌면 **반복**(→2c), content가 스키마 JSON 형태가 아니면 **schema 미적용**(→2a).
 
 **Phase 2 — 층에 맞게 고침.**
 - **2a 플러그인**: 신버전 재설치(`think`=`enable_thinking:false` 명시 전송) → `docker restart`(§배포 검증).
 - **2b 모델/템플릿**: `--reasoning-budget 0` 하드 캡(단 /admin 토글 죽음 = Option A 수용).
+- **2c 반복 루프**: repeat/presence/frequency penalty(또는 DRY 샘플러)를 플러그인 옵션으로 노출(env 기본 + `/admin` — 하드코딩 금지). 과한 값은 grammar의 구조 토큰(따옴표·쉼표)까지 벌점을 먹여 JSON을 깨니 보수적으로.
 - **종료 조건**(공통): 실제 파이프라인 이미지 1장에서 **llama 로그 `n_decoded`가 수십대** = 폭주 죽음 확인.
 
 **Phase 3 — 폭주 잡힌 뒤에야 벤치.** 요청이 짧아지면 백로그·SIGKILL 위험이 사라진다 → llama `--parallel 4` + /admin 동시성 4 + `run_report --concurrency 1/2/4`, 부하 중 `rocm-smi --showtemp --showclocks`로 열·클럭 관찰(89 vs 33 t/s 의문도 여기서 갈림).
