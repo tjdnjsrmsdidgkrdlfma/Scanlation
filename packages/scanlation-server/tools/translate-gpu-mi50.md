@@ -2,7 +2,8 @@
 
 작성 2026-07-14. LLM translator를 **MI50(AMD Instinct, gfx906/Vega20, 32GB HBM2)** 에서 돌리기까지의 기록 + 재현 레시피 + 남은 일. 배경(GPU 역할 분리)은 [SCANLATION_DESIGN.md](../../../SCANLATION_DESIGN.md), recognize 쪽 GPU 사정은 [recognize-gpu-speed.md](recognize-gpu-speed.md).
 
-> **상태 (2026-07-15):** **작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). 로드타임 ~84초는 Vulkan 특성(디스크 아님, §5), GPU hang(§4)은 콜드 부팅으로 복구. **reasoning 제어는 Option B** — 서버 `--reasoning-budget 0` 대신 플러그인 `enable_thinking`(기본 off)으로 제어해 /admin 토글이 실제로 작동(§3). 남은 건 **systemd 영속화**([deploy/llama.cpp.service.example](../../../deploy/llama.cpp.service.example)) + **플러그인 재설치**(think 옵션). 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
+> **상태 (2026-07-15):** ⚠ **동시성 벤치 준비 중 2차 GPU hang·폭주 재발** — 번역이 schema 경로인데도 다시 폭주(요청당 ~3300토큰)→백로그→`systemctl restart`의 SIGKILL로 amdgpu hang(§4 2차, 현재 hang). **복구=콜드 부팅**, 이후 **폭주 원인 재확정이 최우선**(§복구 런북 4 — Option B의 per-request 억제가 실효였는지 재검증). 이하는 그 전까지 확립된 사실:
+> **작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). 로드타임 ~84초는 Vulkan 특성(디스크 아님, §5), GPU hang(§4)은 콜드 부팅으로 복구. **reasoning 제어는 Option B** — 서버 `--reasoning-budget 0` 대신 플러그인 `enable_thinking`(기본 off)으로 제어해 /admin 토글이 실제로 작동(§3). 남은 건 **systemd 영속화**([deploy/llama.cpp.service.example](../../../deploy/llama.cpp.service.example)) + **플러그인 재설치**(think 옵션). 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
 
 ## 배경 — 왜 MI50인가
 
@@ -174,10 +175,34 @@ budget 플래그를 빼고 재검증(실측):
 
 **`strip_think` 제거 (2026-07-15).** reasoning 제어가 `think` 토글(생성 단계)로 옮겨졌고, llama.cpp는 reasoning을 `reasoning_content`로 분리해 `content`가 이미 깨끗하므로 사후 `<think>` 스트립(`strip_think`)이 no-op이라 옵션을 제거했다(생성을 못 막는 사후 청소는 무의미). 다른 OpenAI 서버가 `<think>`를 inline으로 흘리는 엣지케이스 방어는 잃지만, 실사용은 llama.cpp 하나라 순손실 없음.
 
-### 4. GPU hang 사고 (미복구)
+### 4. GPU hang 사고 — 하드킬/SIGKILL이 amdgpu를 꼰다 (2회)
+
+**1차 (kill -9 직접).**
 - llama-server를 **GPU 작업 중 `pkill -9`로 반복 종료** → **amdgpu 컨텍스트 hang**. 프로세스가 D 상태(uninterruptible)로 안 죽고, **VRAM 16.8GB가 프로세스 킬 후에도 반납 안 됨**(`rocm-smi`).
-- warm `reboot` 시도 → 부팅이 amdgpu init에서 멈춘 정황(SSH가 TCP는 받되 검은 화면, 웹 도메인 Cloudflare 521→523). **원격에 전원 제어 수단(스마트 플러그·IPMI)이 없어 콜드 부팅 불가 → 머신 다운 상태로 방치.** (WOL은 켜진 hang 머신을 리셋하지 못함.)
-- **교훈: llama-server를 GPU 작업 중 `kill -9` 금지.** 하드킬이 amdgpu 컨텍스트를 꼬아 **콜드 전원 순환 전까지 GPU가 안 풀린다.** 반드시 systemd로 올려 `systemctl stop`(graceful)만 쓸 것.
+- warm `reboot` 시도 → 부팅이 amdgpu init에서 멈춘 정황(SSH가 TCP는 받되 검은 화면, 웹 도메인 Cloudflare 521→523). **원격에 전원 제어 수단(스마트 플러그·IPMI)이 없어 콜드 부팅 불가 → 머신 다운 상태로 방치.** (WOL은 켜진 hang 머신을 리셋하지 못함.) 이후 콜드 부팅으로 복구.
+- **교훈: GPU 작업 중 `kill -9` 금지.** 하드킬이 amdgpu 컨텍스트를 꼬아 **콜드 전원 순환 전까지 GPU가 안 풀린다.**
+
+**2차 (2026-07-15) — `systemctl restart`도 SIGKILL로 끝날 수 있다.** 1차 교훈("systemd로 `systemctl stop`만 쓰면 안전")은 **불완전했다.** 이번엔 systemctl로 껐는데도 같은 hang이 났다.
+- **연쇄**: 번역 **폭주**(요청당 ~3300토큰·~120초, 아래 §폭주 재발) → `run_report`가 여러 페이지 동시 발사 → llama-server 큐 **백로그**(클라가 타임아웃해도 서버는 계속 처리, §3) → 백로그 낀 채 `systemctl restart` → SIGTERM이 **기본 `TimeoutStopSec` 90초** 안에 안 끝남 → **systemd가 자동으로 SIGKILL 승격** → GPU 작업 중 강제종료 → amdgpu hang. **즉 SIGKILL을 때린 건 사용자가 아니라 systemd다.**
+- **로그 — systemd의 SIGKILL 승격**(Stopping→90초→Killing):
+  ```
+  15:37:38 systemd: Stopping llama.cpp.service...              ← systemctl restart = SIGTERM
+  15:39:08 systemd: State 'stop-sigterm' timed out. Killing.   ← 정확히 90초(DefaultTimeoutStopSec)
+  15:39:08 systemd: Killing process 51590 (llama-server) with signal SIGKILL.
+  15:39:09 systemd: Main process exited, code=killed, status=9/KILL
+  ```
+- **로그 — 폭주**(EOS 없이 감, 클라가 ~120초에 취소, 이후 cancel이 ~2분 간격 반복 = 백로그):
+  ```
+  15:25:33 slot print_timing: task 4324 | n_decoded = 3294, tg = 32.13 t/s   ← 정상은 ~27토큰
+  15:25:51 srv  stop: cancel task, id_task = 4324
+  ```
+- **로그 — hang·소프트 리셋 무효**: SIGKILL 뒤 `rocm-smi`가 **VRAM 16.87GB를 계속 물고 있음**(프로세스 없음). `rocm-smi --gpureset -d 0`은 `Successfully reset GPU 0`을 찍지만 **VRAM은 바이트까지 그대로**(2회 시도 무효) → **소프트 리셋으로 안 풀린다. 콜드 부팅만이 해결.**
+- **교훈(갱신)**: `kill -9`뿐 아니라 **`systemctl restart/stop`도 프로세스가 `TimeoutStopSec`(기본 90초) 안에 못 빠지면 SIGKILL로 끝난다** → 겉보기 graceful이 GPU hang을 낸다. 그러므로
+  1. **부하·백로그 중엔 restart 금지** — 먼저 `run_report` 등 부하를 멈추고 큐가 빠진 뒤 stop.
+  2. unit에 **`TimeoutStopSec` 상향**(예 300)으로 SIGKILL 승격을 늦춘다. 단 백로그가 그보다 길면 여전히 SIGKILL이라 **보장은 아니다**.
+  3. 진짜 방패는 **요청이 짧아 SIGTERM에 즉시 빠지는 것**(=폭주 제거) — 그러면 `TimeoutStopSec` 값과 무관하게 stop이 즉시 끝난다.
+
+**§폭주 재발 (2026-07-15) — 원인 미확정.** §3에서 reasoning으로 규명·해결했다고 봤으나, 이날 동시성 벤치 준비 중 **schema 경로인데도 요청당 ~3300토큰으로 다시 폭주**했다. `/admin` think 토글은 off였다. 원인 후보 둘인데 **매 시도가 백로그/hang이라 clean 측정을 못 해 확정 못 함**: (a) 플러그인이 `enable_thinking:false`를 실제로 안 보냄/모델이 무시, (b) `response_format`(schema/grammar)이 출력을 안 잡음. (Option B로 `--reasoning-budget 0` 하드 캡을 뺀 뒤라 per-request 억제가 안 먹으면 막을 게 없다 — 배포 유닛의 budget 플래그 유무도 확인 대상, 아래 TODO 3의 상태 불일치 참고.) **복구 후 최우선 확인**(아래 런북 4번).
 
 ### 5. 로드타임 ~84초 — Vulkan 특성(1회성), 디스크 아님
 - 서버 기동 시 모델 로드가 **~84초**(로그 타임스탬프 1.5s→1:24가 통째로 텐서 로드 구간).
@@ -185,13 +210,15 @@ budget 플래그를 빼고 재검증(실측):
 - **범인 = Vulkan 백엔드 오버헤드**: 가중치를 **스테이징 버퍼 경유로 VRAM 업로드**(ROCm/CUDA 직접 memcpy보다 느림) + 첫 로드 **셰이더/파이프라인 컴파일**. gfx906에서 ROCm이 안 돼 Vulkan을 쓰는 대가의 일부. 멀티모달 projector(`mmproj-BF16.gguf`)도 같이 로드돼 시간 일부 차지(텍스트 번역만이면 스킵 여지, 부차).
 - **핵심: per-request가 아니라 1회성 로드 비용.** 추론은 83 t/s로 빠르다. **systemd 상주면 부팅 때 한 번만** 낸다 → 파이프라인 처리량엔 무영향. (줄이려면: Vulkan 파이프라인 캐시 영속 + mmproj 스킵 — 둘 다 부차.)
 
-### 복구 런북 (다운 상태에서 재개)
-1. **콜드 부팅**(warm reboot 아님): 전원 완전 차단 후 재투입 — amdgpu hang은 콜드 리셋만 확실히 푼다.
+### 복구 런북 (hang 상태에서 재개)
+0. **소프트 리셋 먼저**(무해): `systemctl stop llama.cpp` → `pgrep -a llama-server`(잔여 없음 확인) → `rocm-smi --gpureset -d 0` → `rocm-smi --showmeminfo vram`. VRAM이 ~0.2GB로 떨어지면 복구, **그대로면**(2차 사례가 이것) 1번.
+1. **콜드 부팅**(warm reboot 아님): 전원 완전 차단 후 재투입 — amdgpu hang은 콜드 리셋만 확실히 푼다. ⚠ 원격이면 **강제 전원 차단 수단(IPMI·스마트플러그·물리 접근)을 먼저 확인** — warm `reboot`은 amdgpu init에서 멈춰 머신을 원격 다운시킬 수 있다(1차 사례).
 2. `rocm-smi --showmeminfo vram`로 VRAM used ~0.2GB(깨끗) 확인.
-3. llama-server를 **systemd 유닛**으로 (graceful stop + MI50 핀). ← TODO 3과 통합, 이걸 먼저.
-4. fresh 서버에서 **스키마 유/무 curl 시간 비교**(위 §3) → translate 느림 원인 확정.
-5. 원인별 조치: 타임아웃만 올리면 되는지(`SCANLATION_HTTP_TIMEOUT`↑, 코드 규칙상 `/admin` 노출도 검토) vs grammar 회피(플러그인 코드) vs 더 작은 모델(gemma-4-12B 등).
-6. 그다음 `run_report` 벤치 — **중간에 죽이지 말 것**(큐 오염).
+3. **재기동 전 안전장치**: unit에 `TimeoutStopSec=300` 추가(SIGKILL 승격 지연, §4 2차). `--reasoning-budget 0`(폭주 하드 캡)은 /admin think 토글을 무력화하므로 **4번에서 원인을 가른 뒤** 결정.
+4. **폭주 원인 확정 (최우선)** — 큐 빈 fresh 서버에서 **schema + `enable_thinking:false` curl 하나**(`--max-time`·`max_tokens` 캡으로 안 매달리게):
+   - `completion_tokens` 수십 + `reasoning_content` 빔 → 모델·스키마 정상 → **파이프라인(플러그인)이 kwarg/스키마를 안 보내는 것** → 플러그인 재설치(§배포 검증).
+   - `completion_tokens`가 캡에 걸림 / `reasoning_content` 참 → 모델이 `enable_thinking:false` 무시 → `--reasoning-budget 0` 하드 캡.
+5. 폭주 잡힘 확인(llama 로그의 `n_decoded`가 수십대) 후에야 `run_report` 벤치 — **중간에 죽이지 말 것**(큐 오염). 동시성 스윕은 `run_report --concurrency 1/2/4`.
 
 ## 남은 일 (TODO)
 
