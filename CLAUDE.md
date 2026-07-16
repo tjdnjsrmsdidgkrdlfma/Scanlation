@@ -19,6 +19,7 @@
 ## 커밋·푸시
 - **커밋 메시지 언어: 제목은 영어(필수), 본문은 자유.** 제목(subject)은 `type(scope): English subject`(conventional commits) — grep·`git log`에 바로 보이니 영어로 통일한다. 본문(body)은 **언어 강제 없음**(영어·한국어 무방, 영어가 더 깔끔). 위 커뮤니케이션의 "모든 출력 한국어"는 **커밋 메시지엔 적용하지 않는다.**
 - 커밋하면 **같은 흐름에서 바로 `git push origin main`까지** 한다. "푸시할까요?"를 매번 따로 묻지 않는다. 커밋 지시나 계획 승인 후 구현이 끝나면 테스트 green 확인 → 커밋 → push → 결과(`old..new` 해시) 보고. force push·히스토리 재작성 등 되돌리기 어려운 경우만 예외적으로 먼저 확인. (솔로 프로젝트라 main 직접 커밋+푸시가 기본.)
+- **`Co-Authored-By` 트레일러 필수.** 커밋 메시지 끝에 `Co-Authored-By: Claude <모델명> <noreply@anthropic.com>`(예: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`)을 넣는다. 기기에 따라 자동으로 안 붙을 수 있으니 설정에 기대지 말고 메시지에 직접 쓴다.
 
 ## 메모리
 - `.claude` 자동 메모리는 이 기기의 `~/.claude`에만 저장돼 **회사 PC·집 PC·리눅스 서버 간 동기화되지 않는다.** 지속 지침은 커밋되는 파일에 둔다: 응답 방식 → 이 CLAUDE.md, 프로젝트 사실·설계·워크플로 → [README.md](README.md) / [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md). `.claude/.../memory/`에 새로 저장하지 않는다.
