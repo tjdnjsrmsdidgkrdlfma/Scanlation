@@ -147,11 +147,13 @@ def main() -> int:
         return 0
 
     url = f"{args.endpoint.rstrip('/')}/v1/chat/completions"
-    if not args.no_warmup:
-        wall, _ = _run_pass(url, bodies, 2, args.timeout)
-        print(f"warmup: {wall:.2f}s (untimed pass — equalizes llama's slot prompt cache)")
-
     plist = [int(x) for x in args.concurrency.split(",")]
+    if not args.no_warmup:
+        # Warm at the highest P being measured: a lower-P warmup can leave some of
+        # llama's slots cold, taxing the first requests of a higher-P timed pass
+        # with the full prompt-prefix prefill (biases high P down).
+        wall, _ = _run_pass(url, bodies, max(plist), args.timeout)
+        print(f"warmup: P={max(plist)} {wall:.2f}s (untimed — equalizes slot cache + pre-heat)")
     for p in plist:
         for r in range(args.repeat):
             wall, toks = _run_pass(url, bodies, p, args.timeout)
