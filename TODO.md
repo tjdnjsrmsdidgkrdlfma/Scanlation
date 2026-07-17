@@ -21,6 +21,12 @@ ollama처럼 /admin에서 여러 모델을 오가고 싶어지면 [llama-swap](h
 
 - [ ] 필요해지면 llama-swap YAML(모델→실행 커맨드) + systemd 구성. 대가: 스왑 시 ~80초 콜드 로드, 기본은 한 번에 한 모델.
 
+## recognize 게이트 — 이미지 수(K)가 아니라 크롭 예산으로 (선택, 분포가 요구하면)
+
+recognize 게이트는 지금 **이미지 K장**을 들여보내는데(프로덕션 W=4·K=2, [recognize-gpu-speed.md](packages/scanlation-server/tools/recognize-gpu-speed.md) §크로스이미지 오버랩), 워커 풀을 채우는 실제 단위는 **크롭**이다. 그래서 공급 = K × 페이지당 크롭 수가 되어, **1크롭 페이지 위주 자료에선 K2 공급(2크롭)이 W4의 절반 = 사실상 W4K1**로 퇴화한다(경계 겹침 몇 %만 남음). 근본 형태는 detect가 낸 크롭을 큐에 넣고 **in-flight 크롭 수가 W에 찰 때까지 이미지를 들여보내는 크롭 예산 게이트** — K 다이얼이 없어지고 크롭 분포에 자동 적응한다. (풀 작업 큐 자체는 이미 크롭 단위 공유 FIFO — 부족한 건 상류 admission이 이미지 수를 세는 것뿐.)
+
+- [ ] 당장은 대응 노브 존재: 1크롭 위주 자료면 /admin에서 K를 `W ÷ 평균 크롭`(=4)으로. 크롭 예산 게이트는 **그런 자료가 실사용에 실재할 때** 구현(그 전엔 과설계) — 9060 XT 재장착 후 실사용 크롭 분포 확인이 선행.
+
 ## 참고 — translate/MI50 남은 배포
 
 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md)의 "남은 일"/"복구 런북" 참조:
