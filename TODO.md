@@ -33,3 +33,10 @@ recognize 게이트는 지금 **이미지 K장**을 들여보내는데(프로덕
 
 - [x] ~~systemd 상주 전환~~ **완료 (2026-07-15)** — `llama.cpp.service` active·enabled(재부팅 생존) + budget 플래그 없음(Option B). [deploy/llama.cpp.service.example](deploy/llama.cpp.service.example)
 - [ ] MI50 최종 토폴로지 — 9060 XT 재장착 후 recognize(9060)∥translate(MI50) 물리 병렬(translate는 이미 gate 밖이라 배포만으로 활성).
+
+## 로컬 LLM 웹 텍스트 번역 (아이디어)
+
+상시 상주 중인 MI50 translator(gemma-4)를 임의 웹 페이지 텍스트 번역에 재사용하는 별도 프로젝트. 지금은 구글 번역 확장으로 대체 중. 재사용 자산이 크다 — translator 엔드포인트(llama.cpp/ollama) + SDK [`http_translator`](packages/scanlation-sdk/scanlation_sdk/http_translator.py)·배칭·동시성, MV2 확장 뼈대(popup·content script·DOM 주입). **스코프는 온디맨드·선택영역**으로 가는 게 맞다: 실시간 전체 페이지 자동번역은 구글이 우위(즉시성·언어 커버리지·인플레이스 UX)이고 MI50 한 장으론 못 따라간다(웹 한 장 수천 토큰 → 약 89 t/s로도 통째 번역엔 수~수십 초). LLM의 이점은 속도가 아니라 **품질**(문맥·뉘앙스·튜닝된 레지스터)·**프라이버시**(외부 미전송). 진짜 난도는 번역이 아니라 **임의 페이지 DOM 텍스트 추출·재삽입**(인라인 태그 보존, SPA·iframe·shadow DOM, 수천 노드 청킹/재주입)이고, 만화 파이프라인과 같은 MI50를 공유하므로 동시 사용 시 경합한다.
+
+- [ ] MVP — 우클릭 "선택 영역을 로컬 LLM으로 번역". 확장 뼈대+translator 재사용, 전체-DOM 문제 우회, 품질 이점만 취함. 만족 시 글(article) 단위 → 전체 페이지 순 확대.
+- [ ] 레포 위치 결정 — 별도 레포 vs 이 모노레포에 얹기.
