@@ -1,8 +1,8 @@
 """Mutable selection state + runtime concurrency primitives.
 
 Selection (which engine per role, src/dst langs, per-engine option overrides) is
-persisted to a small json so restarts keep the user's choice. The GPU lock and
-in-flight dedupe map are runtime-only.
+persisted to a small json so restarts keep the user's choice. The inference gate
+and in-flight dedupe map are runtime-only.
 """
 from __future__ import annotations
 
@@ -97,13 +97,13 @@ class Selection:
     # Seeded from SCANLATION_LOG_LEVEL (DEBUG -> on), toggled at runtime in /admin
     # (동작 tab) and re-applied to the scanlation logger without a restart.
     verbose_log: bool = settings.log_level.upper() == "DEBUG"
-    # Max images translating concurrently off the GPU lock (bounds how many the
+    # Max images translating concurrently off the inference gate (bounds how many the
     # server sends to ollama at once). Seeded from SCANLATION_TRANSLATE_CONCURRENCY
     # (floor 1), edited in /admin (동작 tab) and applied at runtime by swapping
     # translate_sem (see AppState.set_client_config).
     # Default 1 is the safe floor: it never exceeds ollama's OLLAMA_NUM_PARALLEL
     # (whatever it is), so no request queues into a timeout. Even at 1 the translate
-    # overlaps the next image's detect+recognize (it runs off the GPU lock). Parallel
+    # overlaps the next image's detect+recognize (it runs off the inference gate). Parallel
     # GENERATION is opt-in: raise this AND OLLAMA_NUM_PARALLEL together (the lower of
     # the two = real parallelism; ollama can't be queried, so keeping them in sync is manual).
     translate_concurrency: int = settings.translate_concurrency
@@ -144,7 +144,7 @@ class AppState:
         # to separate worker processes and is safe; detect stays serial — it's a small
         # slice of the half, so serializing it costs little overlap).
         self.detect_lock = threading.Lock()
-        # Bound concurrent translations (they run off the GPU lock) so many
+        # Bound concurrent translations (they run off the inference gate) so many
         # in-flight images don't overrun the ollama backend's parallel slots.
         # Seeded from the persisted selection; swapped at runtime by set_client_config.
         self.translate_sem = asyncio.Semaphore(self.selection.translate_concurrency)
