@@ -17,8 +17,6 @@ from PIL import Image
 
 from scanlation_sdk.testing import run, run_modules  # re-export; tests import these from here
 
-__all__ = ["png_b64", "md5_of", "payload", "client", "run", "run_modules"]
-
 
 def png_b64(width: int = 400, height: int = 300, color=(255, 255, 255)) -> str:
     img = Image.new("RGB", (width, height), color)
