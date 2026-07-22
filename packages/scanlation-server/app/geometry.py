@@ -15,6 +15,14 @@ from PIL import Image
 
 from scanlation_sdk.contracts import Region
 
+# Axis-aligned tolerance (px): a detected quad whose edges sit within this of a
+# rectangle takes the exact PIL-crop fast path instead of a perspective warp.
+_AXIS_ALIGNED_EPS = 1.0
+# Minimum crop side (px): tiny crops are padded up to this so the recognizer gets
+# something usable. Internal geometric heuristics, kept as named constants rather
+# than /admin fields (like idle_unload's sweep cadence).
+_MIN_CROP_SIZE = 8
+
 
 def order_quad(pts: np.ndarray) -> np.ndarray:
     """Order 4 points as TL, TR, BR, BL (clockwise from top-left).
@@ -38,7 +46,7 @@ def _target_size(ordered: np.ndarray) -> tuple[int, int]:
     return int(round(width)), int(round(height))
 
 
-def _is_axis_aligned(ordered: np.ndarray, eps: float = 1.0) -> bool:
+def _is_axis_aligned(ordered: np.ndarray, eps: float = _AXIS_ALIGNED_EPS) -> bool:
     tl, tr, br, bl = ordered
     return (
         abs(tl[1] - tr[1]) <= eps and abs(bl[1] - br[1]) <= eps and
@@ -46,7 +54,7 @@ def _is_axis_aligned(ordered: np.ndarray, eps: float = 1.0) -> bool:
     )
 
 
-def deskew_crop(img: Image.Image, region: Region, min_size: int = 8) -> Image.Image:
+def deskew_crop(img: Image.Image, region: Region, min_size: int = _MIN_CROP_SIZE) -> Image.Image:
     """Return an upright RGB crop for ``region``.
 
     Vertical Japanese text is intentionally left vertical (manga-ocr reads

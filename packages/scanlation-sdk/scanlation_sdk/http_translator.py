@@ -42,6 +42,14 @@ def http_timeout() -> float:
     return float(os.getenv("SCANLATION_HTTP_TIMEOUT", "10.0"))
 
 
+def list_timeout() -> float:
+    """HTTP timeout (seconds) for the admin model-list probe —
+    SCANLATION_HTTP_LIST_TIMEOUT (default 4.0). Deliberately shorter than
+    http_timeout(): the /admin picker must stay responsive, so an unreachable
+    backend yields an empty list fast instead of blocking the settings page."""
+    return float(os.getenv("SCANLATION_HTTP_LIST_TIMEOUT", "4.0"))
+
+
 class HttpTranslatorBase(EngineBase):
     # --- subclass config ---
     ENDPOINT_ENV: str = ""          # env var holding the backend base URL
@@ -75,7 +83,7 @@ class HttpTranslatorBase(EngineBase):
         try:
             import httpx
 
-            resp = httpx.get(self._models_url(), timeout=4.0)
+            resp = httpx.get(self._models_url(), timeout=list_timeout())
             resp.raise_for_status()
             return sorted(self._parse_models(resp.json()))
         except Exception:  # noqa: BLE001 - backend unreachable is expected; picker just stays empty

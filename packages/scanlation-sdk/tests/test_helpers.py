@@ -10,7 +10,7 @@ from PIL import Image
 import os
 
 from scanlation_sdk import EngineBase, downscale_to_cap, install_hint, to_rgb
-from scanlation_sdk.http_translator import http_timeout
+from scanlation_sdk.http_translator import http_timeout, list_timeout
 
 
 def test_to_rgb_passes_through_rgb():
@@ -99,6 +99,17 @@ def test_http_timeout_default_and_env():
         os.environ.pop("SCANLATION_HTTP_TIMEOUT", None)
 
 
+def test_list_timeout_default_and_env():
+    """The admin model-list probe timeout is 4.0s by default, overridable via env."""
+    os.environ.pop("SCANLATION_HTTP_LIST_TIMEOUT", None)
+    assert list_timeout() == 4.0
+    os.environ["SCANLATION_HTTP_LIST_TIMEOUT"] = "1.5"
+    try:
+        assert list_timeout() == 1.5
+    finally:
+        os.environ.pop("SCANLATION_HTTP_LIST_TIMEOUT", None)
+
+
 TESTS = [
     test_to_rgb_passes_through_rgb,
     test_to_rgb_converts_non_rgb,
@@ -110,6 +121,7 @@ TESTS = [
     test_install_hint_extra_replaces_period,
     test_engine_base_log_is_namespaced,
     test_http_timeout_default_and_env,
+    test_list_timeout_default_and_env,
 ]
 
 if __name__ == "__main__":

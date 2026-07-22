@@ -54,7 +54,8 @@ services:
       #     Environment="OLLAMA_MAX_LOADED_MODELS=1"
       OLLAMA_ENDPOINT: http://host.docker.internal:11434/api
       LLAMACPP_ENDPOINT: http://host.docker.internal:8080
-      SCANLATION_HTTP_TIMEOUT: 10 
+      SCANLATION_HTTP_TIMEOUT: 10
+      SCANLATION_HTTP_LIST_TIMEOUT: 4   # shorter timeout for the /admin model-list probe
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach host services from the container (Linux)
     restart: unless-stopped
