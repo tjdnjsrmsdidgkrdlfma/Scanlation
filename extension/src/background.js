@@ -43,15 +43,6 @@ function setPageAction(tabId, enabled) {
 
 // Cross-origin image fetch on behalf of the content script (extension context
 // has host permissions, so it bypasses page CORS; cannot beat Referer hotlinking).
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result.slice(reader.result.indexOf(",") + 1));
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
 ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "state") {
     setPageAction(sender.tab && sender.tab.id, !!msg.enabled);
@@ -62,7 +53,7 @@ ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const res = await fetch(msg.url);
         if (!res.ok) throw new Error("HTTP " + res.status);
-        sendResponse({ ok: true, base64: await blobToBase64(await res.blob()) });
+        sendResponse({ ok: true, base64: await SCANUTIL.blobToBase64(await res.blob()) });
       } catch (e) {
         sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
       }

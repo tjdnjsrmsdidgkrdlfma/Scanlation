@@ -3,15 +3,10 @@
 const ext = globalThis.browser || globalThis.chrome;
 
 const $ = (id) => document.getElementById(id);
-const endpoint = () => $("endpoint").value.trim().replace(/\/$/, "");
+const endpoint = () => SCANUTIL.trimEndpoint($("endpoint").value.trim());
 const token = () => $("token").value.trim();
 // Headers for a server call: JSON + the optional auth token (blank => omitted).
-const authHeaders = (base) => {
-  const h = base ? { ...base } : {};
-  const t = token();
-  if (t) h["X-Auth-Token"] = t;
-  return h;
-};
+const authHeaders = (base) => SCANUTIL.authHeaders(base, token());
 
 function setStatus(text, kind) {
   const el = $("status");

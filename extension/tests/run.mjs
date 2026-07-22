@@ -69,5 +69,35 @@ test("md5 base64-of-image-bytes (production shape)", () => {
   assert.equal(md5(b64), "22b393fe586838478742ce7fa899d897");
 });
 
+console.log("\n" + "=".repeat(60));
+console.log("extension.util");
+console.log("=".repeat(60));
+
+// util.js publishes pure helpers on globalThis.SCANUTIL, shared by content/
+// background/popup. They touch no DOM/extension API at load, so they run here.
+// Their return objects come from the vm realm, so spread into a main-realm plain
+// object (`{ ...x }`) before a strict deep-equal (which else trips on prototype).
+const { SCANUTIL } = loadGlobals("util.js");
+
+test("boxFractions maps [l,b,r,t] bounds to fractions of natural size", () => {
+  // bounds is [x_min, y_min, x_max, y_max]; nw=200, nh=400
+  assert.deepEqual({ ...SCANUTIL.boxFractions([10, 20, 110, 120], 200, 400) },
+    { left: 0.05, top: 0.05, w: 0.5, h: 0.25 });
+});
+
+test("trimEndpoint strips a single trailing slash (and tolerates null)", () => {
+  assert.equal(SCANUTIL.trimEndpoint("http://127.0.0.1:4010/"), "http://127.0.0.1:4010");
+  assert.equal(SCANUTIL.trimEndpoint("http://127.0.0.1:4010"), "http://127.0.0.1:4010");
+  assert.equal(SCANUTIL.trimEndpoint(null), "");
+});
+
+test("authHeaders adds X-Auth-Token only for a non-empty token", () => {
+  const json = { "Content-Type": "application/json" };
+  assert.deepEqual({ ...SCANUTIL.authHeaders(json, "") }, { "Content-Type": "application/json" });
+  assert.deepEqual({ ...SCANUTIL.authHeaders(json, "tok") },
+    { "Content-Type": "application/json", "X-Auth-Token": "tok" });
+  assert.deepEqual({ ...SCANUTIL.authHeaders(undefined, "tok") }, { "X-Auth-Token": "tok" });
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

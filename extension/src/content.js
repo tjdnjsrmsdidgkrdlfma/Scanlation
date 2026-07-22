@@ -39,18 +39,6 @@
     return el.tagName === "IMG" ? [el.naturalWidth, el.naturalHeight] : [el.width, el.height];
   }
 
-  function blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const comma = reader.result.indexOf(",");
-        resolve(reader.result.slice(comma + 1)); // strip "data:...;base64,"
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
-
   function canvasBlob(el) {
     const [w, h] = naturalSize(el);
     const c = document.createElement("canvas");
@@ -60,11 +48,11 @@
   }
 
   async function imageToBase64(el) {
-    if (el.tagName === "CANVAS") return blobToBase64(await canvasBlob(el));
+    if (el.tagName === "CANVAS") return SCANUTIL.blobToBase64(await canvasBlob(el));
     // 1) direct fetch — works same-origin or for CORS-enabled images
     try {
       const res = await fetch(el.src);
-      if (res.ok) return blobToBase64(await res.blob());
+      if (res.ok) return SCANUTIL.blobToBase64(await res.blob());
     } catch (e) { /* CORS / network -> try the worker */ }
     // 2) background fetch — the extension has cross-origin host access, so it
     //    bypasses page CORS (cannot beat Referer hotlinking, e.g. pixiv i.pximg.net)
@@ -73,14 +61,13 @@
       if (r && r.ok) return r.base64;
     } catch (e) { /* background unavailable -> last resort */ }
     // 3) canvas re-encode — only succeeds if the image isn't cross-origin tainted
-    return blobToBase64(await canvasBlob(el));
+    return SCANUTIL.blobToBase64(await canvasBlob(el));
   }
 
   // ------------------------------------------------------------- server ----
   async function runPipeline(md5hash, base64, options) {
-    const base = cfg.endpoint.replace(/\/$/, "");
-    const headers = { "Content-Type": "application/json" };
-    if (cfg.token) headers["X-Auth-Token"] = cfg.token;
+    const base = SCANUTIL.trimEndpoint(cfg.endpoint);
+    const headers = SCANUTIL.authHeaders({ "Content-Type": "application/json" }, cfg.token);
     const post = (path, body) =>
       fetch(base + path, { method: "POST", headers, body: JSON.stringify(body) });
     // 1) cache probe (md5 only, no image upload) -> always 200 {result: cached|null}.
@@ -150,13 +137,6 @@
     return wrapper;
   }
 
-  // box is [x_min, y_min, x_max, y_max] in natural px -> fractions (0-1) of the
-  // natural size, so they map onto either % CSS or displayed-px equally.
-  function boxFractions(box, nw, nh) {
-    const [l, b, r, t] = box;
-    return { left: l / nw, top: b / nh, w: (r - l) / nw, h: (t - b) / nh };
-  }
-
   // Text follows the show-original toggle; the full text is also the hover title.
   function setBoxText(box) {
     box.textContent = cfg.showTranslated ? box.dataset.destination : box.dataset.source;
@@ -164,9 +144,10 @@
   }
 
   function makeBox(item, nw, nh) {
-    const f = boxFractions(item.bounds, nw, nh);
+    const f = SCANUTIL.boxFractions(item.bounds, nw, nh);
     const div = document.createElement("div");
     div.className = "scanlation-box";
+    div.__bounds = item.bounds;   // original bounds; sizeFonts refits from these on resize
     div.style.left = f.left * 100 + "%";
     div.style.top = f.top * 100 + "%";
     div.style.width = f.w * 100 + "%";
@@ -187,7 +168,7 @@
     const dispH = entry.img.clientHeight || entry.img.height || 1;
     const [nw, nh] = naturalSize(entry.img);
     for (const box of entry.boxes) {
-      const f = boxFractions(JSON.parse(box.dataset.boundsraw), nw, nh);
+      const f = SCANUTIL.boxFractions(box.__bounds, nw, nh);
       const wpx = f.w * dispW;
       const hpx = f.h * dispH;
       // size font by text length vs box area so long text shrinks to fit
@@ -205,7 +186,6 @@
     const entry = { img, wrapper, boxes: [] };
     for (const item of result) {
       const box = makeBox(item, nw, nh);
-      box.dataset.boundsraw = JSON.stringify(item.bounds);
       wrapper.appendChild(box);
       entry.boxes.push(box);
     }
@@ -225,7 +205,7 @@
     badge.title = msg; // cause (e.g. "server 502: ...") on hover
     wrapper.appendChild(badge);
     // boxes stays empty: the badge is a child of wrapper (removed with it) and
-    // has no boundsraw, so it must not go through sizeFonts()/onResize().
+    // has no __bounds, so it must not go through sizeFonts()/onResize().
     tracked.push({ img, wrapper, boxes: [] });
   }
 
