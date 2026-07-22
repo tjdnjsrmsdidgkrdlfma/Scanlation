@@ -11,46 +11,51 @@
       <img class="mark" src="icons/icon48.png" alt="" />
       <div class="brand-txt">
         <h1>Scanlation</h1>
-        <p class="tagline">manga OCR + translation overlay</p>
+        <p class="tagline" data-i18n="brand.tagline">manga OCR + translation overlay</p>
+      </div>
+      <div id="lang-toggle">
+        <span class="langopt" data-lang="en">EN</span>
+        <span class="langopt" data-lang="ko">한국어</span>
       </div>
     </header>
 
     <div class="field">
-      <label for="endpoint">Server</label>
+      <label for="endpoint" data-i18n="field.server">Server</label>
       <div class="inline">
         <input id="endpoint" type="text" placeholder="https://scanlation.takecontr.lol" />
-        <button id="connect" class="primary">Connect</button>
+        <button id="connect" class="primary" data-i18n="btn.connect">Connect</button>
       </div>
       <div id="status" class="status"></div>
     </div>
 
     <div class="field">
-      <label for="token">Token <span style="text-transform:none;font-weight:400;color:var(--muted)">(optional)</span></label>
-      <input id="token" type="password" placeholder="X-Auth-Token (leave blank if none)" />
+      <label for="token"><span data-i18n="field.token">Token</span> <span style="text-transform:none;font-weight:400;color:var(--muted)" data-i18n="field.token.opt">(optional)</span></label>
+      <input id="token" type="password" placeholder="X-Auth-Token (leave blank if none)" data-i18n-ph="ph.token" />
     </div>
 
     <section id="conn">
-      <div class="rule"><span>languages</span></div>
+      <div class="rule"><span data-i18n="rule.languages">languages</span></div>
       <div class="grid2">
-        <div class="field"><label for="lang_src">From</label><select id="lang_src"></select></div>
-        <div class="field"><label for="lang_dst">To</label><select id="lang_dst"></select></div>
+        <div class="field"><label for="lang_src" data-i18n="field.from">From</label><select id="lang_src"></select></div>
+        <div class="field"><label for="lang_dst" data-i18n="field.to">To</label><select id="lang_dst"></select></div>
       </div>
 
-      <div class="rule"><span>engines</span></div>
-      <div class="field"><label for="detector">Detector</label><select id="detector"></select></div>
-      <div class="field"><label for="recognizer">Recognizer</label><select id="recognizer"></select></div>
-      <div class="field"><label for="translator">Translator</label><select id="translator"></select></div>
+      <div class="rule"><span data-i18n="rule.engines">engines</span></div>
+      <div class="field"><label for="detector" data-i18n="field.detector">Detector</label><select id="detector"></select></div>
+      <div class="field"><label for="recognizer" data-i18n="field.recognizer">Recognizer</label><select id="recognizer"></select></div>
+      <div class="field"><label for="translator" data-i18n="field.translator">Translator</label><select id="translator"></select></div>
 
       <div class="grid2 actions">
-        <button id="enable" class="primary">Translate</button>
-        <button id="disable" class="ghost">Clear</button>
+        <button id="enable" class="primary" data-i18n="btn.translate">Translate</button>
+        <button id="disable" class="ghost" data-i18n="btn.clear">Clear</button>
       </div>
-      <label class="chk"><input type="checkbox" id="showOriginal" /> Show original</label>
+      <label class="chk"><input type="checkbox" id="showOriginal" /> <span data-i18n="chk.showOriginal">Show original</span></label>
     </section>
   </div>
 
   <script src="src/constants.js"></script>
   <script src="src/util.js"></script>
+  <script src="src/i18n.js"></script>
   <script src="src/starfield.js"></script>
   <script type="module" src="src/popup.js"></script>
 </body>

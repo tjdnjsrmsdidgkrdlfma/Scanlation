@@ -26,11 +26,12 @@
 
   async function loadConfig() {
     try {
-      const r = await ext.storage.local.get(["endpoint", "showTranslated", "token", "minImageDim"]);
+      const r = await ext.storage.local.get(["endpoint", "showTranslated", "token", "minImageDim", "lang"]);
       if (r.endpoint) cfg.endpoint = r.endpoint;
       if (typeof r.showTranslated === "boolean") cfg.showTranslated = r.showTranslated;
       if (typeof r.token === "string") cfg.token = r.token;
       if (typeof r.minImageDim === "number") cfg.minImageDim = r.minImageDim;
+      if (r.lang) SCANI18N.setLang(r.lang); // localize the failure badge
     } catch (e) { /* storage may be unavailable in some frames */ }
   }
 
@@ -201,7 +202,7 @@
     const wrapper = wrap(img);
     const badge = document.createElement("div");
     badge.className = "scanlation-badge scanlation-error";
-    badge.textContent = globalThis.SCAN.MSG_FAIL;
+    badge.textContent = SCANI18N.t("badge.fail");
     badge.title = msg; // cause (e.g. "server 502: ...") on hover
     wrapper.appendChild(badge);
     // boxes stays empty: the badge is a child of wrapper (removed with it) and
@@ -314,6 +315,7 @@
       case "set-token": cfg.token = msg.token || ""; break;
       case "set-min-image-dim": if (typeof msg.value === "number") cfg.minImageDim = msg.value; break;
       case "set-show-translated": cfg.showTranslated = !!msg.value; retext(); break;
+      case "set-lang": SCANI18N.setLang(msg.lang); break;
       default: break;
     }
     return undefined;

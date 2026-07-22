@@ -14,6 +14,24 @@ function setStatus(text, kind) {
   el.className = "status" + (kind ? " " + kind : "");
 }
 
+// Fill every [data-i18n]/[data-i18n-ph] node and mark the active lang button.
+function applyLang() {
+  document.documentElement.lang = SCANI18N.lang;
+  document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = SCANI18N.t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = SCANI18N.t(el.dataset.i18nPh); });
+  document.querySelectorAll("#lang-toggle .langopt").forEach((el) => el.classList.toggle("active", el.dataset.lang === SCANI18N.lang));
+}
+
+// Persist the choice to ext.storage.local so the content script's failure badge
+// shares it, and tell the active tab live. (A shown status line refreshes on the
+// next Connect.)
+async function selectLang(l) {
+  SCANI18N.setLang(l);
+  applyLang();
+  try { await ext.storage.local.set({ lang: SCANI18N.lang }); } catch (e) { /* ignore */ }
+  sendActive({ type: "set-lang", lang: SCANI18N.lang });
+}
+
 function fillSelect(sel, values, labels, selected) {
   sel.innerHTML = "";
   values.forEach((v, i) => {
@@ -42,10 +60,10 @@ async function post(path, body) {
 }
 
 async function connect() {
-  setStatus("connecting…");
+  setStatus(SCANI18N.t("status.connecting"));
   try {
     const r = await fetch(endpoint() + "/", { headers: authHeaders() });
-    if (r.status === 401) throw new Error("auth failed — check the token");
+    if (r.status === 401) throw new Error(SCANI18N.t("status.authFail"));
     if (!r.ok) throw new Error("HTTP " + r.status);
     const d = await r.json();
 
@@ -61,7 +79,7 @@ async function connect() {
     fillSelect($("recognizer"), d.recognizers || [], d.recognizers_hr, d.recognizer_selected);
     fillSelect($("translator"), d.translators || [], d.translators_hr, d.translator_selected);
 
-    setStatus(`connected · v${(d.version || []).join(".")}`, "ok");
+    setStatus(SCANI18N.t("status.connected", { v: (d.version || []).join(".") }), "ok");
 
     const store = { endpoint: endpoint(), token: token() };
     if (typeof d.min_image_dim === "number") store.minImageDim = d.min_image_dim;
@@ -70,7 +88,7 @@ async function connect() {
     sendActive({ type: "set-token", token: token() });
     if (typeof d.min_image_dim === "number") sendActive({ type: "set-min-image-dim", value: d.min_image_dim });
   } catch (e) {
-    setStatus("cannot reach server: " + (e.message || e), "err");
+    setStatus(SCANI18N.t("status.unreachable", { msg: e.message || e }), "err");
   }
 }
 
@@ -98,13 +116,18 @@ function wire() {
     await ext.storage.local.set({ showTranslated });
     sendActive({ type: "set-show-translated", value: showTranslated });
   });
+
+  document.querySelectorAll("#lang-toggle .langopt")
+    .forEach((el) => el.addEventListener("click", () => selectLang(el.dataset.lang)));
 }
 
 async function init() {
-  const s = await ext.storage.local.get(["endpoint", "showTranslated", "token"]);
+  const s = await ext.storage.local.get(["endpoint", "showTranslated", "token", "lang"]);
   $("endpoint").value = s.endpoint || globalThis.SCAN.ENDPOINT;
   $("token").value = s.token || "";
   $("showOriginal").checked = s.showTranslated === false;   // checked = show original
+  SCANI18N.setLang(s.lang);
+  applyLang();
   wire();
   connect(); // auto-connect to the saved endpoint
 }

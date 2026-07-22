@@ -99,5 +99,37 @@ test("authHeaders adds X-Auth-Token only for a non-empty token", () => {
   assert.deepEqual({ ...SCANUTIL.authHeaders(undefined, "tok") }, { "X-Auth-Token": "tok" });
 });
 
+console.log("\n" + "=".repeat(60));
+console.log("extension.i18n");
+console.log("=".repeat(60));
+
+const { SCANI18N } = loadGlobals("i18n.js");
+
+test("defaults to en; the failure badge key resolves", () => {
+  assert.equal(SCANI18N.lang, "en");
+  assert.equal(SCANI18N.t("badge.fail"), "Translation failed");
+});
+
+test("setLang('ko') localizes the same key", () => {
+  SCANI18N.setLang("ko");
+  assert.equal(SCANI18N.t("badge.fail"), "번역 실패");
+});
+
+test("setLang normalizes an unknown/absent code to en", () => {
+  assert.equal(SCANI18N.setLang("xx"), "en");
+  assert.equal(SCANI18N.setLang(undefined), "en");
+});
+
+test("t() fills {v} vars and falls back to the raw key", () => {
+  SCANI18N.setLang("en");
+  assert.equal(SCANI18N.t("status.connected", { v: "0.1.0" }), "connected · v0.1.0");
+  assert.equal(SCANI18N.t("no.such.key"), "no.such.key");
+});
+
+test("en and ko tables have identical key sets (no drift)", () => {
+  assert.deepEqual([...Object.keys(SCANI18N.STRINGS.en)].sort(),
+    [...Object.keys(SCANI18N.STRINGS.ko)].sort());
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
