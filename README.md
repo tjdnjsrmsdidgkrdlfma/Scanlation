@@ -264,6 +264,8 @@ cd packages/scanlation-comic-text-and-bubble-detector   && ../../venv/Scripts/py
 cd packages/scanlation-manga-ocr && ../../venv/Scripts/python -m tests
 cd packages/scanlation-ollama   && ../../venv/Scripts/python -m tests   # HTTP mock
 cd packages/scanlation-llama-cpp && ../../venv/Scripts/python -m tests   # HTTP mock
+# 확장 순수 JS (의존성·번들러 없음): md5의 Python hashlib.md5 byte-equality 등
+node extension/tests/run.mjs
 ```
 
 **검출 육안 확인**(정확도 핵심 루프 — 검출이 병목):
