@@ -38,6 +38,7 @@ recognize 게이트는 지금 **이미지 K장**을 들여보내는데(프로덕
 
 상시 상주 중인 MI50 translator(gemma-4)를 임의 웹 페이지 텍스트 번역에 재사용하는 별도 프로젝트. 지금은 구글 번역 확장으로 대체 중. 재사용 자산이 크다 — translator 엔드포인트(llama.cpp/ollama) + SDK [`http_translator`](packages/scanlation-sdk/scanlation_sdk/http_translator.py)·배칭·동시성, MV2 확장 뼈대(popup·content script·DOM 주입). **스코프는 온디맨드·선택영역**으로 가는 게 맞다: 실시간 전체 페이지 자동번역은 구글이 우위(즉시성·언어 커버리지·인플레이스 UX)이고 MI50 한 장으론 못 따라간다(웹 한 장 수천 토큰 → 약 89 t/s로도 통째 번역엔 수~수십 초). LLM의 이점은 속도가 아니라 **품질**(문맥·뉘앙스·튜닝된 레지스터)·**프라이버시**(외부 미전송). 진짜 난도는 번역이 아니라 **임의 페이지 DOM 텍스트 추출·재삽입**(인라인 태그 보존, SPA·iframe·shadow DOM, 수천 노드 청킹/재주입)이고, 만화 파이프라인과 같은 MI50를 공유하므로 동시 사용 시 경합한다.
 
-- [ ] **선행 — 기존 확장으로 대체 검토([KISS Translator](https://github.com/fishjar/kiss-translator)).** 오픈소스·Firefox·선택영역/웹페이지/입력창/자막 번역, 커스텀 OpenAI 호환 API(Ollama 포함) 지원 → MI50 엔드포인트만 꽂으면 됨. 제일 어려운 DOM 추출·재삽입을 안 짜고 품질·프라이버시 이점만 취함. 직접 구현은 만화 파이프라인과 UI 통합 등 기존 확장이 못 주는 요구가 생길 때로 미룬다.
+- [ ] **선행 — 기존 확장으로 대체 검토([KISS Translator](https://github.com/fishjar/kiss-translator)).** 오픈소스·Firefox·선택영역/웹페이지/입력창/자막 번역, 커스텀 OpenAI 호환 API(Ollama 포함) 지원 → MI50 엔드포인트만 꽂으면 됨. 트리거는 우클릭이 아니라 핫키 토글(Alt+Q)·호버·사이트별 자동번역 규칙. 제일 어려운 DOM 추출·재삽입을 안 짜고 품질·프라이버시 이점만 취함. 직접 구현은 만화 파이프라인과 UI 통합 등 기존 확장이 못 주는 요구가 생길 때로 미룬다.
+  - 단점: 선택 번역 팝업 UI가 별로. (전체 토글·자동 규칙 위주로 쓰면 팝업은 덜 탐)
 - [ ] MVP(직접 구현 시) — 우클릭 "선택 영역을 로컬 LLM으로 번역". 확장 뼈대+translator 재사용, 전체-DOM 문제 우회, 품질 이점만 취함. 만족 시 글(article) 단위 → 전체 페이지 순 확대.
 - [ ] 레포 위치 결정 — 별도 레포 vs 이 모노레포에 얹기.
