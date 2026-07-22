@@ -29,7 +29,7 @@ from compare.commands import (
 )
 
 DEFAULT_OUT = "compare_out"    # output root every subcommand writes under
-DEFAULT_REF = "ogkalu_rtdetr"  # the decided box model — makes the crops for the OCR commands
+DEFAULT_REF = "ogkalu_rtdetr"  # the decided detector model — makes the crops for the OCR commands
 
 
 def main() -> None:
@@ -83,7 +83,7 @@ def main() -> None:
                     help="html: reference crop images by relative path instead of base64-embedding (smaller file)")
     cs.set_defaults(fn=cmd_consolidate)
 
-    bh = sub.add_parser("boxhtml", help="gather detector <model>.png overlays into one BOX-scoring HTML (click-to-vote)")
+    bh = sub.add_parser("boxhtml", help="gather detector <model>.png overlays into one detector-scoring HTML (click-to-vote)")
     bh.add_argument("--out", default=DEFAULT_OUT, help="tree with per-image <model>.png overlays (default: compare_out)")
     bh.add_argument("--name", default="_compare_box", help="output file stem under --out")
     bh.add_argument("--embed", action="store_true",

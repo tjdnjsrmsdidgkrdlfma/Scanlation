@@ -473,7 +473,7 @@ def cmd_consolidate(args) -> None:
 def cmd_boxhtml(args) -> None:
     """Gather detector box-overlays (compare_out/<cat>/<img>/<model>.png from `batch`) into
     ONE scoring HTML — per image each model's overlay side by side, click a panel to vote,
-    per-model + per-category tallies (localStorage, boxsel: namespace). BOX analog of consolidate."""
+    per-model + per-category tallies (localStorage, boxsel: namespace). Detector analog of consolidate."""
     out_root = Path(args.out)
     images = _consolidate_box_images(out_root)
     if not images:

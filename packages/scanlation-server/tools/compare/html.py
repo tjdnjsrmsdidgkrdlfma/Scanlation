@@ -38,7 +38,7 @@ def _diff_spans(ref: str, s: str) -> str:
 
 _HTML_JS = """
 (function(){
-  var K=VK, tally={};  // VK injected per page ('ocrsel:' for OCR, 'boxsel:' for BOX) -> separate vote namespaces
+  var K=VK, tally={};  // VK injected per page ('ocrsel:' for recognizer, 'boxsel:' for detector) -> separate vote namespaces
   function refresh(){
     var t=document.getElementById('tally');
     t.innerHTML='선택수 — '+engs.map(function(e){return '<b>'+e+'</b> '+(tally[e]||0);}).join(' &nbsp;·&nbsp; ');
@@ -195,7 +195,7 @@ def _write_box_html(dest: Path, images, out_root: Path, *, embed: bool = False) 
     """Self-contained HTML to score DETECTORS (sibling of _write_ocr_html): per image,
     each model's box-overlay side by side, each panel clickable to vote 'this model boxed
     the page best'. Per-model tally + per-category matrix, persisted in localStorage under
-    the boxsel: namespace (separate from OCR votes). Overlays linked by relative path by
+    the boxsel: namespace (separate from the recognizer votes). Overlays linked by relative path by
     default (full-page PNGs are big); embed=True base64-inlines them (portable, heavy)."""
     import base64
     import html
