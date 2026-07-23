@@ -155,6 +155,32 @@ async def _run_deduped(id_, compute):
         state.inflight.pop(id_, None)
 
 
+def _build_timing(*, t0, t_dec, t_det, t_lock, t_rec, t_sem, t_tsl, detect_ms, recognize_ms, regions) -> dict:
+    """The per-stage ms breakdown from the pipeline's perf_counter marks. detect_ms/
+    recognize_ms are the pure forwards from the two sync helpers; lockwait = wait for a
+    recognize gate permit (detect is off the gate); semwait = queued on translate_sem;
+    translate = the actual ollama call. These spans don't sum exactly to total (residual
+    = engine resolve/first-load + threadpool handoff), which is fine for a breakdown."""
+    return {
+        "decode_ms": round((t_dec - t0) * 1000, 1),
+        "detect_ms": detect_ms,
+        "lockwait_ms": round((t_lock - t_det) * 1000, 1),
+        "recognize_ms": recognize_ms,
+        "semwait_ms": round((t_sem - t_rec) * 1000, 1),
+        "translate_ms": round((t_tsl - t_sem) * 1000, 1),
+        "total_ms": round((t_tsl - t0) * 1000, 1),
+        "regions": regions,
+    }
+
+
+def _build_region_rows(rec_sub: dict, result: list) -> list:
+    """Per-crop stats rows: each region_detail plus a dest_len paired to result's
+    translations in non-empty reading order (empty-recognition crops get 0)."""
+    dests = iter(len(it["destination"]) for it in result)
+    return [{**d, "dest_len": (next(dests) if d["source_len"] else 0)}
+            for d in rec_sub.get("region_details", [])]
+
+
 async def run_page(plan: RunPlan, md5: str, contents: str, *, skip_translate: bool = False) -> tuple[list, dict]:
     """Compute (or join an in-flight computation of) the page result: decode ->
     detect (off the gate, CPU) -> recognize (under the gate) -> translate (off it) ->
@@ -196,21 +222,11 @@ async def run_page(plan: RunPlan, md5: str, contents: str, *, skip_translate: bo
             cache.put_run(md5, *plan.cache_key, result)
         # Per-stage spans, returned so the /run_pipeline/ response can carry them
         # (headless tools/reports read this; the extension ignores the extra key).
-        # detect_ms/recognize_ms are the pure forwards (from the two sync helpers);
-        # lockwait = wait for a recognize gate permit (detect is off the gate now);
-        # semwait = queued on translate_sem, translate = the actual ollama call. These
-        # spans don't sum exactly to total (residual = engine resolve/first-load +
-        # threadpool handoff), which is fine for a breakdown.
-        timing = {
-            "decode_ms": round((t_dec - t0) * 1000, 1),
-            "detect_ms": detect_ms,
-            "lockwait_ms": round((t_lock - t_det) * 1000, 1),
-            "recognize_ms": rec_sub["recognize_ms"],
-            "semwait_ms": round((t_sem - t_rec) * 1000, 1),
-            "translate_ms": round((t_tsl - t_sem) * 1000, 1),
-            "total_ms": round((t_tsl - t0) * 1000, 1),
-            "regions": len(recognized),
-        }
+        timing = _build_timing(
+            t0=t0, t_dec=t_dec, t_det=t_det, t_lock=t_lock, t_rec=t_rec, t_sem=t_sem,
+            t_tsl=t_tsl, detect_ms=detect_ms, recognize_ms=rec_sub["recognize_ms"],
+            regions=len(recognized),
+        )
         logger.info(
             "md5=%s ok regions=%d decode=%.0f detect=%.0f lockwait=%.0f recognize=%.0f "
             "semwait=%.0f translate=%.0f total=%.0fms",
@@ -219,12 +235,9 @@ async def run_page(plan: RunPlan, md5: str, contents: str, *, skip_translate: bo
             timing["semwait_ms"], timing["translate_ms"], timing["total_ms"],
         )
         # Persist raw per-page + per-crop stats. region_details/raw_regions ride `rec_sub`
-        # (the recognize timing); dest_len pairs to result's translations in non-empty
-        # reading order (empty-recognition crops get 0). skip_translate is marked and
-        # default-filtered out of the summary.
-        _dests = iter(len(it["destination"]) for it in result)
-        region_rows = [{**d, "dest_len": (next(_dests) if d["source_len"] else 0)}
-                       for d in rec_sub.get("region_details", [])]
+        # (the recognize timing); skip_translate is marked and default-filtered out of
+        # the summary.
+        region_rows = _build_region_rows(rec_sub, result)
         cache.record_stats(
             page={"engines": plan.engines, "src": plan.src, "dst": plan.dst, "md5": md5,
                   "regions": timing["regions"], "raw_regions": rec_sub.get("raw_regions"),
