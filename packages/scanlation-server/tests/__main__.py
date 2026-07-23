@@ -27,6 +27,7 @@ from tests import (
     test_routes_run,
     test_routes_settings,
     test_state,
+    test_web_i18n,
 )
 from tests.helpers import run_modules
 
@@ -46,6 +47,7 @@ if __name__ == "__main__":
         test_gpus,
         test_orchestrator,
         test_idle_unload,
+        test_web_i18n,
         test_routes_run,
         test_routes_settings,
         test_routes_plugins,
