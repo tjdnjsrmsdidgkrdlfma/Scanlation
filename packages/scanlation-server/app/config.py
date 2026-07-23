@@ -19,6 +19,15 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def _env_int(name: str, default: int, floor: int | None = None) -> int:
+    """Env-backed int with an optional lower clamp. ``floor`` guards the values a
+    0/negative would break (a Semaphore/pool size); leave it None where any int is
+    valid. The /admin write path clamps the same values at runtime; this is just the
+    first-run seed."""
+    value = int(_env(name, str(default)))
+    return value if floor is None else max(floor, value)
+
+
 @dataclass
 class Settings:
     host: str = field(default_factory=lambda: _env("SCANLATION_HOST", "0.0.0.0"))
@@ -48,14 +57,14 @@ class Settings:
     # in state.json and editable in /admin (동작 tab); delivered to the extension
     # via the handshake. 0 = translate everything.
     min_image_dim: int = field(
-        default_factory=lambda: int(_env("SCANLATION_MIN_IMAGE_DIM", "80"))
+        default_factory=lambda: _env_int("SCANLATION_MIN_IMAGE_DIM", 80)
     )
 
     # First-run default for the concurrent-translation limit (bounds parallel ollama
     # requests). Persisted in state.json, editable in /admin (동작 tab). Floor 1: a
     # 0/negative Semaphore would deadlock, matching set_client_config's clamp.
     translate_concurrency: int = field(
-        default_factory=lambda: max(1, int(_env("SCANLATION_TRANSLATE_CONCURRENCY", "1")))
+        default_factory=lambda: _env_int("SCANLATION_TRANSLATE_CONCURRENCY", 1, floor=1)
     )
 
     # First-run default for the recognize worker-pool size (per-engine, overridable
@@ -66,7 +75,7 @@ class Settings:
     # Selection.recognize_concurrency (a dict, like devices), NOT as an OPTION_SCHEMA
     # option; this is only the global fallback when an engine has no override.
     recognize_concurrency: int = field(
-        default_factory=lambda: max(1, int(_env("SCANLATION_RECOGNIZE_CONCURRENCY", "1")))
+        default_factory=lambda: _env_int("SCANLATION_RECOGNIZE_CONCURRENCY", 1, floor=1)
     )
 
     # First-run default for the gate size (per-recognizer, overridable in /admin plugin
@@ -76,7 +85,7 @@ class Settings:
     # Like recognize_concurrency it's a per-recognizer LOAD-TIME setting (sizes the
     # InferenceGate) stored in Selection.gpu_concurrency; this is only the global fallback.
     gpu_concurrency: int = field(
-        default_factory=lambda: max(1, int(_env("SCANLATION_GPU_CONCURRENCY", "1")))
+        default_factory=lambda: _env_int("SCANLATION_GPU_CONCURRENCY", 1, floor=1)
     )
 
     # First-run default for idle model unload (MINUTES): a local torch engine
@@ -86,7 +95,7 @@ class Settings:
     # processes, unaffected). Persisted in state.json, editable in /admin (동작 tab).
     # Floor 0; 0 = never auto-unload (keep resident).
     model_idle_unload_minutes: int = field(
-        default_factory=lambda: max(0, int(_env("SCANLATION_MODEL_IDLE_UNLOAD_MINUTES", "5")))
+        default_factory=lambda: _env_int("SCANLATION_MODEL_IDLE_UNLOAD_MINUTES", 5, floor=0)
     )
 
     # First-run defaults for the GPU/torch build a plugin install pulls, so a headless
