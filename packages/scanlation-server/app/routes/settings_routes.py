@@ -1,5 +1,5 @@
-"""Selection endpoints: /set_engines/, /set_languages/, /set_engine_device/,
-/set_recognize_concurrency/.
+"""Selection endpoints (POST): choose the per-role engines and languages, and set
+the per-engine compute device, recognize-pool size, and inference-gate size.
 
 Selection is validated (name must exist / language must be known) but engines
 are NOT eagerly loaded — that happens lazily on first run_pipeline.

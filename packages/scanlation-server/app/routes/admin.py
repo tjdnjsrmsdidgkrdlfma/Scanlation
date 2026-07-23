@@ -2,12 +2,11 @@
 
 One read (`GET /get_settings/`) returns everything the page needs; the rest are
 small mutations that persist to state.json so the choice survives restarts and
-the browser extension no longer has to set models on every page:
-
-  * /set_options/    per-engine option overrides (incl. the LLM model tag)
-  * /save_prompt/    upsert a custom system-prompt preset + activate it
-  * /select_prompt/  activate an existing preset (builtin or custom)
-  * /delete_prompt/  remove a custom preset
+the browser extension no longer has to set models on every page. They cover
+per-engine option overrides (incl. the LLM model tag), custom system-prompt
+presets (save/select/delete), the extension client config, a translator
+backend's available-models query, and cache/stats maintenance — plus the
+recognize-pool occupancy bench readouts (a diagnostic aid).
 
 Model/lang selection + plugin install reuse the existing wire endpoints
 (/set_engines/, /set_languages/, /install_plugins/).
