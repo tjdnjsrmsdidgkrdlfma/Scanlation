@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException
 
 from .. import __version_array__
 from scanlation_sdk.context import LANGUAGES
+from . import require_known_engine
 from ..cache import cache
 from ..config import settings
 from ..catalog import catalog
@@ -142,9 +143,7 @@ def get_translator_models(engine: str | None = None) -> dict:
 @router.post("/set_options/")
 def set_options(req: SetOptionsRequest) -> dict:
     """Persist per-engine option overrides. Engine must exist in some role."""
-    known = any(registry.has(role, req.engine) for role in ROLE_NAMES)
-    if not known:
-        raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
+    require_known_engine(req.engine)
     state.set_options(req.engine, req.options)
     return {"status": "success", "options": dict(state.selection.options.get(req.engine, {}))}
 

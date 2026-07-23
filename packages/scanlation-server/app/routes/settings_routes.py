@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from scanlation_sdk.context import LANGUAGES
+from . import require_known_engine
 from ..recognize_pool import recognize_pool
 from ..registry import ROLE_NAMES, registry
 from ..schemas import (
@@ -75,8 +76,7 @@ async def set_engine_device(req: SetEngineDeviceRequest) -> dict:
     dev = req.device.strip().lower()
     if dev and not _DEVICE_RE.match(dev):
         raise HTTPException(status_code=400, detail="device must be cpu, cuda, or cuda:<n>")
-    if not any(registry.has(role, req.engine) for role in ROLE_NAMES):
-        raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
+    require_known_engine(req.engine)
     if (dev or None) != state.resolve_device_for(req.engine):
         async with state.gpu_gate.writer():  # exclusive vs in-flight recognize while we swap
             await run_in_threadpool(_apply_engine_device, req.engine, dev or None)
@@ -88,8 +88,7 @@ async def set_recognize_concurrency(req: SetRecognizeConcurrencyRequest) -> dict
     """Per-engine recognize worker-pool size (null resets to the global default).
     On a real change, invalidate the pool under the GPU lock so the next run rebuilds
     at the new size and no run is torn down mid-flight."""
-    if not any(registry.has(role, req.engine) for role in ROLE_NAMES):
-        raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
+    require_known_engine(req.engine)
     new = None if req.concurrency is None else max(1, int(req.concurrency))
     if new != state.selection.recognize_concurrency.get(req.engine):
         async with state.gpu_gate.writer():  # exclusive vs all in-flight inference while we tear the pool down
@@ -105,8 +104,7 @@ def set_gpu_concurrency(req: SetGpuConcurrencyRequest) -> dict:
     rebuild the gate: in-flight inference finishes on the old gate, new requests use
     the new size. This resizes only the gate (no pool/model teardown), so it's the
     same runtime swap as translate_sem — no writer/drain needed."""
-    if not any(registry.has(role, req.engine) for role in ROLE_NAMES):
-        raise HTTPException(status_code=400, detail=f"unknown engine: {req.engine}")
+    require_known_engine(req.engine)
     new = None if req.concurrency is None else max(1, int(req.concurrency))
     if new != state.selection.gpu_concurrency.get(req.engine):
         state.set_gpu_concurrency(req.engine, new)
