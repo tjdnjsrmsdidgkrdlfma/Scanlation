@@ -260,7 +260,7 @@ function initLang() {
 let LANG = initLang();
 
 function t(key, vars) {
-  let s = (I18N[LANG] && I18N[LANG][key]) || I18N.ko[key] || key;
+  let s = (I18N[LANG] && I18N[LANG][key]) || I18N.en[key] || key;
   if (vars) for (const k in vars) s = s.split("{" + k + "}").join(vars[k]);
   return s;
 }
