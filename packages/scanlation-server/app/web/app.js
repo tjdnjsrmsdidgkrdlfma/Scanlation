@@ -276,7 +276,7 @@ function optBlock(role, e) {
   // that carries an empty schema, so don't imply "no options" — say it's not installed.
   if (e.installed_package === false) {
     return `<div class="opt-block" data-engine="${e.name}">
-      <span class="role">${role}</span>
+      <span class="role">${t("role." + role)}</span>
       <h3>${e.display_name}</h3>
       <p class="opt-empty">${t("options.notInstalled")}</p>
     </div>`;
@@ -293,7 +293,7 @@ function optBlock(role, e) {
   const saveBtn = (keys.length || dev || conc || gconc)
     ? `<button class="btn primary sm" data-save-engine="${e.name}">${t("btn.save")}</button>` : "";
   return `<div class="opt-block" data-engine="${e.name}">
-      <span class="role">${role}</span>
+      <span class="role">${t("role." + role)}</span>
       <h3>${e.display_name}</h3>
       ${dev}${conc}${gconc}${fieldsHtml}${saveBtn}
     </div>`;
