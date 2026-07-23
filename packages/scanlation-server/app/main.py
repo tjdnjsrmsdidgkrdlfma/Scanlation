@@ -1,9 +1,8 @@
 """FastAPI app factory.
 
 CORS is permissive: the browser content script issues cross-origin requests to
-this server from arbitrary manga sites, so every origin must be allowed (the old
-Django stack left this commented-out, which is why it needed extension privileges
-to work). No CSRF (FastAPI has none; all POSTs are open).
+this server from arbitrary manga sites, so every origin must be allowed. No CSRF
+(FastAPI has none; all POSTs are open).
 """
 from __future__ import annotations
 

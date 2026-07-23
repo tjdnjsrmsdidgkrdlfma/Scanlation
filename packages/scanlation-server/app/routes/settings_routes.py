@@ -26,7 +26,7 @@ from ..state import state
 router = APIRouter()
 
 # GPU ("cuda") also covers ROCm — a ROCm torch build exposes HIP under the
-# torch.cuda namespace, so ".to('cuda')" works there too. dml is gone with ctd.
+# torch.cuda namespace, so ".to('cuda')" works there too.
 # Format-only: accept cpu / cuda / cuda:<n>. Which indices actually exist is the
 # UI's job (it only offers enumerated GPUs) and pick_device's (range-check + fall
 # back at load), so this route stays torch-free and testable without a GPU.

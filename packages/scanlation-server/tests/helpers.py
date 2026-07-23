@@ -41,8 +41,8 @@ _CLIENT = None
 
 
 def client():
-    """Cached FastAPI TestClient — one app instance for the whole run (matches
-    the old session-scoped fixture, so state persists across a file's tests)."""
+    """Cached FastAPI TestClient — one app instance for the whole run, so state
+    persists across a file's tests."""
     global _CLIENT
     if _CLIENT is None:
         from fastapi.testclient import TestClient

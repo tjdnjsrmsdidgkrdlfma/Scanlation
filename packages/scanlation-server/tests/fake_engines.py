@@ -1,7 +1,7 @@
-"""Test-only fake engines (formerly the shipped `dummy` plugin).
+"""Test-only fake engines.
 
-The product no longer ships any placeholder engine — a fresh install has no
-engines until you install a real one, and running without one is a 400 error.
+The product ships no placeholder engine — a fresh install has no engines until
+you install a real one, and running without one is a 400 error.
 These fakes exist ONLY for the test suite: they exercise the whole skeleton —
 wire protocol, pipeline, cache, reading order, routes — with zero models,
 deterministically and fast. The fake detector deliberately emits one rotated

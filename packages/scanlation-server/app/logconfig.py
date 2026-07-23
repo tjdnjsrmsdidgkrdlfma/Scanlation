@@ -1,14 +1,12 @@
 """One-call logging setup for the server.
 
-The app shipped with NO logging config, so ``scanlation.*`` INFO lines (e.g. the
-engines' "loaded on cpu") were swallowed while manga-ocr's loguru output showed —
-misleading. This centralizes it: a timestamped formatter, our namespace opened to
+Centralizes logging so ``scanlation.*`` INFO lines (e.g. the engines' "loaded on
+cpu") surface with a timestamped formatter, our namespace opened to
 ``SCANLATION_LOG_LEVEL`` (default INFO), and third-party libs (transformers/httpx)
 kept at WARNING via the root so they don't drown the log.
 
 uvicorn's default access log is disabled here — the request-timing middleware in
-``app.main`` replaces it with a timestamped ``METHOD PATH -> STATUS Nms`` line
-(and, since the cache probe moved to /run_lookup/, no more control-flow 404s).
+``app.main`` replaces it with a timestamped ``METHOD PATH -> STATUS Nms`` line.
 
 Called once from the app lifespan (after uvicorn has set up its own logging, so
 ``dictConfig`` overrides it).
