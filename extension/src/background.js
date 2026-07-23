@@ -16,8 +16,13 @@ const DEFAULTS = {
 };
 const ICON_ON = { 16: "icons/icon16.png", 48: "icons/icon48.png" };
 const ICON_OFF = { 16: "icons/icon-off16.png", 48: "icons/icon-off48.png" };
-const TITLE_ON = "Scanlation: translating — click to stop";
-const TITLE_OFF = "Scanlation: click to translate this tab";
+
+// Keep SCANI18N.lang in sync with the popup's stored choice so the page_action
+// tooltip localizes (storage key "lang", default en; popup persists it, see i18n.js).
+Promise.resolve(ext.storage.local.get("lang")).then((c) => SCANI18N.setLang(c && c.lang)).catch(() => {});
+ext.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.lang) SCANI18N.setLang(changes.lang.newValue);
+});
 
 ext.runtime.onInstalled.addListener(async () => {
   const cur = await ext.storage.local.get(Object.keys(DEFAULTS));
@@ -37,7 +42,7 @@ function setPageAction(tabId, enabled) {
   if (tabId == null) return;
   try {
     ext.pageAction.setIcon({ tabId, path: enabled ? ICON_ON : ICON_OFF });
-    ext.pageAction.setTitle({ tabId, title: enabled ? TITLE_ON : TITLE_OFF });
+    ext.pageAction.setTitle({ tabId, title: SCANI18N.t(enabled ? "title.on" : "title.off") });
   } catch (e) { /* tab gone */ }
 }
 

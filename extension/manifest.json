@@ -19,7 +19,7 @@
     "show_matches": ["http://*/*", "https://*/*", "file:///*"]
   },
   "background": {
-    "scripts": ["src/constants.js", "src/util.js", "src/background.js"],
+    "scripts": ["src/constants.js", "src/util.js", "src/i18n.js", "src/background.js"],
     "persistent": false
   },
   "permissions": [

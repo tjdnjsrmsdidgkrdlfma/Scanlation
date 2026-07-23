@@ -29,6 +29,8 @@ globalThis.SCANI18N = (() => {
       "status.authFail": "auth failed — check the token",
       "status.unreachable": "cannot reach server: {msg}",
       "badge.fail": "Translation failed",
+      "title.on": "Scanlation: translating — click to stop",
+      "title.off": "Scanlation: click to translate this tab",
     },
     ko: {
       "brand.tagline": "만화 OCR + 번역 오버레이",
@@ -52,6 +54,8 @@ globalThis.SCANI18N = (() => {
       "status.authFail": "인증 실패 — 토큰을 확인하세요",
       "status.unreachable": "서버에 접속할 수 없음: {msg}",
       "badge.fail": "번역 실패",
+      "title.on": "Scanlation: 번역 중 — 클릭하면 중지",
+      "title.off": "Scanlation: 클릭하면 이 탭 번역",
     },
   };
   const api = {
