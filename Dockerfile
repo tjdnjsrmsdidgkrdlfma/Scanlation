@@ -62,6 +62,6 @@ RUN useradd -m -u 10001 app \
 # `app` via setpriv. CPU-only containers just drop privileges. (No `USER app`.)
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 
-EXPOSE 4000
+EXPOSE 4010
 ENTRYPOINT ["sh", "/docker-entrypoint.sh"]
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4000"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4010"]

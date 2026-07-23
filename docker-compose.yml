@@ -17,9 +17,9 @@ services:
     image: scanlation-server
     container_name: scanlation-server
     # localhost-only; the host nginx terminates TLS and proxies to this.
-    # host 4010 -> container 4000 (uvicorn stays on 4000 inside).
+    # host 4010 -> container 4010 (uvicorn binds 4010 inside).
     ports:
-      - "127.0.0.1:4010:4000"
+      - "127.0.0.1:4010:4010"
     volumes:
       - plugins:/plugins   # runtime-installed engine packages (survive recreation)
       - data:/data         # state.json, sqlite cache, model weights, HF cache

@@ -259,7 +259,7 @@ lazy = ocr_runs PK SELECT; `force=True` 덮어쓰기; get_trans = translations S
 **권장: 하이브리드 — 개발은 로컬 CPU, 배포는 Docker+ROCm.**
 - **로컬 개발**(Windows / Claude 샌드박스): `DEVICE=cpu`(또는 CTD에 DirectML). Dummy + CTD-CPU + manga-ocr-CPU로 Claude가 GPU 없이 완전 반복. 빠른 루프, 리빌드 없음.
 - **배포**(Linux/ROCm): compose 2서비스 — `ocr-server`(우리 FastAPI, `DEVICE=rocm`, ort-rocm+torch-rocm 호스트 ROCm에 핀, `/dev/kfd`+`/dev/dri` + `video` 그룹, 필요시 `HSA_OVERRIDE_GFX_VERSION`)와 `ollama`(공식 이미지 11434, 자기 VRAM). 서버는 `OLLAMA_ENDPOINT=http://ollama:11434/api`로 접근. 볼륨: `./models:/models`(CTD+manga-ocr 가중치+`HF_HOME`), `./data:/data`(sqlite), ollama 자체 볼륨. GPU 없는 스모크용 `docker-compose.cpu.yml` override + 무도커 `pip install -e .` 경로도 제공.
-- **Dockerfile**(구 패턴 재사용): 멀티스테이지(builder venv→slim+`libgl1`), EXPOSE 4000, `uvicorn app.main:app --host 0.0.0.0 --port 4000 --workers 1`. 타깃 `cpu`(평범한 휠)/`rocm`(ort-rocm+torch-rocm index URL). nginx 선택(uvicorn 직접 서빙 가능).
+- **Dockerfile**(구 패턴 재사용): 멀티스테이지(builder venv→slim+`libgl1`), EXPOSE 4010, `uvicorn app.main:app --host 0.0.0.0 --port 4010 --workers 1`. 타깃 `cpu`(평범한 휠)/`rocm`(ort-rocm+torch-rocm index URL). nginx 선택(uvicorn 직접 서빙 가능).
 
 **결론: 예, Docker — 단 배포/ROCm 용으로만.** 일상 개발과 Claude 테스트는 속도를 위해 컨테이너 없이 로컬 CPU로. 컨테이너는 재현 가능한 ROCm 배포 타깃.
 

@@ -10,7 +10,7 @@ test:            ## fast unit suite, no models/GPU (hand-rolled runner)
 	# `../../venv/Scripts/python -m tests` from packages/scanlation-<engine>/
 
 serve:           ## run the API (uvicorn, single worker)
-	$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 4000 --workers 1
+	$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 4010 --workers 1
 
 viz:             ## visualize detection: make viz IMG=page.png
 	$(PY) tools/visualize.py "$(IMG)" --detector "$(or $(DET),comic-text-and-bubble-detector)"
