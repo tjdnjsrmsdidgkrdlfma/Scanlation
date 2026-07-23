@@ -7,15 +7,12 @@ download are deferred to load().
 """
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from PIL import Image
 
 from scanlation_sdk.contracts import Region
 from scanlation_sdk.local_engine import LocalModelEngineBase, install_hint, to_rgb
-
-logger = logging.getLogger("scanlation.manga-ocr")
 
 
 class MangaOcrRecognizer(LocalModelEngineBase):
@@ -44,9 +41,9 @@ class MangaOcrRecognizer(LocalModelEngineBase):
         """Download the model (~400MB) into the HF cache."""
         from huggingface_hub import snapshot_download
 
-        logger.info("installing manga-ocr model %s", self.MODEL_REPO)
+        self._log.info("installing manga-ocr model %s", self.MODEL_REPO)
         snapshot_download(self.MODEL_REPO)
-        logger.info("manga-ocr model installed")
+        self._log.info("manga-ocr model installed")
 
     def _load(self, device: str) -> None:
         from manga_ocr import MangaOcr  # lazy: torch + transformers

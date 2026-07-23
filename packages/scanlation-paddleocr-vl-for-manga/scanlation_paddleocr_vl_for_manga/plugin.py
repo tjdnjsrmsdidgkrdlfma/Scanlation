@@ -17,7 +17,6 @@ download are deferred to install()/load().
 """
 from __future__ import annotations
 
-import logging
 import os
 from typing import Any
 
@@ -25,8 +24,6 @@ from PIL import Image
 
 from scanlation_sdk.contracts import Region
 from scanlation_sdk.local_engine import LocalModelEngineBase, downscale_to_cap, install_hint, to_rgb
-
-logger = logging.getLogger("scanlation.PaddleOCR-VL-For-Manga")
 
 _MODES = ("area", "box", "grid28", "boxgrid", "pow2")  # downscale_mode choices; validated in recognize
 
@@ -87,11 +84,11 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
         from huggingface_hub import snapshot_download
 
         repo = self._repo()
-        logger.info("installing PaddleOCR-VL weights %s + processor %s", repo, self.PROC_REPO)
+        self._log.info("installing PaddleOCR-VL weights %s + processor %s", repo, self.PROC_REPO)
         if not os.path.isdir(repo):
             snapshot_download(repo)
         snapshot_download(self.PROC_REPO)  # processor files only (~13MB); base weights not needed
-        logger.info("PaddleOCR-VL installed")
+        self._log.info("PaddleOCR-VL installed")
 
     def _load(self, device: str) -> None:
         import torch  # lazy

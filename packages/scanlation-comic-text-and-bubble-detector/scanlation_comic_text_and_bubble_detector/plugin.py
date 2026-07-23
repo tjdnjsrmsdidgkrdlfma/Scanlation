@@ -15,7 +15,6 @@ rule.
 """
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -26,8 +25,6 @@ from scanlation_sdk.context import context
 from scanlation_sdk.contracts import Region
 from scanlation_sdk.local_engine import LocalModelEngineBase, install_hint, to_rgb
 from . import postprocess
-
-logger = logging.getLogger("scanlation.comic-text-and-bubble-detector")
 
 
 class ComicTextAndBubbleDetector(LocalModelEngineBase):
@@ -74,9 +71,9 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
 
         d = self._model_dir()
         d.mkdir(parents=True, exist_ok=True)
-        logger.info("installing RT-DETR weights from %s -> %s", self.REPO, d)
+        self._log.info("installing RT-DETR weights from %s -> %s", self.REPO, d)
         snapshot_download(self.REPO, local_dir=str(d), allow_patterns=self.WEIGHT_PATTERNS)
-        logger.info("RT-DETR weights installed -> %s", d)
+        self._log.info("RT-DETR weights installed -> %s", d)
 
     def _load(self, device: str) -> None:
         from transformers import AutoImageProcessor  # lazy
