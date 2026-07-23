@@ -46,6 +46,12 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
         "downscale_mode": {"type": str,
                            "default": os.environ.get("SCANLATION_RECOGNIZE_DOWNSCALE_MODE", "pow2"),
                            "description": "How to downscale when max_pixels applies: pow2 (recommended) / box / area / grid28 / boxgrid."},
+        "do_sample": {"type": bool, "default": False,
+                      "description": "Sample instead of greedy decode. Off (greedy) is deterministic — best for OCR. Turn on only to diversify with temperature/top_p below."},
+        "temperature": {"type": float, "default": 1.0,
+                        "description": "Sampling temperature (ignored unless do_sample is on)."},
+        "top_p": {"type": float, "default": 1.0,
+                  "description": "Nucleus-sampling top_p (ignored unless do_sample is on)."},
     }
     SUPPORTED_SRC = ["ja", "en", "zh", "ko"]
 
@@ -112,8 +118,13 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
         messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": self.PROMPT}]}]
         text = self._proc.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
         inputs = self._proc(text=[text], images=[crop], return_tensors="pt").to(self._model.device)
-        out = self._model.generate(
-            **inputs, max_new_tokens=options["max_new_tokens"], do_sample=False,
-        )
+        # do_sample defaults off (greedy = deterministic, best for OCR); temperature/
+        # top_p are only forwarded when it's on, so greedy stays a clean byte-identical
+        # call and transformers doesn't warn about sampling args under greedy decode.
+        gen_kwargs = {"max_new_tokens": options["max_new_tokens"], "do_sample": options["do_sample"]}
+        if options["do_sample"]:
+            gen_kwargs["temperature"] = options["temperature"]
+            gen_kwargs["top_p"] = options["top_p"]
+        out = self._model.generate(**inputs, **gen_kwargs)
         gen = out[0][inputs["input_ids"].shape[1]:]
         return self._proc.decode(gen, skip_special_tokens=True).strip()
