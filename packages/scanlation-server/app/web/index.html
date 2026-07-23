@@ -98,7 +98,7 @@
       <div class="row">
         <label class="opt-check grow"><input id="verbose-log" type="checkbox" /><span class="toggle"></span> <span data-i18n="behavior.verbose.label">상세 로그 (DEBUG)</span></label>
       </div>
-      <p class="note" data-i18n="behavior.verbose.desc">켜면 탐지 영역·bounds·인식/번역 결과를 로그에 남깁니다(진단용, 재시작 없이 즉시 적용). 끄면 개수·시간 요약만.</p>
+      <p class="note" data-i18n="behavior.verbose.desc">켜면 검출 영역·bounds·인식/번역 결과를 로그에 남깁니다(진단용, 재시작 없이 즉시 적용). 끄면 개수·시간 요약만.</p>
       <div class="row">
         <label class="grow"><span data-i18n="behavior.concurrency.label">동시 번역 이미지 수</span>
           <div class="stepper">
@@ -118,7 +118,7 @@
           </div>
         </label>
       </div>
-      <p class="note" data-i18n="behavior.idleUnload.desc">로컬 torch 엔진(탐지·인식)을 이 시간(분) 동안 안 쓰면 VRAM에서 내려, 작업 사이에 GPU를 붙잡고 있지 않게 합니다(ollama 번역기는 별도 프로세스라 무관 — 그쪽은 OLLAMA_KEEP_ALIVE가 관리). 0 = 안 내림(상주 유지).</p>
+      <p class="note" data-i18n="behavior.idleUnload.desc">로컬 torch 엔진(검출·인식)을 이 시간(분) 동안 안 쓰면 VRAM에서 내려, 작업 사이에 GPU를 붙잡고 있지 않게 합니다(ollama 번역기는 별도 프로세스라 무관 — 그쪽은 OLLAMA_KEEP_ALIVE가 관리). 0 = 안 내림(상주 유지).</p>
       <div class="row">
         <label class="grow"><span data-i18n="behavior.backend.label">연산 백엔드 (torch)</span>
           <select id="torch-backend">
@@ -141,12 +141,12 @@
         </label>
       </div>
       <p class="note" id="torch-note"></p>
-      <p class="note" data-i18n="behavior.backend.desc">torch 엔진(탐지·인식)을 CPU로 돌릴지 GPU로 돌릴지. GPU면 패스스루된 장치로 벤더(AMD ROCm / NVIDIA CUDA)를 자동 판별해 맞는 torch를 깝니다. 설치 전에 정하세요 — 바꾸면 엔진 재설치(또는 /plugins 리셋 후 재설치)해야 적용됩니다. GPU 패스스루는 docker-compose 오버라이드로 따로 설정.</p>
+      <p class="note" data-i18n="behavior.backend.desc">torch 엔진(검출·인식)을 CPU로 돌릴지 GPU로 돌릴지. GPU면 패스스루된 장치로 벤더(AMD ROCm / NVIDIA CUDA)를 자동 판별해 맞는 torch를 깝니다. 설치 전에 정하세요 — 바꾸면 엔진 재설치(또는 /plugins 리셋 후 재설치)해야 적용됩니다. GPU 패스스루는 docker-compose 오버라이드로 따로 설정.</p>
     </section>
 
     <!-- 통계 -->
     <section class="card view" data-view="stats">
-      <h2><span data-i18n="stats.h2">통계</span> <span class="hint" data-i18n="stats.hint">페이지·crop 처리 통계 (벤치 제외)</span></h2>
+      <h2><span data-i18n="stats.h2">통계</span> <span class="hint" data-i18n="stats.hint">페이지·crop 처리 통계 (벤치마크 제외)</span></h2>
       <h3 data-i18n="stats.pages">페이지 지표</h3>
       <div id="stats-pages"></div>
       <h3 data-i18n="stats.regions">crop(말풍선) 지표</h3>
