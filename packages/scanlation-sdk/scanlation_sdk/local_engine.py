@@ -23,16 +23,24 @@ def to_rgb(img: Image.Image) -> Image.Image:
 
 
 GRID = 28  # dynamic-res VLM vision patch grid (PaddleOCR-VL: patch14 x merge2)
+# The downscale modes downscale_to_cap understands — the authoritative set a
+# recognizer's OPTION_SCHEMA should defer to instead of hardcoding its own whitelist
+# (an unknown mode falls back to pow2 below). pow2 = BOX integer halving; box/area =
+# BOX/LANCZOS scale; the grid variants snap to the VLM patch grid first.
+DOWNSCALE_MODES = ("pow2", "box", "area", "grid28", "boxgrid")
 
 
 def downscale_to_cap(crop: Image.Image, cap: int, mode: str = "pow2") -> Image.Image:
     """Shrink a crop to <= ``cap`` pixels (aspect preserved) so a dynamic-resolution
     VLM recognizer emits fewer vision tokens. ``pow2`` (BOX integer halving) is the
     validated-best mode — packages/scanlation-server/tools/recognize-gpu-speed.md.
-    ``cap <= 0`` or an already-small crop is returned unchanged (same object)."""
+    An unrecognized ``mode`` falls back to ``pow2``. ``cap <= 0`` or an already-small
+    crop is returned unchanged (same object)."""
     w, h = crop.width, crop.height
     if cap <= 0 or w * h <= cap:
         return crop
+    if mode not in DOWNSCALE_MODES:
+        mode = "pow2"
     if mode == "pow2":
         while crop.width * crop.height > cap and crop.width >= 2 and crop.height >= 2:
             crop = crop.reduce(2)

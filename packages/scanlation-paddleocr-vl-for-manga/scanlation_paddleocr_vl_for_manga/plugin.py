@@ -25,8 +25,6 @@ from PIL import Image
 from scanlation_sdk.contracts import Region
 from scanlation_sdk.local_engine import LocalModelEngineBase, downscale_to_cap, install_hint, to_rgb
 
-_MODES = ("area", "box", "grid28", "boxgrid", "pow2")  # downscale_mode choices; validated in recognize
-
 
 class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
     name = "PaddleOCR-VL-For-Manga"
@@ -110,8 +108,7 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
     def recognize(self, crop: Image.Image, region: Region, options: dict[str, Any]) -> str:
         options = self.resolve_options(options)
         crop = to_rgb(crop)
-        mode = options["downscale_mode"] if options["downscale_mode"] in _MODES else "pow2"
-        crop = downscale_to_cap(crop, options["max_pixels"], mode)
+        crop = downscale_to_cap(crop, options["max_pixels"], options["downscale_mode"])
         messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": self.PROMPT}]}]
         text = self._proc.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
         inputs = self._proc(text=[text], images=[crop], return_tensors="pt").to(self._model.device)
