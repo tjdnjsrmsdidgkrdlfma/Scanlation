@@ -17,6 +17,34 @@ const DEFAULTS = {
 const ICON_ON = { 16: "icons/icon16.png", 48: "icons/icon48.png" };
 const ICON_OFF = { 16: "icons/icon-off16.png", 48: "icons/icon-off48.png" };
 
+// Content is injected on demand — only into a tab the user activates — instead of
+// statically on <all_urls>, so pages the user never translates run none of it. The
+// content script's presence is the source of truth: a message to a tab without it
+// rejects, so there's no injected-tab bookkeeping to go stale when this (non-
+// persistent) event page unloads.
+const CONTENT_FILES = ["src/constants.js", "src/util.js", "src/md5.js", "src/content.js"];
+
+async function injectContent(tabId) {
+  try {
+    await ext.tabs.insertCSS(tabId, { file: "content.css" });
+    for (const file of CONTENT_FILES) await ext.tabs.executeScript(tabId, { file });
+    return true;
+  } catch (e) {
+    return false; // restricted page (about:, view-source:, reader, PDF, AMO) — can't inject
+  }
+}
+
+// Message a tab's content script; if it isn't there yet, inject it and enable. A
+// tab with no content script is off, so the inject path always means "turn on" —
+// which is what both toolbar surfaces want on a first activation.
+async function messageOrInject(tabId, msg) {
+  try {
+    await ext.tabs.sendMessage(tabId, msg);
+  } catch (e) {
+    if (await injectContent(tabId)) ext.tabs.sendMessage(tabId, { type: "enable" }).catch(() => {});
+  }
+}
+
 // Keep SCANI18N.lang in sync with the popup's stored choice so the page_action
 // tooltip localizes (storage key "lang", default en; popup persists it, see i18n.js).
 Promise.resolve(ext.storage.local.get("lang")).then((c) => SCANI18N.setLang(c && c.lang)).catch(() => {});
@@ -31,11 +59,10 @@ ext.runtime.onInstalled.addListener(async () => {
   if (Object.keys(patch).length) await ext.storage.local.set(patch);
 });
 
-// address-bar icon click = one-click translate toggle
+// address-bar icon: toggle the live content script, or inject + enable on the
+// first activation of this tab.
 ext.pageAction.onClicked.addListener((tab) => {
-  if (tab && tab.id != null) {
-    Promise.resolve(ext.tabs.sendMessage(tab.id, { type: "toggle" })).catch(() => {});
-  }
+  if (tab && tab.id != null) messageOrInject(tab.id, { type: "toggle" });
 });
 
 function setPageAction(tabId, enabled) {
@@ -51,6 +78,13 @@ function setPageAction(tabId, enabled) {
 ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "state") {
     setPageAction(sender.tab && sender.tab.id, !!msg.enabled);
+    return undefined;
+  }
+  // Popup "Translate": enable the active tab's content script, injecting it first
+  // if this is the first activation. Injection lives here (not the popup) so both
+  // toolbar surfaces share one code path.
+  if (msg && msg.type === "activate" && msg.tabId != null) {
+    messageOrInject(msg.tabId, { type: "enable" });
     return undefined;
   }
   if (msg && msg.type === "fetch-image") {

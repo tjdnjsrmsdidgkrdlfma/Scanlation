@@ -26,15 +26,6 @@
     "storage",
     "<all_urls>"
   ],
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["src/constants.js", "src/util.js", "src/md5.js", "src/content.js"],
-      "css": ["content.css"],
-      "run_at": "document_idle",
-      "all_frames": false
-    }
-  ],
   "browser_specific_settings": {
     "gecko": { "id": "scanlation@local" }
   }

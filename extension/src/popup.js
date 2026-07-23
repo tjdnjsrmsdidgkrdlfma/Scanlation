@@ -108,7 +108,12 @@ function wire() {
     });
   ["detector", "recognizer", "translator"].forEach((id) => $(id).addEventListener("change", setModels));
 
-  $("enable").addEventListener("click", () => sendActive({ type: "enable" }));
+  // Translate routes through the background so it injects the content script into
+  // the active tab first (on-demand injection); Clear just messages an already-live tab.
+  $("enable").addEventListener("click", async () => {
+    const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.id != null) Promise.resolve(ext.runtime.sendMessage({ type: "activate", tabId: tab.id })).catch(() => {});
+  });
   $("disable").addEventListener("click", () => sendActive({ type: "disable" }));
 
   $("showOriginal").addEventListener("change", async (e) => {

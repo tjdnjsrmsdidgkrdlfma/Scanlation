@@ -36,18 +36,20 @@ content.css            overlay box styles
 popup.html/css         settings popup (dark theme)
 icons/                 icon{16,48,128} (on) + icon-off{16,48} (page_action off state)
 src/content.js         image discovery + lazy/work + overlay
-src/background.js      page_action toggle + icon sync + cross-origin image fetch
+src/background.js      page_action toggle + on-demand content injection + icon sync + cross-origin image fetch
 src/popup.js           handshake-driven settings controls
 src/starfield.js       popup background animation
 src/constants.js       shared config defaults on globalThis.SCAN (endpoint, min image dim)
 src/util.js            shared pure helpers (endpoint/auth/base64/box math) on globalThis.SCANUTIL
-src/i18n.js            shared en/ko strings (popup + content failure badge) on globalThis.SCANI18N
+src/i18n.js            shared en/ko strings (popup + page_action title) on globalThis.SCANI18N
 src/md5.js             clean-room md5 (byte-equal to Python hashlib.md5)
 ```
 
-No build step: the files load as-is. Manifest content scripts and the event page
-can't use ES imports, so the shared pieces (`constants.js`, `util.js`, `i18n.js`,
-`md5.js`) are classic scripts that publish onto `globalThis` and are listed before
-their consumers in each load list. The `icon-off*` PNGs are generated from our own
-`icon*` (desaturated + dimmed) — no GPLv3 assets from ocr_extension are copied,
-keeping the tree clean-room.
+No build step: the files load as-is. Neither the injected content world nor the
+event page can use ES imports, so the shared pieces are classic scripts that publish
+onto `globalThis` and load before their consumers: the popup and event page list
+theirs in order; the content script is injected on demand by the background via
+`tabs.executeScript` — only into a tab you activate, no static `<all_urls>`
+injection — in dependency order (`constants.js`, `util.js`, `md5.js`, `content.js`).
+The `icon-off*` PNGs are generated from our own `icon*` (desaturated + dimmed) — no
+GPLv3 assets from ocr_extension are copied, keeping the tree clean-room.

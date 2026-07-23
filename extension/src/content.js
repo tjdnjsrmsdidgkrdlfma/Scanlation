@@ -20,6 +20,7 @@
   };
   let enabled = false;
   let observer = null;
+  let configReady = null; // resolves once loadConfig() has applied stored settings
   const processed = new WeakSet();
   const processing = new WeakSet();
   const tracked = []; // { img, wrapper, boxes: [el] }
@@ -285,9 +286,13 @@
     try { ext.runtime.sendMessage({ type: "state", enabled }); } catch (e) { /* no background */ }
   }
 
-  function enable() {
+  async function enable() {
     if (enabled) return;
     enabled = true;
+    // Injected on demand, so config may still be loading — wait for it before the
+    // first scan so requests use the configured endpoint/token, not the defaults.
+    try { await configReady; } catch (e) { /* fall back to defaults */ }
+    if (!enabled) return; // a disable() landed while config was loading
     scan(document.body || document.documentElement);
     observer = new MutationObserver((muts) => {
       for (const m of muts) m.addedNodes.forEach((n) => { if (n.nodeType === 1) scan(n); });
@@ -328,5 +333,5 @@
     return undefined;
   });
 
-  loadConfig();
+  configReady = loadConfig();
 })();
