@@ -143,15 +143,15 @@ def test_discover_logs_failed_load():
     handler.emit = records.append  # type: ignore[method-assign]
     logging.getLogger("scanlation.registry").addHandler(handler)
 
-    real_entry_points = registry_mod.entry_points
+    real_iter = registry_mod.iter_entry_points
 
-    def fake_entry_points(*args, **kwargs):
-        eps = list(real_entry_points(*args, **kwargs))
-        if kwargs.get("group") == "scanlation.detectors":
+    def fake_iter(group):
+        eps = list(real_iter(group))
+        if group == "scanlation.detectors":
             eps.append(_BrokenEntryPoint())  # inject the ghost into detectors only
         return eps
 
-    registry_mod.entry_points = fake_entry_points
+    registry_mod.iter_entry_points = fake_iter
     try:
         registry.rediscover()  # re-scan with the broken entry_point present
         assert any("__broken_probe__" in r.getMessage() for r in records), \
@@ -159,7 +159,7 @@ def test_discover_logs_failed_load():
         assert not registry.has("detector", "__broken_probe__"), \
             "a failed load must not register a class"
     finally:
-        registry_mod.entry_points = real_entry_points
+        registry_mod.iter_entry_points = real_iter
         logging.getLogger("scanlation.registry").removeHandler(handler)
         registry.rediscover()  # rebuild a clean class map without the probe
 

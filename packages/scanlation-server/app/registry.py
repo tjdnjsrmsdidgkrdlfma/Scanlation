@@ -15,10 +15,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from importlib.metadata import entry_points
 from typing import Any, Callable
 
-from .plugins_path import ensure_on_path
+from .plugins_path import ensure_on_path, iter_entry_points
 
 logger = logging.getLogger("scanlation.registry")
 
@@ -58,11 +57,7 @@ class Registry:
 
     def _discover(self) -> None:
         for role, group in ROLES.items():
-            try:
-                eps = entry_points(group=group)
-            except TypeError:  # Python < 3.10 API
-                eps = entry_points().get(group, [])
-            for ep in eps:
+            for ep in iter_entry_points(group):
                 try:
                     self._classes[role][ep.name] = ep.load()
                 except Exception as exc:  # noqa: BLE001 - a broken/absent engine must not kill discovery

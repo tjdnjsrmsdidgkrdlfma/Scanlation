@@ -9,9 +9,21 @@ from __future__ import annotations
 import os
 import site
 import sys
+from importlib.metadata import entry_points
 from pathlib import Path
 
 from scanlation_sdk.context import context
+
+
+def iter_entry_points(group: str) -> list:
+    """Every entry point declared for ``group``, across the stdlib API gap: 3.10+
+    takes ``group=``, the 3.9 API returns a dict keyed by group. Both the registry
+    (main process) and the recognize worker pool (spawned workers) discover engines
+    this way, so it lives here in the leaf module they already import."""
+    try:
+        return list(entry_points(group=group))
+    except TypeError:  # Python < 3.10 API
+        return list(entry_points().get(group, []))
 
 
 def plugins_dir() -> Path:

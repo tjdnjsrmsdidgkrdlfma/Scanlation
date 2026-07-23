@@ -57,16 +57,10 @@ def _worker_init(group: str, name: str, device: str | None) -> None:
     (cold start); there is no synthetic warmup here (it would only move the same
     one-time cost, since the pool builds lazily on the first request anyway)."""
     global _REC
-    from importlib.metadata import entry_points
-
-    from app.plugins_path import ensure_on_path
+    from app.plugins_path import ensure_on_path, iter_entry_points
 
     ensure_on_path()  # volume-installed engine packages importable in the worker too
-    try:
-        eps = entry_points(group=group)
-    except TypeError:  # Python < 3.10 API
-        eps = entry_points().get(group, [])
-    cls = next((ep.load() for ep in eps if ep.name == name), None)
+    cls = next((ep.load() for ep in iter_entry_points(group) if ep.name == name), None)
     if cls is None:
         raise RuntimeError(f"recognizer {name!r} not found in entry-point group {group!r}")
     rec = cls()
