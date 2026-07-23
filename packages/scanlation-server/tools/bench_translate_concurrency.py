@@ -59,7 +59,7 @@ def _unescape(cell: str) -> str:
 
 def parse_pages(md_path: Path) -> list[tuple[str, list[str]]]:
     """(page name, non-blank source texts) per page, from a run_report markdown.
-    Row shape: | # | [bounds] | source (OCR) | destination |"""
+    Row shape: | # | [bounds] | source (recognized) | destination |"""
     pages: list[tuple[str, list[str]]] = []
     name, texts = None, []
     def flush():

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Drive the running server's /run_pipeline/ on local image(s) like the extension,
-then export a REPORT — per-region OCR (source) + final translation (destination),
+then export a REPORT — per-region source (recognized) + final translation (destination),
 per-stage timing, and the active engine/option config — as Markdown + a JSON sidecar.
 
 Where run_image.py just prints a one-line-per-region summary for log diagnosis, this
@@ -281,7 +281,7 @@ def build_markdown(report: dict) -> str:
         L.append(f"### {r['image']} — {len(regions)} regions")
         L.append(f"- {_fmt_timing(r.get('timing'))}")
         L.append("")
-        L.append("| # | bounds | source (OCR) | destination (번역) |")
+        L.append("| # | bounds | source (recognized) | destination (번역) |")
         L.append("|---|---|---|---|")
         for i, it in enumerate(regions):
             L.append(f"| {i} | {it.get('bounds')} | {_md_cell(it.get('source', ''))} "
@@ -345,7 +345,7 @@ def _selftest() -> int:
     for key in ("timing_sum", "timing_mean", "timing_median", "timing_min", "timing_max"):
         assert agg[key] == stage_vals, (key, agg[key])
     assert report["wall_clock_ms"] == 1000.0 and agg["throughput_pps"] == 1.0  # 1 ok page / 1.0s wall
-    assert "안녕하세요" in md and "こんにちは" in md          # OCR + translation rendered
+    assert "안녕하세요" in md and "こんにちは" in md          # recognized source + translation rendered
     assert "translate-bound" in md                          # 900 > 38 verdict (detect+recognize)
     assert "중앙값" in md and "최소" in md and "최대" in md    # per-stage spread columns
     assert "recognize_ms" in md and "detect 12.0 / recognize 26.0" in md  # detect/recognize split
@@ -359,7 +359,7 @@ def _selftest() -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Export a /run_pipeline/ report (OCR + translation + per-stage timing).")
+    ap = argparse.ArgumentParser(description="Export a /run_pipeline/ report (recognized source + translation + per-stage timing).")
     ap.add_argument("images", nargs="*", help="image files and/or folders")
     ap.add_argument("--server", default=os.environ.get("SCANLATION_SERVER", "http://127.0.0.1:4010"),
                     help="server base URL (default: %(default)s)")
@@ -375,7 +375,7 @@ def main() -> int:
     ap.add_argument("--use-cache", action="store_true",
                     help="honor the cache (default: force a fresh run so timing is present)")
     ap.add_argument("--no-translate", action="store_true",
-                    help="recognize-only: skip the LLM (source only, no translation). For an OCR "
+                    help="recognize-only: skip the LLM (source only, no translation). For a recognize "
                          "bench when the GPU recognizer and the translate model can't share VRAM.")
     ap.add_argument("--out", default=None, help="output prefix (default: run_report_<timestamp>)")
     ap.add_argument("--selftest", action="store_true", help="verify report formatting on canned data, no server")

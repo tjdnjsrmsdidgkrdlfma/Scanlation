@@ -5,7 +5,7 @@
 This is THE accuracy-debugging tool: detection is the bottleneck, so seeing the
 rotated polygons land on the text (and the deskewed crops come out upright) is
 how detection quality is judged by eye. Optionally pass --recognizer to also
-print the OCR text per crop.
+print the recognized text per crop.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("image")
     ap.add_argument("--detector", default="comic-text-and-bubble-detector")
-    ap.add_argument("--recognizer", default=None, help="optional: OCR each crop and print text")
+    ap.add_argument("--recognizer", default=None, help="optional: recognize each crop and print text")
     ap.add_argument("--out", default="compare_out/annotated.png")
     ap.add_argument("--crops", default="compare_out/viz_crops")
     ap.add_argument("--src", default="ja",
