@@ -40,6 +40,38 @@
 
 > **범위 밖(기록용):** B3에 이어 **모델 유휴 언로드**를 신규 기능으로 착수·완료(`1b6e33d`) — `/admin` 동작 탭 `model_idle_unload_minutes`(env `SCANLATION_MODEL_IDLE_UNLOAD_MINUTES`, 기본 5분, `0`=상주), 로컬 detector/recognizer를 유휴 시 lifespan 백그라운드 sweep가 VRAM에서 내린다(ollama `OLLAMA_KEEP_ALIVE`의 로컬 대응). 이 백로그의 동작 보존 범위 밖이라 R-항목이 아니다(테스트 +5 → 전체 85개). 상세는 [README.md](README.md)·[SCANLATION_DESIGN.md](SCANLATION_DESIGN.md).
 
+### R10 — post-R9 재스윕 (자라난 트리의 신규 부채, `ed0bb5c`..`7a6ac73`, 18커밋)
+
+R1~R9 이후 자라난 부분(recognize 워커 풀·InferenceGate·유휴 언로드·해상도 캡·새 `paddleocr-vl-for-manga` recognizer·확장 i18n)이 네 축과 같은 부류의 부채를 다시 들여왔다. 트리 전체를 세 영역(서버 코어 / SDK+플러그인 / 확장+tools+문서)으로 재감사해 동작 보존 원칙 그대로 처리했다. 코어 단위 112 → **113**(admin i18n 키 패리티 가드 +1).
+
+| 배치 | 커밋 | 내용 |
+|---|---|---|
+| 1a | `ed0bb5c` | 서버 회고 주석 제거(logconfig·main CORS·settings `dml/ctd`·test-infra) — R2가 놓친 규칙4 위반 |
+| 1b | `4f36370` | SDK/플러그인 provenance 도크스트링 현재형화(contracts "old Crivella stack"·ctbd·ollama·testing) |
+| 1c | `f8263fa` | 라우트 도크스트링 ↔ 엔드포인트 동기화(settings 4/5·admin 4/12 → 요약형) |
+| 1d | `aab98f3` | 확장 README 파일트리 갱신(R9 이후 constants/util/i18n/md5/starfield) |
+| 2a | `88ee8eb` | entry_points 발견 헬퍼 통합 → `plugins_path.iter_entry_points`(registry + recognize pool) |
+| 2b | `bbf8ca8` | engine-존재 400 가드 4중복 → `routes.require_known_engine` |
+| 2c | `090a02f` | config env-int-with-floor 5필드 → `_env_int(name, default, floor=None)` |
+| 3a | `aa517f1` | 로컬 3종 중복 module logger → `EngineBase._log`(paddleocr가 재도입한 R6 부채) |
+| 3b | `b8da258` | ollama `_body`/`_extract` 추출(llama.cpp 대칭; sibling 비대칭 해소) |
+| 3c | `7c6934a` | base `load()`가 `self._device` 보존 → ctbd 사설 추적(init+`_load`) 접음 |
+| 3d | `669c7e3` | downscale-mode 집합을 SDK가 소유(`DOWNSCALE_MODES` + pow2 폴백) → paddleocr `_MODES` 제거 |
+| 4a | `182bb49` | paddleocr `do_sample`(+temperature/top_p) `OPTION_SCHEMA` 노출(R5 이월; 기본 greedy 보존) |
+| 5a | `b4a82a1` | tools의 'OCR' 역할 라벨 → recognized/source(run_report·bench_translate·visualize; compare/ 예외 밖) |
+| 6a | `15fc43e` | admin i18n 폴백 ko → **en**(확장·명시 기본과 일치) |
+| 6b | `b4d096c` | admin i18n en/ko 키 패리티 가드 테스트(chrome 키 파싱; `opt.*`는 ko 전용 불변식) |
+| 6c | `7a6ac73` | 확장 page_action 툴팁/manifest 타이틀 지역화(`title.on/off`; background가 storage lang 추적) |
+| 6d | `d31db60` | admin 모델탭 역할 라벨 지역화(`role.detector/recognizer/translator`; 정적+동적) |
+| 7a | `47f98d9` | orchestrator `run_page.compute` 조립부 → `_build_timing`/`_build_region_rows`(await/락 순서 유지) |
+
+**의도적으로 남긴 것:**
+
+- **TEMP occupancy 계측 유지(소유자 결정).** `recognize_pool`의 4-tuple 반환·`_OCC`·`_split_occ`·occupancy 헬퍼 3개, `admin`의 `/bench_occupancy(_reset)/` 2개, `tools/bench_occupancy.py`는 9060 XT 재장착 후 크롭 분포 재측정에 재사용하려 남긴다("revert via git" 라벨 유지). 재감사가 프로덕션 recognize 핫패스의 최대 부채로 지목했으나 되돌리지 않기로 결정. 그 결론은 [recognize-gpu-speed.md](packages/scanlation-server/tools/recognize-gpu-speed.md)에 이미 기록됨.
+- **N7**(플러그인 attr 이름 드리프트 `MODEL_REPO`/`REPO`/`self._m` vs `_model`)은 공유 표면이 없는 cosmetic이라 제외. R1~R9의 기존 "의도적 제외"(compare/ localStorage 키, 확장 타이포 노브, `SUPPORTED_SRC/DST` 등)는 그대로.
+
+**가중치 머신 잔여 검증:** 3a·3c(로컬 모델 본문)는 이 PC에서 스모크 auto-skip. 홈 PC/리눅스 서버에서 manga-ocr·paddleocr·ctbd 스모크 green + ctbd GPU detect로 완결. **관측 검증:** 6a/6b/6d는 `/admin` 언어 토글, 6c는 Firefox 임시 확장 로드 후 page_action 툴팁 ko/en 확인.
+
 **결정 완료:**
 
 - **H3** — vendored bake-off를 **유지**하기로 결정(2026-07-09). OCR 인식이 파이프라인 핵심이고 그 모델 비교(bake-off)가 중요해 (a) 제거·(c) 분리를 기각. 형식 라이선스 확정((b))은 보류. 이에 따라 §9-4의 "트리에 GPLv3 미포함"을 현실에 맞게 정정. **LICENSE 파일 부재만 미결**로 남긴다(소유자 보류) — 아래 전용 절
@@ -47,8 +79,8 @@
 
 **측정 장비가 필요한 것:** B5·B6 — 벤치 크롭 세트 불일치. GPU 호스트에서 재측정해야 `tools/*.md`의 결론을 갱신할 수 있다.
 
-**남은 리팩토링:** 없음 — R1~R9 완료로 네 축(벤치 통합·어휘 정리·대형 파일 분할·하드코딩→`/admin`)의 구조 부채는 소진.
-남은 것은 측정(B5·B6)·가중치 머신 검증뿐 — 결정 대기 0(H3 유지 결정·H6 정정 완료), 문서 위생(H4·H5·H7) 완료, H8(해상도 캡)은 범위 밖 신규 기능으로 완료.
+**남은 리팩토링:** 없음 — R1~R9(네 축: 벤치 통합·어휘 정리·대형 파일 분할·하드코딩→`/admin`)에 더해, **R10 재스윕**이 그 이후 자라난 트리의 같은 부류 부채(중복·주석/문서 위생·하드코딩·i18n 정합·대형 함수)를 마저 소진했다.
+남은 것은 측정(B5·B6)·가중치 머신 검증(R10의 3a·3c 포함)뿐 — 결정 대기 0(H3 유지 결정·H6 정정 완료, R10의 TEMP occupancy는 유지 결정), 문서 위생 완료.
 
 ---
 
@@ -421,7 +453,7 @@ i18n 블록(테이블 + `LANG`/`t`/`setLang`/`applyLang`, 14-239줄 ~225줄)을 
 
 ## 다음 순서 (완료분은 「현재 상태」 참조)
 
-**바로 착수 가능** — 없음. R1~R9(리팩토링 네 축)가 모두 완료돼 구조 부채는 소진됐다. 남은 것은 아래 세 부류다.
+**바로 착수 가능** — 없음. R1~R9(리팩토링 네 축) + R10 재스윕이 모두 완료돼 구조 부채는 소진됐다. 남은 것은 아래 세 부류다.
 
 **결정 대기** — 없음. H3(유지)·H6(정정)이 처리돼 열린 결정은 0. H3의 잔여 미결은 `LICENSE` 파일 하나(소유자 보류) — 위 H3 상세 참조.
 
