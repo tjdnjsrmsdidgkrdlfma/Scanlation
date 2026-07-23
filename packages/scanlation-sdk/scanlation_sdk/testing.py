@@ -32,7 +32,7 @@ def run(tests, title: str) -> int:
 def run_modules(modules) -> int:
     """Run every module's ``TESTS`` list (each test module defines ``TESTS``).
     Returns 0 if all modules passed/skipped, else 1 — the exit code a package's
-    ``python -m tests`` should use. Replaces the identical loop each package had."""
+    ``python -m tests`` should use."""
     rc = 0
     for mod in modules:
         rc |= run(mod.TESTS, mod.__name__)

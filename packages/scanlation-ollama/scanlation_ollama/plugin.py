@@ -1,8 +1,7 @@
 """OllamaTranslator — LLM translation via a local ollama server.
 
-Ported from the user's own tuned config (model_test.py), not the GPLv3 Crivella
-plugin: the system prompt + the inline-`system`/`options`/`think:False` request
-shape are the user's working setup. Key tunings:
+The system prompt + the inline-`system`/`options`/`think:False` request shape are
+the user's own tuned setup (clean-room, not the GPLv3 Crivella plugin). Key tunings:
   * think=False  -> ~11x faster on reasoning models (drops hidden <think>)
   * num_ctx=2048 -> one KV size for the single + batch paths (no model reload
                     when the pipeline switches between them)

@@ -1,7 +1,6 @@
 """ComicTextAndBubbleDetector — RT-DETRv2 comic/manga text detector (transformers).
 
-Replaces the segmentation-mask ``ctd`` detector. The model
-(ogkalu/comic-text-and-bubble-detector) classifies each region as
+The model (ogkalu/comic-text-and-bubble-detector) classifies each region as
 bubble / text_bubble / text_free; for recognition we keep only the text regions
 (text_bubble + text_free), drop the whole-bubble container, and dedup the
 NMS-free overlaps RT-DETR leaves behind. Tuned defaults (conf 0.6, dedup

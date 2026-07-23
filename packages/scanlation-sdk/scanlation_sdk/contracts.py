@@ -1,10 +1,9 @@
 """The engine contract — the single seam every plugin plugs into.
 
-The key design departure from the old (Crivella) stack: a Region carries
-*rotated* geometry (a 4-point polygon + angle + optional mask), not just an
-axis-aligned box. This lets the pipeline deskew tilted text (SFX, vertical
-JP) before recognition. Axis-aligned detectors degrade gracefully via
-``Region.from_bbox`` (a right-angled quad, angle 0).
+The key design choice: a Region carries *rotated* geometry (a 4-point polygon +
+angle + optional mask), not just an axis-aligned box. This lets the pipeline
+deskew tilted text (SFX, vertical JP) before recognition. Axis-aligned detectors
+degrade gracefully via ``Region.from_bbox`` (a right-angled quad, angle 0).
 
 Only ``bbox`` (= [x_min, y_min, x_max, y_max]) is serialized to the wire, which
 the browser extension reads as [l, b, r, t]. polygon/angle/mask stay
