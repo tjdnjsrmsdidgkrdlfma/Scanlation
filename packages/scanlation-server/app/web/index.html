@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,7 +11,7 @@
     <header class="topbar">
       <div class="brand">
         <h1>Scanlation <span class="muted">Admin</span></h1>
-        <p class="sub" id="version" data-i18n="brand.sub">서버 설정 · 플러그인 · 프롬프트</p>
+        <p class="sub" id="version" data-i18n="brand.sub"></p>
       </div>
       <div class="langtoggle" id="lang-toggle" role="group" aria-label="Language">
         <button class="langopt" data-lang="en">EN</button>
@@ -20,87 +20,87 @@
     </header>
 
     <nav class="tabbar" id="tabbar" hidden>
-      <button class="tab active" data-view="models" data-i18n="tab.models">플러그인 · 언어</button>
-      <button class="tab" data-view="prompt" data-i18n="tab.prompt">번역 프롬프트</button>
-      <button class="tab" data-view="options" data-i18n="tab.options">플러그인 옵션</button>
-      <button class="tab" data-view="plugins" data-i18n="tab.plugins">플러그인 설치</button>
-      <button class="tab" data-view="behavior" data-i18n="tab.behavior">동작</button>
-      <button class="tab" data-view="stats" data-i18n="tab.stats">통계</button>
-      <button class="tab" data-view="maintenance" data-i18n="tab.maintenance">유지보수</button>
+      <button class="tab active" data-view="models" data-i18n="tab.models"></button>
+      <button class="tab" data-view="prompt" data-i18n="tab.prompt"></button>
+      <button class="tab" data-view="options" data-i18n="tab.options"></button>
+      <button class="tab" data-view="plugins" data-i18n="tab.plugins"></button>
+      <button class="tab" data-view="behavior" data-i18n="tab.behavior"></button>
+      <button class="tab" data-view="stats" data-i18n="tab.stats"></button>
+      <button class="tab" data-view="maintenance" data-i18n="tab.maintenance"></button>
     </nav>
   </div>
 
   <main id="app" hidden>
-    <!-- 플러그인 선택 -->
+    <!-- plugin selection -->
     <section class="card view active" data-view="models">
-      <h2><span data-i18n="models.h2">플러그인 선택</span> <span class="hint" data-i18n="models.hint">마지막 선택이 서버에 저장되어 기본값이 됩니다</span></h2>
+      <h2><span data-i18n="models.h2"></span> <span class="hint" data-i18n="models.hint"></span></h2>
       <div class="grid3">
-        <label><span data-i18n="role.detector">Detector</span><select id="sel-detector"></select></label>
-        <label><span data-i18n="role.recognizer">Recognizer</span><select id="sel-recognizer"></select></label>
-        <label><span data-i18n="role.translator">Translator</span><select id="sel-translator"></select></label>
+        <label><span data-i18n="role.detector"></span><select id="sel-detector"></select></label>
+        <label><span data-i18n="role.recognizer"></span><select id="sel-recognizer"></select></label>
+        <label><span data-i18n="role.translator"></span><select id="sel-translator"></select></label>
       </div>
       <div class="row">
         <div class="grid2 langs">
-          <label><span data-i18n="models.src">원문</span><select id="sel-lang_src"></select></label>
-          <label><span data-i18n="models.dst">번역</span><select id="sel-lang_dst"></select></label>
+          <label><span data-i18n="models.src"></span><select id="sel-lang_src"></select></label>
+          <label><span data-i18n="models.dst"></span><select id="sel-lang_dst"></select></label>
         </div>
-        <button class="btn primary" id="save-models" data-i18n="btn.save">저장</button>
+        <button class="btn primary" id="save-models" data-i18n="btn.save"></button>
       </div>
-      <p class="note" data-i18n="models.deviceNote">플러그인별 연산 장치(CPU/GPU)는 「플러그인 옵션」 탭에서 플러그인마다 따로 정합니다. 비워두면 각 플러그인의 기본값을 씁니다.</p>
+      <p class="note" data-i18n="models.deviceNote"></p>
     </section>
 
-    <!-- 번역 프롬프트 -->
+    <!-- translation prompt -->
     <section class="card view" data-view="prompt">
-      <h2><span data-i18n="prompt.h2">번역 프롬프트</span> <span class="hint" data-i18n="prompt.hint">LLM 시스템 프롬프트를 고르거나 직접 편집</span></h2>
+      <h2><span data-i18n="prompt.h2"></span> <span class="hint" data-i18n="prompt.hint"></span></h2>
       <div class="row">
-        <label class="grow"><span data-i18n="prompt.preset">프리셋</span>
+        <label class="grow"><span data-i18n="prompt.preset"></span>
           <select id="prompt-preset"></select>
         </label>
-        <button class="btn primary" id="prompt-use" data-i18n="prompt.use">이 프롬프트 사용</button>
-        <button class="btn danger" id="prompt-delete" data-i18n="prompt.delete">삭제</button>
+        <button class="btn primary" id="prompt-use" data-i18n="prompt.use"></button>
+        <button class="btn danger" id="prompt-delete" data-i18n="prompt.delete"></button>
       </div>
       <textarea id="prompt-text" rows="10" spellcheck="false"></textarea>
       <div class="row">
-        <label class="grow"><span data-i18n="prompt.saveName">저장 이름</span>
-          <input id="prompt-name" type="text" data-i18n-ph="prompt.namePlaceholder" placeholder="예: my-prompt" />
+        <label class="grow"><span data-i18n="prompt.saveName"></span>
+          <input id="prompt-name" type="text" data-i18n-ph="prompt.namePlaceholder" placeholder="" />
         </label>
-        <button class="btn" id="prompt-save" data-i18n="prompt.save">저장 &amp; 사용</button>
+        <button class="btn" id="prompt-save" data-i18n="prompt.save"></button>
       </div>
-      <p class="note" data-i18n="prompt.note">빌트인을 편집해 같은 이름으로 저장하면 그 이름의 커스텀 프리셋이 덮어씁니다. 새 이름으로 저장하면 복제됩니다. 커스텀을 삭제하면 빌트인으로 되돌아갑니다.</p>
+      <p class="note" data-i18n="prompt.note"></p>
     </section>
 
-    <!-- 플러그인 옵션 -->
+    <!-- plugin options -->
     <section class="card view" data-view="options">
-      <h2><span data-i18n="options.h2">플러그인 옵션</span> <span class="hint" data-i18n="options.hint">선택된 플러그인의 옵션 (예: 번역 모델 태그)</span></h2>
+      <h2><span data-i18n="options.h2"></span> <span class="hint" data-i18n="options.hint"></span></h2>
       <div id="engine-options"></div>
     </section>
 
-    <!-- 플러그인 설치 -->
+    <!-- plugin installation -->
     <section class="card view" data-view="plugins">
-      <h2><span data-i18n="plugins.h2">플러그인 설치</span> <span class="hint" data-i18n="plugins.hint">패키지 + 가중치 원클릭 설치</span></h2>
+      <h2><span data-i18n="plugins.h2"></span> <span class="hint" data-i18n="plugins.hint"></span></h2>
       <div id="plugins"></div>
     </section>
 
-    <!-- 동작 (확장 클라이언트 동작 설정) -->
+    <!-- behavior (extension client behavior settings) -->
     <section class="card view" data-view="behavior">
-      <h2><span data-i18n="behavior.h2">동작</span> <span class="hint" data-i18n="behavior.hint">확장 동작 설정</span></h2>
+      <h2><span data-i18n="behavior.h2"></span> <span class="hint" data-i18n="behavior.hint"></span></h2>
       <div class="row">
-        <label class="grow"><span data-i18n="behavior.minDim.label">최소 이미지 변 (px)</span>
+        <label class="grow"><span data-i18n="behavior.minDim.label"></span>
           <div class="stepper">
             <button type="button" class="step-btn" data-step="-50" aria-label="decrease">−</button>
             <input id="min-image-dim" type="number" min="0" step="50" inputmode="numeric" />
             <button type="button" class="step-btn" data-step="50" aria-label="increase">+</button>
           </div>
         </label>
-        <button class="btn primary" id="save-behavior" data-i18n="btn.save">저장</button>
+        <button class="btn primary" id="save-behavior" data-i18n="btn.save"></button>
       </div>
-      <p class="note" data-i18n="behavior.minDim.desc">이미지의 짧은 변이 이 값보다 작으면 아이콘·배너로 보고 번역하지 않습니다. 확장이 접속 시 이 값을 받아 적용합니다. 0 = 모든 이미지 번역.</p>
+      <p class="note" data-i18n="behavior.minDim.desc"></p>
       <div class="row">
-        <label class="opt-check grow"><input id="verbose-log" type="checkbox" /><span class="toggle"></span> <span data-i18n="behavior.verbose.label">상세 로그 (DEBUG)</span></label>
+        <label class="opt-check grow"><input id="verbose-log" type="checkbox" /><span class="toggle"></span> <span data-i18n="behavior.verbose.label"></span></label>
       </div>
-      <p class="note" data-i18n="behavior.verbose.desc">켜면 검출 영역·bounds·인식/번역 결과를 로그에 남깁니다(진단용, 재시작 없이 즉시 적용). 끄면 개수·시간 요약만.</p>
+      <p class="note" data-i18n="behavior.verbose.desc"></p>
       <div class="row">
-        <label class="grow"><span data-i18n="behavior.concurrency.label">동시 번역 이미지 수</span>
+        <label class="grow"><span data-i18n="behavior.concurrency.label"></span>
           <div class="stepper">
             <button type="button" class="step-btn" data-step="-1" aria-label="decrease">−</button>
             <input id="translate-concurrency" type="number" min="1" step="1" inputmode="numeric" />
@@ -108,9 +108,9 @@
           </div>
         </label>
       </div>
-      <p class="note" data-i18n="behavior.concurrency.desc">GPU 락 밖에서 한 번에 번역할 이미지 수(재시작 없이 즉시 적용). ollama의 OLLAMA_NUM_PARALLEL과 맞추세요 — 둘 중 낮은 값이 실제 병렬도이고, 이 값만 높이면 요청이 큐에 밀려 타임아웃·폴백이 납니다.</p>
+      <p class="note" data-i18n="behavior.concurrency.desc"></p>
       <div class="row">
-        <label class="grow"><span data-i18n="behavior.idleUnload.label">모델 유휴 언로드 (분)</span>
+        <label class="grow"><span data-i18n="behavior.idleUnload.label"></span>
           <div class="stepper">
             <button type="button" class="step-btn" data-step="-1" aria-label="decrease">−</button>
             <input id="model-idle-unload-minutes" type="number" min="0" step="1" inputmode="numeric" />
@@ -118,9 +118,9 @@
           </div>
         </label>
       </div>
-      <p class="note" data-i18n="behavior.idleUnload.desc">로컬 torch 엔진(검출·인식)을 이 시간(분) 동안 안 쓰면 VRAM에서 내려, 작업 사이에 GPU를 붙잡고 있지 않게 합니다(ollama 번역기는 별도 프로세스라 무관 — 그쪽은 OLLAMA_KEEP_ALIVE가 관리). 0 = 안 내림(상주 유지).</p>
+      <p class="note" data-i18n="behavior.idleUnload.desc"></p>
       <div class="row">
-        <label class="grow"><span data-i18n="behavior.backend.label">연산 백엔드 (torch)</span>
+        <label class="grow"><span data-i18n="behavior.backend.label"></span>
           <select id="torch-backend">
             <option value="cpu">CPU</option>
             <option value="gpu">GPU</option>
@@ -128,7 +128,7 @@
         </label>
       </div>
       <div class="row" id="torch-vendor-row" hidden>
-        <label class="grow"><span data-i18n="behavior.vendor.label">GPU 벤더 (AMD/NVIDIA 둘 다 감지됨)</span>
+        <label class="grow"><span data-i18n="behavior.vendor.label"></span>
           <select id="torch-vendor">
             <option value="amd">AMD (ROCm)</option>
             <option value="nvidia">NVIDIA (CUDA)</option>
@@ -136,36 +136,36 @@
         </label>
       </div>
       <div class="row" id="torch-index-row" hidden>
-        <label class="grow"><span data-i18n="behavior.torchIndex.label">torch index URL (선택 — ROCm 버전 튜닝)</span>
+        <label class="grow"><span data-i18n="behavior.torchIndex.label"></span>
           <input id="torch-index" type="text" placeholder="https://download.pytorch.org/whl/rocm6.2" />
         </label>
       </div>
       <p class="note" id="torch-note"></p>
-      <p class="note" data-i18n="behavior.backend.desc">torch 엔진(검출·인식)을 CPU로 돌릴지 GPU로 돌릴지. GPU면 패스스루된 장치로 벤더(AMD ROCm / NVIDIA CUDA)를 자동 판별해 맞는 torch를 깝니다. 설치 전에 정하세요 — 바꾸면 엔진 재설치(또는 /plugins 리셋 후 재설치)해야 적용됩니다. GPU 패스스루는 docker-compose 오버라이드로 따로 설정.</p>
+      <p class="note" data-i18n="behavior.backend.desc"></p>
     </section>
 
-    <!-- 통계 -->
+    <!-- stats -->
     <section class="card view" data-view="stats">
-      <h2><span data-i18n="stats.h2">통계</span> <span class="hint" data-i18n="stats.hint">페이지·crop 처리 통계 (벤치마크 제외)</span></h2>
-      <h3 data-i18n="stats.pages">페이지 지표</h3>
+      <h2><span data-i18n="stats.h2"></span> <span class="hint" data-i18n="stats.hint"></span></h2>
+      <h3 data-i18n="stats.pages"></h3>
       <div id="stats-pages"></div>
-      <h3 data-i18n="stats.regions">crop(말풍선) 지표</h3>
+      <h3 data-i18n="stats.regions"></h3>
       <div id="stats-regions"></div>
       <div class="row">
-        <div class="grow"><p class="note" data-i18n="stats.clear.desc">저장된 처리 통계를 모두 지웁니다(페이지 캐시와 별개).</p></div>
-        <button class="btn danger" id="clear-stats" data-i18n="stats.clear.btn">통계 비우기</button>
+        <div class="grow"><p class="note" data-i18n="stats.clear.desc"></p></div>
+        <button class="btn danger" id="clear-stats" data-i18n="stats.clear.btn"></button>
       </div>
     </section>
 
-    <!-- 유지보수 -->
+    <!-- maintenance -->
     <section class="card view" data-view="maintenance">
-      <h2><span data-i18n="maint.h2">유지보수</span> <span class="hint" data-i18n="maint.hint">캐시 관리</span></h2>
+      <h2><span data-i18n="maint.h2"></span> <span class="hint" data-i18n="maint.hint"></span></h2>
       <div class="row">
         <div class="grow">
-          <strong data-i18n="maint.cache.title">캐시 비우기</strong>
-          <p class="note" data-i18n="maint.cache.desc">저장된 모든 캐시(페이지 결과 + 번역 기록)를 지워 다음 접속 때 전 과정(검출·인식·번역)을 새로 실행합니다.</p>
+          <strong data-i18n="maint.cache.title"></strong>
+          <p class="note" data-i18n="maint.cache.desc"></p>
         </div>
-        <button class="btn danger" id="clear-cache" data-i18n="maint.cache.btn">캐시 비우기</button>
+        <button class="btn danger" id="clear-cache" data-i18n="maint.cache.btn"></button>
       </div>
     </section>
   </main>
@@ -175,12 +175,12 @@
   <!-- login gate: only shown when the server requires a token -->
   <div id="gate" class="gate" hidden>
     <form id="gate-form" class="gate-card">
-      <h2 data-i18n="gate.title">관리자 인증</h2>
-      <p class="note" data-i18n="gate.hint">이 서버는 접근 토큰이 필요합니다.</p>
+      <h2 data-i18n="gate.title"></h2>
+      <p class="note" data-i18n="gate.hint"></p>
       <input id="gate-token" type="password" autocomplete="current-password" spellcheck="false"
-             data-i18n-ph="gate.tokenPh" placeholder="Access token" />
-      <button type="submit" class="btn primary" data-i18n="gate.submit">입력</button>
-      <p id="gate-err" class="gate-err" data-i18n="gate.wrong" hidden>토큰이 올바르지 않습니다.</p>
+             data-i18n-ph="gate.tokenPh" placeholder="" />
+      <button type="submit" class="btn primary" data-i18n="gate.submit"></button>
+      <p id="gate-err" class="gate-err" data-i18n="gate.wrong" hidden></p>
     </form>
   </div>
 
