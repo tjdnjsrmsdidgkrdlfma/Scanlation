@@ -24,6 +24,13 @@
   const processing = new WeakSet();
   const tracked = []; // { img, wrapper, boxes: [el] }
 
+  // The failure badge is the only text the content world renders, so it carries
+  // its own two translations inline instead of loading the whole popup i18n table.
+  const BADGE_FAIL = { en: "Translation failed", ko: "번역 실패" };
+  let badgeLang = "en";
+  const setBadgeLang = (l) => { badgeLang = l === "ko" ? "ko" : "en"; };
+  const badgeFail = () => BADGE_FAIL[badgeLang];
+
   async function loadConfig() {
     try {
       const r = await ext.storage.local.get(["endpoint", "showTranslated", "token", "minImageDim", "lang"]);
@@ -31,7 +38,7 @@
       if (typeof r.showTranslated === "boolean") cfg.showTranslated = r.showTranslated;
       if (typeof r.token === "string") cfg.token = r.token;
       if (typeof r.minImageDim === "number") cfg.minImageDim = r.minImageDim;
-      if (r.lang) SCANI18N.setLang(r.lang); // localize the failure badge
+      if (r.lang) setBadgeLang(r.lang); // localize the failure badge
     } catch (e) { /* storage may be unavailable in some frames */ }
   }
 
@@ -202,7 +209,7 @@
     const wrapper = wrap(img);
     const badge = document.createElement("div");
     badge.className = "scanlation-badge scanlation-error";
-    badge.textContent = SCANI18N.t("badge.fail");
+    badge.textContent = badgeFail();
     badge.title = msg; // cause (e.g. "server 502: ...") on hover
     wrapper.appendChild(badge);
     // boxes stays empty: the badge is a child of wrapper (removed with it) and
@@ -315,7 +322,7 @@
       case "set-token": cfg.token = msg.token || ""; break;
       case "set-min-image-dim": if (typeof msg.value === "number") cfg.minImageDim = msg.value; break;
       case "set-show-translated": cfg.showTranslated = !!msg.value; retext(); break;
-      case "set-lang": SCANI18N.setLang(msg.lang); break;
+      case "set-lang": setBadgeLang(msg.lang); break;
       default: break;
     }
     return undefined;

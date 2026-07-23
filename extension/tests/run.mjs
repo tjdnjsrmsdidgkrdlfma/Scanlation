@@ -105,14 +105,14 @@ console.log("=".repeat(60));
 
 const { SCANI18N } = loadGlobals("i18n.js");
 
-test("defaults to en; the failure badge key resolves", () => {
+test("defaults to en; a known key resolves", () => {
   assert.equal(SCANI18N.lang, "en");
-  assert.equal(SCANI18N.t("badge.fail"), "Translation failed");
+  assert.equal(SCANI18N.t("btn.translate"), "Translate");
 });
 
 test("setLang('ko') localizes the same key", () => {
   SCANI18N.setLang("ko");
-  assert.equal(SCANI18N.t("badge.fail"), "번역 실패");
+  assert.equal(SCANI18N.t("btn.translate"), "번역");
 });
 
 test("setLang normalizes an unknown/absent code to en", () => {
