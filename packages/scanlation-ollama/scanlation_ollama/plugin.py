@@ -61,8 +61,11 @@ class OllamaTranslator(HttpTranslatorBase):
             "num_ctx": options["num_ctx"],
         }
 
-    def _translate(self, model: str, system: str, prompt: str, options: dict) -> str:
-        body = {
+    def _body(self, model: str, system: str, prompt: str, options: dict) -> dict:
+        """The shared /generate body. Options arrive already resolved against
+        OPTION_SCHEMA (defaults filled + typed) by resolve_options; the sampling
+        sub-dict is built by _sampling (one num_ctx for the single + batch paths)."""
+        return {
             "model": model,
             "prompt": prompt,
             "system": system,
@@ -70,19 +73,16 @@ class OllamaTranslator(HttpTranslatorBase):
             "think": options["think"],
             "options": self._sampling(options),
         }
-        data = self._post("/generate", body)
+
+    def _extract(self, data: dict) -> str:
         return (data.get("response") or "").strip()
 
+    def _translate(self, model: str, system: str, prompt: str, options: dict) -> str:
+        return self._extract(self._post("/generate", self._body(model, system, prompt, options)))
+
     def _translate_batch_call(self, model: str, system: str, prompt: str, schema: dict, options: dict) -> str:
-        """Batch: same body as _translate plus `format`=schema to force JSON. Uses
-        the same num_ctx as _translate so switching between the two never reloads."""
-        body = {
-            "model": model,
-            "prompt": prompt,
-            "system": system,
-            "stream": False,
-            "think": options["think"],
-            "format": schema,
-            "options": self._sampling(options),
-        }
-        return (self._post("/generate", body).get("response") or "").strip()
+        """Batch: same body plus `format`=schema to force JSON. Uses the same
+        num_ctx as _translate so switching between the two never reloads."""
+        body = self._body(model, system, prompt, options)
+        body["format"] = schema
+        return self._extract(self._post("/generate", body))
