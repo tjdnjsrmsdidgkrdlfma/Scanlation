@@ -68,6 +68,11 @@ class LocalModelEngineBase(EngineBase):
     # None -> DEFAULT_DEVICE. Class default keeps super().__init__()-skipping
     # subclasses safe, same as _loaded.
     _device_override: str | None = None
+    # The device this engine actually loaded onto (pick_device of the override or
+    # DEFAULT_DEVICE), recorded by load() so inference reads the resolved device
+    # instead of each subclass tracking it. Class default keeps __init__()-skipping
+    # subclasses safe, same as _loaded/_device_override.
+    _device: str = "cpu"
 
     # --- subclass hooks ---
     def _download(self) -> None:
@@ -95,6 +100,7 @@ class LocalModelEngineBase(EngineBase):
             raise RuntimeError(f"{self.name} weights not installed. {self.INSTALL_HINT}")
         device = pick_device(self._device_override or self.DEFAULT_DEVICE)
         self._load(device)
+        self._device = device
         self._loaded = True
         # Uniform load line for every local engine (per-engine logger namespace kept).
         self._log.info("%s loaded on %s", self.display_name, device_label(device))

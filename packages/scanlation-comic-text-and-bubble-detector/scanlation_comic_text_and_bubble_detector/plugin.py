@@ -52,7 +52,6 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
     def __init__(self) -> None:
         self._model = None
         self._proc = None
-        self._device = "cpu"
 
     # --- weights / install ---
     def _model_dir(self) -> Path:
@@ -79,7 +78,6 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
         from transformers import AutoImageProcessor  # lazy
 
         d = self._model_dir()
-        self._device = device
         self._proc = AutoImageProcessor.from_pretrained(str(d), local_files_only=True)
         try:  # Auto covers most detection models
             from transformers import AutoModelForObjectDetection
@@ -87,7 +85,9 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
         except (ValueError, KeyError):  # rt_detr_v2 on older transformers: name the class
             from transformers import RTDetrV2ForObjectDetection
             model = RTDetrV2ForObjectDetection.from_pretrained(str(d), local_files_only=True)
-        self._model = model.to(self._device).eval()
+        # detect() reads self._device (set by LocalModelEngineBase.load after this returns);
+        # inside _load the resolved device is the `device` arg.
+        self._model = model.to(device).eval()
 
     def _unload(self) -> None:
         self._model = None
