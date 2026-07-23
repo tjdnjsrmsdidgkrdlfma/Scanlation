@@ -116,10 +116,9 @@ class HttpTranslatorBase(EngineBase):
     ) -> list[str]:
         """Translate many texts in one model call and return them aligned to the
         input order. Blank texts pass through unchanged; every non-blank text goes
-        to the model (no length threshold — think-off makes even 1-2 char SFX cheap
-        enough). ANY failure (parse error, wrong count, HTTP error, num_ctx overflow
-        -> truncated JSON) falls back to a per-text translate() loop, so the result
-        is always complete and aligned — just slower on that page."""
+        to the model. ANY failure (parse error, wrong count, HTTP error, num_ctx
+        overflow -> truncated JSON) falls back to a per-text translate() loop, so
+        the result is always complete and aligned — just slower on that page."""
         options = self.resolve_options(options)
         stripped = [t.strip() for t in texts]
         idx = [i for i, t in enumerate(stripped) if t]  # non-blank -> worth a model call
