@@ -2,7 +2,7 @@
 local HTTP backend (ollama, llama.cpp / any OpenAI-compatible server).
 
 Both backends want the exact same lifecycle (a lazily-created httpx client keyed
-off an endpoint env var), the same guardrails (skip ≤2-char inputs, require a
+off an endpoint env var), the same guardrails (skip blank inputs, require a
 model chosen in /admin), and the same prompt selection (per-call ``system_prompt``
 falling back to ``DEFAULT_SYSTEM_PROMPT``). Only two things actually differ: the
 request body shape and how the response text is pulled out. Subclasses provide
