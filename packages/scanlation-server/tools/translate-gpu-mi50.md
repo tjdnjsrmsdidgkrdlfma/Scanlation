@@ -4,7 +4,7 @@
 
 > **상태 (2026-07-16):** **폭주 원인 확정·수정 — greedy 반복 루프.** 교성 텍스트(07.jpg `イ．．．くぅぅぅ〜〜〜んっっ`)가 "이... 으으으…"로 슬롯 컨텍스트가 찰 때까지 반복 — EOS도 grammar도 못 막는 유형(경위·로그·처방은 §폭주 원인 확정). 방어 3겹 배치: 플러그인 **`dry_multiplier` 0.8**(근본) + 유닛 **`--n-predict 1024`**(백스톱) + **전력 캡 150W**(decode 89~95 t/s 실측, 비용 ≈ 0). 2차 hang 자체는 콜드 부팅으로 복구(카드 생존) — 인과는 §4(무냉각 지속 부하 → 과열 → PCIe 버스 이탈, SIGKILL은 증상). **재검증 완료(2026-07-16): 챕터 21/21, 07.jpg 608ms에 `"이... 으으으으으응~"`(루프 사망), translate 평균 970.3ms(기존 932.9 대비 +4% = 캡+DRY 비용, 오차 수준). 동시성 스윕도 완료 — 운영 동시성 2 권장**(§3 동시성 스윕: 4는 junction crit 도달, 냉각 보강 후 재평가).
 > **⚠ 벤치 중지 (2026-07-17 저녁):** 포화 벤치 세션 뒤 카드가 **probe 상한 ~74 t/s의 미해결 상태**(§MI50 쿨링 성능 latch — idle 58°C·캡 정상인데 건강 90도 latch 63도 아님). **냉각 보강(GPU 연동 팬 커브/직결 송풍 강화)이 선행 조건** → 콜드 부팅 → probe 재기준선 → 재개봉 측정(서버 설정 비용 표·P8 판정) → 최종 토폴로지(TODO 5) 순서로 재개.
-> **그 외는 작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). 로드타임 ~84초는 Vulkan 특성(디스크 아님, §5). **reasoning 제어는 Option B** — 서버 `--reasoning-budget 0` 대신 플러그인 `enable_thinking`(기본 off)으로 제어해 /admin 토글이 실제로 작동(§3). systemd 영속화·플러그인 재설치 완료. 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
+> **그 외는 작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). **reasoning 제어는 Option B** — 서버 `--reasoning-budget 0` 대신 플러그인 `enable_thinking`(기본 off)으로 제어해 /admin 토글이 실제로 작동(§3). systemd 영속화·플러그인 재설치 완료. 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
 
 ## 배경 — 왜 MI50인가
 
@@ -320,12 +320,6 @@ task 4424 | n_decoded 2637+ …                                                 
 **폭주 격리 — HTTP 타임아웃으론 못 막는다, 서버측 `max_tokens`라야.** `SCANLATION_HTTP_TIMEOUT`은 **클라만 포기시키지 llama-server의 생성을 안 멈춘다**(서버는 EOS나 슬롯 컨텍스트까지 계속 태움 — 클라 타임아웃 뒤에도 GPU는 요청당 ~120초를 태워 백로그가 쌓인다). 그래서 타임아웃 값(10초든 120초든)으로는 폭주의 GPU 소모·백로그를 격리 못 한다. 실제로 서버가 멈추는 건 둘뿐이다: **llama-server 전역 캡 `--n-predict N`**(요청이 max_tokens를 안 보내면 기본값이 되고, 더 큰 값을 요구해도 서버가 클램프 — 유닛 ExecStart에 걸 수 있어 **plugin 상태와 무관하게 작동**, [deploy/llama.cpp.service.example](../../../deploy/llama.cpp.service.example)에 `--n-predict 1024`로 반영), 그리고 요청의 **`max_tokens`**(현재 plugin 미전송, TODO 7). 단 이건 **`n_ctx_slot`보다 낮아야** 의미가 있다 — `-c 16384 --parallel 4`면 슬롯당 4096이라 **4096 캡은 무효**(어차피 4096까지 태움), **1024급**이라야 GPU 시간을 실제로 줄인다(약 32초). 대가는 텍스트 많은 정상 페이지 truncation이므로 **폭주 제거가 본선, 낮은 `max_tokens`는 보조 방어선**(넣으면 하드코딩 말고 env 기본+`/admin` — TODO 7). 한국어 출력은 대략 1토큰 ≈ 1.5~2.5글자라 1024 ≈ 2000자 수준(실측 권장: `completion_tokens ÷ 글자수`).
 
 **hang/reset은 커널(amdgpu) 소관 — 커널·펌웨어 업글은 우선순위 낮다.** hang·리셋·VRAM 미해제는 ROCm 유저스페이스나 llama.cpp가 아니라 **커널 amdgpu 드라이버** 층이고, Vulkan(RADV)도 amdgpu를 거치므로 이 문제를 피하지 못한다(`rocm-smi`는 리셋을 amdgpu에 부탁하는 도구일 뿐). 2차처럼 카드가 **버스에서 이탈**하면 커널 리셋도 -ENODEV로 즉시 실패한다 — 소프트웨어 층 전체가 무력. 커널/`linux-firmware` 업글이 리셋 신뢰성을 **높일 수는** 있으나 (a) 개선이지 보장 아님(하드 hang은 여전히 전원순환), (b) gfx906은 ROCm 지원 **공식 종료(EOL)**라 새 펌웨어 기대값 낮음, (c) 되던 gfx906+Vulkan 조합이 깨질 리스크. → **예방(SIGKILL·폭주·열 제거)이 커널 업글보다 확실·저위험.** 커널은 "예방 다 했는데도 트리거 없이 hang"일 때의 다음 카드.
-
-### 5. 로드타임 ~84초 — Vulkan 특성(1회성), 디스크 아님
-- 서버 기동 시 모델 로드가 **~84초**(로그 타임스탬프 1.5s→1:24가 통째로 텐서 로드 구간).
-- **디스크가 범인 아님**: 모델은 **NVMe SSD**(`/`=cs-root, Solidigm 1.9TB)에 있어 raw 16GB 읽기면 ~3~5초. `lsblk`상 sda(TOSHIBA 14.6T)는 HDD지만 그건 별개 스토리지고, cs-root는 nvme.
-- **범인 = Vulkan 백엔드 오버헤드**: 가중치를 **스테이징 버퍼 경유로 VRAM 업로드**(ROCm/CUDA 직접 memcpy보다 느림) + 첫 로드 **셰이더/파이프라인 컴파일**. gfx906에서 ROCm이 안 돼 Vulkan을 쓰는 대가의 일부. 멀티모달 projector(`mmproj-BF16.gguf`)도 같이 로드돼 시간 일부 차지(텍스트 번역만이면 스킵 여지, 부차).
-- **핵심: per-request가 아니라 1회성 로드 비용.** 추론은 83 t/s로 빠르다. **systemd 상주면 부팅 때 한 번만** 낸다 → 파이프라인 처리량엔 무영향. (줄이려면: Vulkan 파이프라인 캐시 영속 + mmproj 스킵 — 둘 다 부차.)
 
 ### 복구 런북 (hang 상태에서 재개)
 0. **소프트 리셋 먼저**(무해): `systemctl stop llama.cpp` → `pgrep -a llama-server`(잔여 없음 확인) → `rocm-smi --gpureset -d 0` → `rocm-smi --showmeminfo vram`. VRAM이 ~0.2GB로 떨어지면 복구, **그대로면**(2차 사례가 이것) 1번.
