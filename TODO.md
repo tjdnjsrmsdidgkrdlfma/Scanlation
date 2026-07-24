@@ -32,7 +32,7 @@ recognize 게이트는 지금 **이미지 K장**을 들여보내는데(프로덕
 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md)의 "남은 일"/"복구 런북" 참조:
 
 - [x] ~~systemd 상주 전환~~ **완료 (2026-07-15)** — `llama.cpp.service` active·enabled(재부팅 생존) + budget 플래그 없음(Option B). [deploy/llama.cpp.service.example](deploy/llama.cpp.service.example)
-- [ ] MI50 최종 토폴로지 — 9060 XT 재장착 후 recognize(9060)∥translate(MI50) 물리 병렬(translate는 이미 gate 밖이라 배포만으로 활성).
+- [x] ~~MI50 최종 토폴로지~~ **완료 (2026-07-24)** — recognize=9060 XT(`HIP_VISIBLE_DEVICES=0,1` + `/admin` cuda:1) ∥ translate=MI50(llama-server `--device Vulkan1`) 물리 분리. translate는 gate 밖이라 배포만으로 활성.
 
 ## 로컬 LLM 웹 텍스트 번역 (아이디어)
 

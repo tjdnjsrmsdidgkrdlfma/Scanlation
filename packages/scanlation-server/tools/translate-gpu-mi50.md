@@ -8,7 +8,7 @@
 
 ## 배경 — 왜 MI50인가
 
-recognizer를 PaddleOCR-VL로 바꾸면 파이프라인이 recognize-bound가 되고, LLM(translator)이 VRAM을 많이 먹어 한 카드에서 recognize와 경합한다. 그래서 **역할을 물리 분리**한다: recognize(PaddleOCR-VL) = 9060 XT 16GB, **translate(LLM) = MI50 32GB**. MI50는 HBM2(~1TB/s) + 넉넉한 VRAM이라 LLM 추론에 맞는다. 케이스 공간 문제로 **현재는 MI50만** 장착돼 있어, 이 문서는 "MI50에서 LLM translate가 도는가"를 먼저 검증한 기록이다.
+recognizer를 PaddleOCR-VL로 바꾸면 파이프라인이 recognize-bound가 되고, LLM(translator)이 VRAM을 많이 먹어 한 카드에서 recognize와 경합한다. 그래서 **역할을 물리 분리**한다: recognize(PaddleOCR-VL) = 9060 XT 16GB, **translate(LLM) = MI50 32GB**. MI50는 HBM2(~1TB/s) + 넉넉한 VRAM이라 LLM 추론에 맞는다. 이 문서는 MI50에서 LLM translate를 돌리는 기록·레시피다(두 카드 물리 분리 배정 완료는 §남은 일 5).
 
 ## 결론 먼저
 
@@ -375,7 +375,7 @@ A가 폭주면 내용물로 다시 가른다: `reasoning_content`가 크면 **�
 2. ~~**벤치.**~~ **완료 (2026-07-15)** — 이전 GPU 대비 translate **1.62x**(§3 파이프라인 벤치). 기준 `run_report_20260710_111941.md`(ollama, 이전 GPU) vs `run_report_mi50_translate.md`(llama.cpp, MI50). 참고: 20260710은 CPU가 아니라 **이전 GPU** 실행이었다.
 3. ~~**영속화.**~~ **완료 — 배포·enable 확인 (2026-07-15).** 콜드 부팅에서 유닛 자동 기동 실측(`Started llama.cpp.service`). 배포 유닛은 Option B대로 budget 플래그 없음, `-c 16384 --parallel 4`. 예시 파일([deploy/llama.cpp.service.example](../../../deploy/llama.cpp.service.example))을 배포본과 동기화 + 전력 캡 `ExecStartPre` + 전역 토큰 캡 `--n-predict 1024` 추가, **서버 유닛에도 반영 완료(2026-07-16, `systemctl cat` 확인).**
 4. ~~**MI50 디바이스 핀 확정.**~~ **결정 (2026-07-15): 핀 없이 자동.** `GGML_VK_VISIBLE_DEVICES=0`이 오히려 lavapipe/iGPU를 잡아 10x 느렸다(§3 함정) — 기본 자동선택이 discrete(MI50)를 고른다.
-5. **최종 토폴로지(9060 XT 재장착 후).** detect=CPU / recognize=9060 XT / **translate=MI50** 물리 병렬. translate는 파이프라인상 이미 gate 밖이라 배포만으로 병렬 활성(코드 변경 불필요, [recognize-gpu-speed.md](recognize-gpu-speed.md) 참조). 동시성 스윕에서 **CPU recognize 직렬화(lockwait)가 스케일 병목으로 실측**돼(§3) 재장착의 정량 근거가 생겼다.
+5. ~~**최종 토폴로지(9060 XT 재장착 후).**~~ **완료 (2026-07-24): detect=CPU / recognize=9060 XT / translate=MI50 물리 분리 배포.** 핀은 두 네임스페이스에 각각 — translate=llama-server `--device Vulkan1`(Vulkan enum), recognize=컨테이너 `HIP_VISIBLE_DEVICES=0,1` + `/admin` device `cuda:1`(HIP enum). HIP·Vulkan 인덱스가 서로 달라(MI50=HIP0/Vulkan1, 9060 XT=HIP1/Vulkan2) 각각 확인해 핀했다. translate는 파이프라인상 gate 밖이라 배포만으로 병렬 활성([recognize-gpu-speed.md](recognize-gpu-speed.md) 참조). 동시성 스윕의 **CPU recognize 직렬화(lockwait) 스케일 병목**(§3)이 분리의 정량 근거였다.
 6. **하드코딩 회피 점검.** 엔드포인트·모델·포트 등 조절값은 env 기본 + `/admin` 노출 원칙을 따른다(신규 값 생기면).
 7. **폭주 방어선.** 근본 수정은 플러그인 `dry_multiplier` 기본 0.8(§폭주 원인 확정). 전역 백스톱은 유닛 `--n-predict 1024`(plugin 상태와 무관 — 폭주가 사라져 실동작은 미검증인 채 백스톱으로 유지). 요청 단위 `max_tokens`(plugin 옵션 + `/admin`)는 필요해지면 추가(선택).
 8. ~~**전력 캡 적용·실측.**~~ **완료 (2026-07-16): 150W 확정** — decode 88.8~95.0 t/s로 225W와 동일(§MI50 쿨링 전력 캡, 캡 비용 ≈ 0). 유닛 `ExecStartPre`로 영속화 배포. 부수 효과: 발열·소음·8핀 데이지체인 부담 감소.
