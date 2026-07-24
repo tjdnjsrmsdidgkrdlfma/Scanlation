@@ -14,6 +14,15 @@ if [ "$(id -u)" = "0" ]; then
     if [ -z "$grp" ]; then grp="gpu$gid"; groupadd -g "$gid" "$grp" 2>/dev/null || true; fi
     usermod -aG "$grp" app 2>/dev/null || true
   done
+  # Runtime cache dirs on the /data volume: torch's kernel cache / MIOpen / HF
+  # only READ their env-set paths — they don't reliably create them (torch's
+  # kernel cache just disables itself when the dir is missing -> a gfx kernel
+  # recompile on every cold load), and a pre-existing volume predates these ENV
+  # lines. Create them and hand to `app` here while still root. Best-effort.
+  for d in "$PYTORCH_KERNEL_CACHE_PATH" "$MIOPEN_USER_DB_PATH" "$MIOPEN_CUSTOM_CACHE_DIR" "$HF_HOME"; do
+    [ -n "$d" ] || continue
+    mkdir -p "$d" 2>/dev/null && chown app:app "$d" 2>/dev/null || true
+  done
   if command -v setpriv >/dev/null 2>&1; then
     exec setpriv --reuid "$(id -u app)" --regid "$(id -g app)" --init-groups "$@"
   fi
