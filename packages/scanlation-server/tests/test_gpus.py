@@ -17,11 +17,14 @@ from tests.helpers import run
 
 def _fake_torch(count):
     """Minimal torch stub exposing the cuda bits list_gpus reads."""
+    archs, vrams = ["gfx906:sramecc+:xnack-", "gfx1200"], [32, 16]
     m = types.ModuleType("torch")
     m.cuda = types.SimpleNamespace(
         is_available=lambda: count > 0,
         device_count=lambda: count,
-        get_device_name=lambda i: f"GPU-{i}",
+        get_device_properties=lambda i: types.SimpleNamespace(
+            name=f"GPU-{i}", gcnArchName=archs[i], total_memory=vrams[i] * 1024**3
+        ),
     )
     return m
 
@@ -51,9 +54,11 @@ def test_list_gpus_no_gpu():
 
 
 def test_list_gpus_enumerates():
+    # name enriched with gfx arch (":" suffix stripped) + VRAM, since ROCm reports
+    # every AMD card under the same generic name — arch+VRAM is what disambiguates.
     assert _with_torch(_fake_torch(2)) == [
-        {"index": 0, "name": "GPU-0"},
-        {"index": 1, "name": "GPU-1"},
+        {"index": 0, "name": "GPU-0 (gfx906, 32GB)"},
+        {"index": 1, "name": "GPU-1 (gfx1200, 16GB)"},
     ]
 
 

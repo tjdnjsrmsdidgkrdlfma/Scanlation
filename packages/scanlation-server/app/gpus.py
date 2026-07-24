@@ -14,15 +14,23 @@ from functools import lru_cache
 @lru_cache(maxsize=1)
 def list_gpus() -> list[dict]:
     """[{index, name}] for every visible CUDA/ROCm device, or [] if torch is
-    absent / reports no GPU. A ROCm torch build reports its AMD GPUs here too."""
+    absent / reports no GPU. A ROCm torch build reports its AMD GPUs here too.
+
+    The name is enriched with gfx arch + VRAM: ROCm reports every AMD card as the
+    generic "AMD Radeon Graphics", so two AMD GPUs are indistinguishable by name
+    alone — arch (gfx906/gfx1200) + VRAM is what tells them apart in the picker.
+    Display-only; the picker still selects by index (cuda:N)."""
     try:
         import torch
         if not torch.cuda.is_available():
             return []
-        return [
-            {"index": i, "name": torch.cuda.get_device_name(i)}
-            for i in range(torch.cuda.device_count())
-        ]
+        out = []
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            arch = (getattr(props, "gcnArchName", "") or "").split(":")[0]  # gfx906:sramecc+:xnack- -> gfx906
+            tags = ", ".join(t for t in (arch, f"{round(props.total_memory / 1024**3)}GB") if t)
+            out.append({"index": i, "name": f"{props.name} ({tags})" if tags else props.name})
+        return out
     except Exception:  # noqa: BLE001 - no torch / probe failure -> no GPUs
         return []
 
