@@ -7,6 +7,11 @@ This module runs a periodic sweep that drops a local engine once it's gone unuse
 for the /admin-configured window (state.selection.model_idle_unload_minutes; 0 =
 never) — the in-process analog of ollama's OLLAMA_KEEP_ALIVE for the LLM.
 
+The recognize worker pool (concurrency>1) holds its model in separate PROCESSES,
+outside the registry, so the sweep tears IT down on the same window too — killing
+those workers drops their HIP context, letting the recognizer GPU runtime-suspend
+to ~0W (an in-process engine can't: the server process pins its context for life).
+
 Wired in the FastAPI lifespan (app.main): sweep_loop() runs as a task started at
 startup and cancelled at shutdown.
 """
@@ -18,6 +23,7 @@ import time
 
 from starlette.concurrency import run_in_threadpool
 
+from .recognize_pool import recognize_pool
 from .registry import registry
 from .state import state
 
@@ -41,7 +47,9 @@ async def sweep_once(now: float) -> list[tuple[str, str]]:
     if minutes <= 0:
         return []
     ttl = minutes * 60
-    if not registry.idle_candidates(ttl, now):  # cheap lock-free early-out
+    pool_idle = recognize_pool.idle_seconds(now)
+    pool_due = pool_idle is not None and pool_idle >= ttl
+    if not registry.idle_candidates(ttl, now) and not pool_due:  # cheap lock-free early-out
         return []
     # writer() excludes in-flight RECOGNIZE; the threadpool'd helper also holds
     # detect_lock to exclude an in-flight DETECT (which runs off the gate now).
@@ -61,6 +69,16 @@ def _unload_idle_locked(ttl: float, now: float, minutes: int) -> list[tuple[str,
             registry.unload_one(role, name)
             unloaded.append((role, name))
             logger.info("idle-unloaded %s %r (unused > %dm)", role, name, minutes)
+    # The recognize pool's model lives in its worker PROCESSES, not the registry, so the
+    # loop above never sees it. Tear the workers down when idle past the window — this is
+    # what lets the recognizer's GPU reach D3hot (~0W); an in-process engine can't (the
+    # server process pins its HIP context for life). We hold the gate writer here (no
+    # in-flight recognize), so invalidate() drains and shuts down instantly.
+    idle = recognize_pool.idle_seconds(now)
+    if idle is not None and idle >= ttl:
+        recognize_pool.invalidate()
+        unloaded.append(("recognizer", "__pool__"))
+        logger.info("idle-unloaded recognize pool (unused > %dm)", minutes)
     return unloaded
 
 

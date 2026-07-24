@@ -127,12 +127,26 @@ def test_broken_retry_also_breaks_drops_and_raises():
     assert pool._inflight == 0
 
 
+def test_idle_seconds_tracks_last_run_and_teardown():
+    """idle_seconds is None with no live pool, reflects time since the last run once
+    built, and returns to None after teardown (the idle-unload sweep's hook)."""
+    pool = _mk_pool(_FakeExecutor())
+    assert pool.idle_seconds(100.0) is None        # no run yet -> _last_used None
+    pool.run([("a", {})])                           # bumps _last_used to a monotonic
+    base = pool._last_used
+    assert base is not None
+    assert pool.idle_seconds(base + 30.0) == 30.0   # grows with now
+    pool.invalidate()                               # teardown clears _ex + _last_used
+    assert pool.idle_seconds(100.0) is None
+
+
 TESTS = [
     test_single_run_returns_ordered,
     test_teardown_waits_for_inflight_run,
     test_concurrent_runs_share_pool,
     test_broken_pool_rebuild_no_selfdeadlock,
     test_broken_retry_also_breaks_drops_and_raises,
+    test_idle_seconds_tracks_last_run_and_teardown,
 ]
 
 if __name__ == "__main__":

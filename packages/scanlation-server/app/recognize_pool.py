@@ -172,6 +172,12 @@ class RecognizePool:
         # AND the in-flight counter; teardown waits on it until _inflight hits 0.
         self._cond = threading.Condition()
         self._inflight = 0
+        # time.monotonic() of the last run() (and of the initial build), or None when no
+        # pool is live. The idle-unload sweep reads this via idle_seconds() to tear the
+        # workers down after the /admin window — freeing their VRAM AND letting the GPU
+        # drop to D3hot (~0W), which an in-process engine can't (the server process pins
+        # its HIP context for life).
+        self._last_used: float | None = None
 
     def ensure(self, name: str, device: str | None, workers: int) -> None:
         """Build the pool for (name, device, workers) if it isn't already that. A
@@ -202,6 +208,7 @@ class RecognizePool:
         finally:
             with self._cond:
                 self._inflight -= 1
+                self._last_used = time.monotonic()   # idle clock resets on each run
                 if self._inflight == 0:
                     self._cond.notify_all()   # wake any teardown waiting to drain
 
@@ -222,6 +229,16 @@ class RecognizePool:
         server."""
         with self._cond:
             self._teardown_locked()
+
+    def idle_seconds(self, now: float) -> float | None:
+        """Monotonic seconds since the last run (``now`` from time.monotonic()), or None
+        when no pool is live. The idle-unload sweep uses this to tear the workers down
+        after the /admin window: the recognizer lives in the worker processes, not the
+        registry, so the registry-based sweep can't see it — this is the hook that does."""
+        with self._cond:
+            if self._ex is None or self._last_used is None:
+                return None
+            return now - self._last_used
 
     # --- internals ---
     def _map_with_retry(self, ex: ProcessPoolExecutor, key, items: list) -> list[tuple[str, float]]:
@@ -267,6 +284,7 @@ class RecognizePool:
             initargs=(ROLES["recognizer"], name, device or None),
         )
         self._key = key
+        self._last_used = time.monotonic()   # start the idle clock at build (first run bumps it)
         logger.info("recognize pool: %d workers for %r on %s", workers, name, device or "default")
 
     def _teardown_locked(self) -> None:
@@ -282,6 +300,7 @@ class RecognizePool:
             self._ex.shutdown(wait=True)
             self._ex = None
             self._key = None
+            self._last_used = None
 
 
 recognize_pool = RecognizePool()

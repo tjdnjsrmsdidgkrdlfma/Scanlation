@@ -43,6 +43,13 @@ class _TrProbe(_IdleProbe):
     description = "Test-only: translator (HTTP) — must never be idle-unloaded."
 
 
+class _FakePoolExec:
+    """Stand-in executor for the recognize pool (no real spawn workers); shutdown is a
+    no-op so teardown runs without a GPU."""
+    def shutdown(self, wait=True):
+        pass
+
+
 def _register(role: str, name: str, cls: type) -> None:
     cls.loaded = cls.unloaded = 0
     registry.all_classes()[role][name] = cls
@@ -133,11 +140,58 @@ def test_sweep_never_touches_translator():
         _cleanup(*_TR_KEY)
 
 
+def test_sweep_tears_down_idle_recognize_pool():
+    """The recognize pool (workers, OUTSIDE the registry) is torn down when idle past the
+    window — freeing worker VRAM so the recognizer GPU can drop to D3hot (~0W). The
+    registry-based loop never sees the pool, so this is a separate teardown path."""
+    from app.recognize_pool import recognize_pool
+    saved = state.selection.model_idle_unload_minutes
+    with recognize_pool._cond:
+        recognize_pool._ex = _FakePoolExec()
+        recognize_pool._key = ("__rec_probe__", "", 2)
+        recognize_pool._last_used = 0.0              # ancient -> idle past any window
+    try:
+        state.selection.model_idle_unload_minutes = 5    # ttl 300s
+        unloaded = _run(sweep_once(10_000.0))
+        assert ("recognizer", "__pool__") in unloaded
+        assert recognize_pool._ex is None            # workers torn down
+    finally:
+        state.selection.model_idle_unload_minutes = saved
+        with recognize_pool._cond:
+            recognize_pool._ex = None
+            recognize_pool._key = None
+            recognize_pool._last_used = None
+
+
+def test_sweep_skips_recently_used_pool():
+    """A recognize pool used more recently than the window survives the sweep."""
+    from app.recognize_pool import recognize_pool
+    saved = state.selection.model_idle_unload_minutes
+    fake = _FakePoolExec()
+    with recognize_pool._cond:
+        recognize_pool._ex = fake
+        recognize_pool._key = ("__rec_probe__", "", 2)
+        recognize_pool._last_used = 9_950.0          # 50s ago at now=10_000 (< 300)
+    try:
+        state.selection.model_idle_unload_minutes = 5
+        unloaded = _run(sweep_once(10_000.0))
+        assert ("recognizer", "__pool__") not in unloaded
+        assert recognize_pool._ex is fake            # survived
+    finally:
+        state.selection.model_idle_unload_minutes = saved
+        with recognize_pool._cond:
+            recognize_pool._ex = None
+            recognize_pool._key = None
+            recognize_pool._last_used = None
+
+
 TESTS = [
     test_sweep_unloads_idle_local_engine,
     test_sweep_disabled_when_zero,
     test_sweep_skips_recently_used,
     test_sweep_never_touches_translator,
+    test_sweep_tears_down_idle_recognize_pool,
+    test_sweep_skips_recently_used_pool,
 ]
 
 if __name__ == "__main__":
