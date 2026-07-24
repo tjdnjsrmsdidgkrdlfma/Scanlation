@@ -107,7 +107,7 @@ def get_settings() -> dict:
         },
         "languages": LANGUAGES,
         # Global fallback the per-engine recognize-worker field shows as its placeholder
-        # (an engine with no override runs this many workers; 1 = no pool).
+        # (an engine with no override runs this many workers; 1 = a 1-worker pool).
         "recognize_concurrency_default": settings.recognize_concurrency,
         # Global fallback for the per-recognizer gate-size field (1 = serial images).
         "gpu_concurrency_default": settings.gpu_concurrency,

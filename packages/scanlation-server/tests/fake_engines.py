@@ -72,6 +72,29 @@ class DummyTranslator(EngineBase):
         return f"[{src}->{dst}] {text}"
 
 
+class _FakeRecognizePool:
+    """In-process stand-in for the recognize worker pool. recognize now ALWAYS goes
+    through the pool (orchestrator._recognize_sync), whose spawn workers re-discover the
+    recognizer by ENTRY POINT — but these fakes are registered straight into the registry,
+    not pip-installed, so a real spawn worker can't find "dummy". This runs the registered
+    DummyRecognizer in-process instead (no subprocess), injecting region.order = i (the
+    crop's index == its region.order, since detect returns regions in reading order), so
+    the golden "REGION-<order>" output is reproduced exactly."""
+    def ensure(self, name, device, workers): pass
+    def invalidate(self, name=None): pass
+    def shutdown(self): pass
+    def idle_seconds(self, now): return None
+
+    def run(self, items):  # items = [(crop, opt), ...] — same contract as RecognizePool.run
+        rec = DummyRecognizer()
+        out = []
+        for i, (crop, opt) in enumerate(items):
+            region = Region.from_bbox(0, 0, crop.width, crop.height)
+            region.order = i
+            out.append((rec.recognize(crop, region, opt).strip(), 1.0))
+        return out
+
+
 def install_fakes() -> None:
     """Register the fakes into the live registry + select them, so route tests
     have a working detector/recognizer/translator (the product ships none)."""
@@ -84,3 +107,12 @@ def install_fakes() -> None:
     state.selection.detector = "dummy"
     state.selection.recognizer = "dummy"
     state.selection.translator = "dummy"
+
+    # recognize now ALWAYS runs through the worker pool. Rebind ONLY orchestrator's
+    # `recognize_pool` name to the in-process fake, so route tests exercise the always-
+    # pool path without spawning workers (and without touching the real singleton, which
+    # test_idle_unload/test_recognize_pool drive directly). Idempotent so client()'s
+    # cache can call install_fakes again harmlessly.
+    import app.orchestrator as _orch
+    if not isinstance(_orch.recognize_pool, _FakeRecognizePool):
+        _orch.recognize_pool = _FakeRecognizePool()

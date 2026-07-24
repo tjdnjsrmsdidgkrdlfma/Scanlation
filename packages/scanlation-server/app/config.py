@@ -68,8 +68,8 @@ class Settings:
     )
 
     # First-run default for the recognize worker-pool size (per-engine, overridable
-    # in /admin plugin options). Floor 1: 1 = no pool (the in-process per-crop loop,
-    # byte-identical to the pre-pool path); >1 fans a page's crops across N worker
+    # in /admin plugin options). Floor 1: 1 = a 1-worker pool (the recognizer always
+    # runs off-process now, so idle-unload can reach D3hot); >1 fans a page's crops across N worker
     # PROCESSES (each B=1) to fill the GPU idle a single request leaves. It's a
     # per-engine LOAD-TIME setting (pool built with N workers), so it lives in
     # Selection.recognize_concurrency (a dict, like devices), NOT as an OPTION_SCHEMA

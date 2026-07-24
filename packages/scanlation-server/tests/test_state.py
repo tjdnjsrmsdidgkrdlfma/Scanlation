@@ -82,7 +82,7 @@ def test_engine_device_override():
 
 def test_recognize_concurrency_override():
     """Per-engine recognize worker-pool size mirrors the device override: absent ->
-    the global default; an explicit int is stored (incl. 1 to force 'no pool' even if
+    the global default; an explicit int is stored (incl. 1, still a 1-worker pool, even if
     the global default is higher); None resets to the default."""
     from app.config import settings
 
@@ -95,7 +95,7 @@ def test_recognize_concurrency_override():
         st.set_recognize_concurrency(eng, 4)
         assert st.resolve_recognize_concurrency(eng) == 4
         assert st.selection.recognize_concurrency[eng] == 4
-        st.set_recognize_concurrency(eng, 1)                    # explicit 1 forces no pool, is kept
+        st.set_recognize_concurrency(eng, 1)                    # explicit 1 is kept (still a 1-worker pool)
         assert st.resolve_recognize_concurrency(eng) == 1
         assert st.selection.recognize_concurrency[eng] == 1
         st.set_recognize_concurrency(eng, None)                 # None resets to the global default
@@ -161,7 +161,7 @@ def test_config_env_seeds_settings_and_selection():
     try:
         assert Settings().recognize_concurrency == 4           # env read per instance
         os.environ["SCANLATION_RECOGNIZE_CONCURRENCY"] = "0"
-        assert Settings().recognize_concurrency == 1           # floor 1 (1 = no pool)
+        assert Settings().recognize_concurrency == 1           # floor 1 (1 = a 1-worker pool)
     finally:
         os.environ.pop("SCANLATION_RECOGNIZE_CONCURRENCY", None)
 

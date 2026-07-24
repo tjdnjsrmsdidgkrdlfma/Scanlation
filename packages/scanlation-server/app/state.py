@@ -77,8 +77,8 @@ class Selection:
     # {engine_name: N} per-engine recognize worker-pool size (process count). Like
     # ``devices`` this is a LOAD-TIME property (the pool is built with N workers, not
     # changed per crop), so it lives here rather than in OPTION_SCHEMA. Absent -> the
-    # global default (settings.recognize_concurrency); N=1 -> no pool (in-process
-    # per-crop loop). Only recognizers use it (the pipeline fans a page's crops out).
+    # global default (settings.recognize_concurrency); N=1 -> a 1-worker pool (the
+    # recognizer always runs off-process). Only recognizers use it (crops fan out).
     recognize_concurrency: dict[str, int] = field(default_factory=dict)
     # {engine_name: K} per-recognizer max concurrent images through the detect+recognize
     # half (the InferenceGate size). Like recognize_concurrency this is per-recognizer and
@@ -201,7 +201,7 @@ class AppState:
     def set_recognize_concurrency(self, engine_name: str, workers: int | None) -> None:
         """Persist a per-engine recognize worker-pool size. ``None`` removes the
         override (falls back to the global default); an explicit int is stored (incl.
-        1, which forces 'no pool' for this engine even if the global default is
+        1, which is still a 1-worker pool for this engine even if the global default is
         higher). Floored at 1. The caller invalidates the pool so the next run
         rebuilds at the new size."""
         if workers is None:
@@ -212,7 +212,8 @@ class AppState:
 
     def resolve_recognize_concurrency(self, engine_name: str) -> int:
         """The per-engine recognize worker-pool size, or the global default. Floor 1
-        (1 = no pool). Read on every run to pick the in-process loop vs the pool."""
+        (1 = a 1-worker pool). Read on every run to size the pool (the recognizer
+        always runs in the pool now)."""
         return max(1, int(self.selection.recognize_concurrency.get(
             engine_name, settings.recognize_concurrency)))
 

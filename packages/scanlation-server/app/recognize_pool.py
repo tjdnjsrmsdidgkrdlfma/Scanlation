@@ -13,8 +13,8 @@ So this mirrors ``tools/bench_recognize_gpu_concurrency.py`` for production: a
 hold it resident, and a page's deskewed crops fan out across them (order
 preserved). The pool is a SERVER concern (like ``translate_sem``), keyed on
 (engine, device, workers); the worker count is a per-engine setting resolved by
-``state.resolve_recognize_concurrency`` (1 = no pool, the in-process per-crop
-loop — the default, byte-identical to before).
+``state.resolve_recognize_concurrency`` (1 = a 1-worker pool: the recognizer always
+runs off-process, so idle-unload can drop its GPU to ~0W; >1 fans crops across procs).
 
 Invariant (shared with ``_bench_common``): NOTHING heavy at import time. torch and
 the engine plugin are imported only inside the worker, so importing this module in

@@ -94,20 +94,20 @@ def _detect_sync(img, plan: RunPlan):
 
 def _recognize_sync(img, regions, plan: RunPlan):
     """RECOGNIZE stage (GPU) — run UNDER the gate reader (up to K images' crops share
-    the pool). Takes the worker pool when this recognizer's concurrency is >1 (a page's
-    crops fan out across processes; the recognizer is NOT registry-loaded here so its
-    VRAM lives only in the workers, not also in this process); otherwise the
-    registry-loaded engine runs the in-process per-crop loop (the default). A pool that
-    stays broken after its own rebuild+retry propagates — the request fails rather than
-    doubling the VRAM by loading the model here. Returns (recognized pairs, rec-timing)
-    where rec-timing is {recognize_ms, raw_regions, region_details}."""
+    the pool). ALWAYS runs in the worker pool (workers = this recognizer's concurrency,
+    floor 1): a page's crops fan out across processes and the recognizer is NOT
+    registry-loaded here, so its VRAM lives only in the workers, never in this process.
+    That isolation is what lets idle-unload tear the workers down and the GPU reach
+    D3hot (~0W) — an in-process load would pin THIS process's GPU context for its whole
+    life, so 0W would be impossible. workers=1 is a 1-worker pool (isolation, no
+    parallelism); >1 fans a page's crops across processes. A pool that stays broken
+    after its own rebuild+retry propagates — the request fails rather than doubling the
+    VRAM by loading the model here. Returns (recognized pairs, rec-timing) where
+    rec-timing is {recognize_ms, raw_regions, region_details}."""
     workers = state.resolve_recognize_concurrency(plan.recognizer)
-    if workers > 1:
-        recognize_pool.ensure(plan.recognizer, state.resolve_device_for(plan.recognizer), workers)
-        return recognize_regions(img, regions, recognizer=None, opt_recognize=plan.opt_recognize,
-                                 pool=recognize_pool, rec_name=plan.recognizer)
-    recognizer = registry.get("recognizer", plan.recognizer)
-    return recognize_regions(img, regions, recognizer=recognizer, opt_recognize=plan.opt_recognize)
+    recognize_pool.ensure(plan.recognizer, state.resolve_device_for(plan.recognizer), workers)
+    return recognize_regions(img, regions, recognizer=None, opt_recognize=plan.opt_recognize,
+                             pool=recognize_pool, rec_name=plan.recognizer)
 
 
 def _translate_sync(recognized, translator, plan: RunPlan):

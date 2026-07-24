@@ -58,7 +58,7 @@ def test_set_recognize_concurrency_validates():
         r = c.post("/set_recognize_concurrency/", json={"engine": "dummy", "concurrency": 4})
         assert r.status_code == 200 and r.json()["concurrency"] == 4
         assert state.resolve_recognize_concurrency("dummy") == 4
-        # a sub-1 value is floored to 1 (forces 'no pool' for this engine)
+        # a sub-1 value is floored to 1 (still a 1-worker pool for this engine)
         r = c.post("/set_recognize_concurrency/", json={"engine": "dummy", "concurrency": 0})
         assert r.status_code == 200 and r.json()["concurrency"] == 1
         # null resets to the global default -> the override is removed
