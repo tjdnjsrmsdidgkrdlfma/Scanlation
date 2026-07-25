@@ -1,39 +1,11 @@
-# llama.cpp server for PaddleOCR-VL-For-Manga — the recognize half, a SECOND
-# instance next to llama.cpp-gemma-4-26B-A4B.service.example. One unit per MODEL,
-# named after it: llama-server holds exactly one, an LLM there and this vision
-# model (+ its mmproj) here.
-#
-# Pin each to its own GPU so the two servers don't compete: translate on the MI50,
-# recognize on the 9060 XT. GGML_VK_VISIBLE_DEVICES hides every other card (index from
-# `llama-server --list-devices` run WITHOUT the env — here 2 = 9060 XT / RADV GFX1200),
-# matching the sibling translate unit. Do NOT also pass --device: it validates against
-# the devices VISIBLE to the process, so with the env set the only device is renumbered
-# to Vulkan0 and "--device Vulkan2" exits 1 at argument parsing.
-#
-# Weights: the GGUF pair (model + mmproj) of the manga fine-tune —
-#   huggingface.co/adambarbato/PaddleOCR-VL-For-Manga-GGUF
-# Needs llama.cpp build b8110+ (PaddleOCR-VL support, ggml-org/llama.cpp#18825).
-#
-# Optional: quantize the MODEL to Q8_0 (893MB -> 476MB) for ~400MB less VRAM —
-#   llama-quantize <in>.gguf <out>.gguf Q8_0
-# Measured byte-identical output on all 42 bench crops, and no speed change (weight
-# bandwidth isn't the bottleneck). Leave the mmproj at BF16: the vision half is what
-# the time actually goes to, and quantizing it isn't validated here.
-#
-# Then point the server at it: LLAMACPP_RECOGNIZE_ENDPOINT (docker-compose.yml
-# already sets host.docker.internal:8090) and pick `llama.cpp` as the recognizer
-# in /admin. Measurements: packages/scanlation-server/tools/recognize-decode-bound.md
 [Unit]
-Description=llama.cpp recognize server (9060 XT, Vulkan, PaddleOCR-VL manga)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Environment="GGML_VK_VISIBLE_DEVICES=2"
-ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server \
-  -m /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-BF16.gguf \
-  --mmproj /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-mmproj-BF16.gguf \
-  -ngl 99 --temp 0 --host 0.0.0.0 --port 8090
+InaccessiblePaths=/dev/dri/renderD128
+ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -m /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-BF16.gguf --mmproj /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-mmproj-BF16.gguf -ngl 99 --temp 0 --host 0.0.0.0 --port 8090
 Restart=on-failure
 
 [Install]

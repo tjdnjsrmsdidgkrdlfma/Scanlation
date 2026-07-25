@@ -1,17 +1,3 @@
-# llama.cpp server for gemma-4-26B-A4B — the translate half. One unit per MODEL,
-# named after it: llama-server holds exactly one, this LLM here and the vision model
-# in the sibling llama.cpp-PaddleOCR-VL-For-Manga.service.example.
-#
-# GPU pinning is by ENV, not by --device: GGML_VK_VISIBLE_DEVICES hides every other
-# card, so llama.cpp sees exactly one and numbers it Vulkan0. Two reasons that beats
-# `--device Vulkan1`:
-#   * --device validates its argument against the devices VISIBLE to that process, so
-#     the two mechanisms don't compose — with the env set, "Vulkan1" doesn't exist and
-#     the server exits 1 at argument parsing.
-#   * the index is the one from `llama-server --list-devices` run WITHOUT the env
-#     (here 1 = MI50 / RADV VEGA20, 2 = 9060 XT / RADV GFX1200; 0 is the iGPU).
-# InaccessiblePaths additionally hides the other card's render node from the unit.
-# Find yours: ls -l /dev/dri/by-path/ (or check which renderD* each card owns).
 [Unit]
 After=network-online.target
 Wants=network-online.target
