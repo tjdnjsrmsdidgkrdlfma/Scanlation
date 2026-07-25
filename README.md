@@ -230,7 +230,7 @@ recognizer는 두 방식 중 고른다(`/admin` 인식기 목록).
 - **`PaddleOCR-VL-For-Manga`** — 가중치(1.8GB)를 받아 **이 프로세스의 torch**로 돌린다. GPU 없이도(느리게) 동작하고, 설치가 `/admin` 안에서 끝난다.
 - **`llama.cpp`** — 같은 모델을 **별도 `llama-server`**(GGUF + mmproj)가 서빙하고 이미지+프롬프트를 `POST /v1/chat/completions`로 보낸다. env `LLAMACPP_RECOGNIZE_ENDPOINT`(`http://127.0.0.1:8090`) — **번역용과 다른 인스턴스**다(llama-server는 모델을 하나만 문다).
 
-llama.cpp 쪽이 **per-crop ~2.2x 빠르고 VRAM은 ~1/4**이다(모델 사본이 워커마다가 아니라 서버에 하나). 병목이 GPU가 아니라 eager decode 루프의 **호스트 측 오버헤드**였기 때문 — 실측·판정 근거는 [recognize-decode-bound.md](packages/scanlation-server/tools/recognize-decode-bound.md). 대신 **모델 배포가 서버 관리자 몫**이 된다(GGUF 교체·GPU 선택 = `llama-server` 커맨드라인, 유닛 예시 [deploy/llama.cpp-recognize.service.example](deploy/llama.cpp-recognize.service.example)). 동시성은 올리지 말 것 — 호스트 오버헤드가 사라져 GPU가 이미 포화라 처리량은 1.06x인데 per-crop 지연만 3배가 된다.
+llama.cpp 쪽이 **per-crop ~2.2x 빠르고 VRAM은 ~1/4**이다(모델 사본이 워커마다가 아니라 서버에 하나). 병목이 GPU가 아니라 eager decode 루프의 **호스트 측 오버헤드**였기 때문 — 실측·판정 근거는 [recognize-decode-bound.md](packages/scanlation-server/tools/recognize-decode-bound.md). 대신 **모델 배포가 서버 관리자 몫**이 된다(GGUF 교체·GPU 선택 = `llama-server` 커맨드라인, 유닛 예시 [deploy/llama.cpp-PaddleOCR-VL-For-Manga.service.example](deploy/llama.cpp-PaddleOCR-VL-For-Manga.service.example)). 동시성은 올리지 말 것 — 호스트 오버헤드가 사라져 GPU가 이미 포화라 처리량은 1.06x인데 per-crop 지연만 3배가 된다.
 
 ---
 

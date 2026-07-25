@@ -1,7 +1,10 @@
-# --device pins this to the MI50 (list them: llama-server --list-devices). Be
-# explicit once a second instance exists (deploy/llama.cpp-recognize.service.example
-# serves the vision model on the other GPU) — otherwise llama.cpp picks for itself
-# and can take the card the recognizer wants.
+# One unit per MODEL, named after it: llama-server holds exactly one, so each model
+# it serves is its own long-running service (see the sibling
+# llama.cpp-PaddleOCR-VL-For-Manga.service.example, the vision half).
+#
+# --device pins this to the MI50 (list them: llama-server --list-devices). Be explicit
+# once a second instance exists — otherwise llama.cpp picks for itself and can take the
+# card the other one wants.
 [Unit]
 Description=llama.cpp translate server (MI50, Vulkan, gemma-4)
 After=network-online.target

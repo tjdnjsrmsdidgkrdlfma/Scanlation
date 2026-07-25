@@ -1,6 +1,7 @@
-# llama.cpp RECOGNIZE server — the vision half, a SECOND instance next to the
-# translate one (deploy/llama.cpp.service.example). Two instances because
-# llama-server holds one model: an LLM there, a vision model (+ its mmproj) here.
+# llama.cpp server for PaddleOCR-VL-For-Manga — the recognize half, a SECOND
+# instance next to llama.cpp-gemma-4-26B-A4B.service.example. One unit per MODEL,
+# named after it: llama-server holds exactly one, an LLM there and this vision
+# model (+ its mmproj) here.
 #
 # Pin each to its own GPU with --device (list them: llama-server --list-devices):
 # translate on the MI50, recognize on the 9060 XT. Without --device llama.cpp picks
