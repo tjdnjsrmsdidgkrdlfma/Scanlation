@@ -11,6 +11,12 @@
 #   huggingface.co/adambarbato/PaddleOCR-VL-For-Manga-GGUF
 # Needs llama.cpp build b8110+ (PaddleOCR-VL support, ggml-org/llama.cpp#18825).
 #
+# Optional: quantize the MODEL to Q8_0 (893MB -> 476MB) for ~400MB less VRAM —
+#   llama-quantize <in>.gguf <out>.gguf Q8_0
+# Measured byte-identical output on all 42 bench crops, and no speed change (weight
+# bandwidth isn't the bottleneck). Leave the mmproj at BF16: the vision half is what
+# the time actually goes to, and quantizing it isn't validated here.
+#
 # Then point the server at it: LLAMACPP_RECOGNIZE_ENDPOINT (docker-compose.yml
 # already sets host.docker.internal:8090) and pick `llama.cpp` as the recognizer
 # in /admin. Measurements: packages/scanlation-server/tools/recognize-decode-bound.md
