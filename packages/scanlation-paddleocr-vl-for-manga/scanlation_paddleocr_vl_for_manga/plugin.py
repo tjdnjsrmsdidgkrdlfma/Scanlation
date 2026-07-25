@@ -23,7 +23,13 @@ from typing import Any
 from PIL import Image
 
 from scanlation_sdk.contracts import Region
-from scanlation_sdk.local_engine import LocalModelEngineBase, downscale_to_cap, install_hint, to_rgb
+from scanlation_sdk.local_engine import (
+    DOWNSCALE_MODES,
+    LocalModelEngineBase,
+    downscale_to_cap,
+    install_hint,
+    to_rgb,
+)
 
 
 class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
@@ -40,7 +46,9 @@ class PaddleOcrVLForMangaRecognizer(LocalModelEngineBase):
                        "description": "Downscale crops above this many pixels before OCR to cut vision tokens (~1.66x). 0 = off."},
         "downscale_mode": {"type": str,
                            "default": os.environ.get("SCANLATION_RECOGNIZE_DOWNSCALE_MODE", "pow2"),
-                           "description": "How to downscale when max_pixels applies: pow2 (recommended) / box / area / grid28 / boxgrid."},
+                           "choices": list(DOWNSCALE_MODES),
+                           "description": "How to downscale when max_pixels applies. pow2 is cheapest but overshoots the "
+                                          "cap (it only halves); box lands on it, which reads tall crops better."},
         "do_sample": {"type": bool, "default": False,
                       "description": "Sample instead of greedy decode. Off (greedy) is deterministic — best for OCR. Turn on only to diversify with temperature/top_p below."},
         "temperature": {"type": float, "default": 1.0,

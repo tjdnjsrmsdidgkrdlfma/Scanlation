@@ -73,6 +73,19 @@ def test_set_options_persists_and_clears():
     c.post("/set_options/", json={"role": "translator", "engine": "dummy", "options": {"model": ""}})
 
 
+def test_schema_serialization_keeps_choices():
+    """The admin renders a <select> instead of a text box when a schema entry lists
+    `choices` — an engine coerces an unrecognized value silently, so typing one must
+    not be possible. serialize_schema therefore has to pass extra spec keys through."""
+    from app.engine_meta import serialize_schema
+
+    class Fake:
+        OPTION_SCHEMA = {"mode": {"type": str, "default": "box", "choices": ["box", "pow2"]}}
+
+    assert serialize_schema(Fake)["mode"] == {"type": "str", "default": "box",
+                                              "choices": ["box", "pow2"]}
+
+
 def test_prompt_select_save_delete():
     c = client()
     assert c.post("/select_prompt/", json={"name": "default"}).json()["active"] == "default"
@@ -185,6 +198,7 @@ TESTS = [
     test_get_settings_merges_catalog,
     test_get_translator_models_shape,
     test_set_options_persists_and_clears,
+    test_schema_serialization_keeps_choices,
     test_prompt_select_save_delete,
     test_active_prompt_injected_into_translator_options,
     test_clear_cache_drops_runs,

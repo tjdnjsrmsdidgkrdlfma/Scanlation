@@ -79,7 +79,8 @@ class LlamaCppRecognizer(HttpEngineBase):
                        "description": "Downscale crops above this many pixels before OCR to cut vision tokens. 0 = off."},
         "downscale_mode": {"type": str,
                            "default": os.environ.get("SCANLATION_RECOGNIZE_DOWNSCALE_MODE", "box"),
-                           "description": f"How to downscale when max_pixels applies: {' / '.join(DOWNSCALE_MODES)} (box recommended — pow2 overshoots)."},
+                           "choices": list(DOWNSCALE_MODES),
+                           "description": "How to downscale when max_pixels applies (box recommended — pow2 overshoots)."},
     }
     SUPPORTED_SRC = ["ja", "en", "zh", "ko"]
 

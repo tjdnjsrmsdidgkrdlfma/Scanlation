@@ -219,9 +219,22 @@ function fieldInput(engine, opt, spec, value) {
     const checked = (has ? value : spec.default) ? "checked" : "";
     return `<label class="opt-check"><input type="checkbox" data-opt="${opt}" data-type="bool" ${checked}/><span class="toggle"></span> ${opt}</label>`;
   }
+  const val = has ? String(value) : "";
+  // A schema that lists `choices` renders as a <select> so a typo is impossible:
+  // an unrecognized mode is silently coerced by the engine, which looks like the
+  // setting took. "" = no override -> the schema default.
+  if (Array.isArray(spec.choices) && spec.choices.length) {
+    const o = (v, label) => `<option value="${v}"${v === val ? " selected" : ""}>${label}</option>`;
+    const opts = [o("", `${t("field.default")} (${spec.default})`)];
+    // a stored value the engine no longer offers stays visible instead of being
+    // silently swapped for the default on the next save
+    if (val && !spec.choices.includes(val)) opts.push(o(val, `${val} ${t("field.unknownChoice")}`));
+    for (const ch of spec.choices) opts.push(o(ch, ch));
+    return `<label>${opt} <span class="desc">${optDesc(engine, opt, spec.description)}</span>
+    <select data-opt="${opt}" data-type="${type}">${opts.join("")}</select></label>`;
+  }
   const inputType = (type === "int" || type === "float") ? "number" : "text";
   const step = type === "float" ? ` step="any"` : "";
-  const val = has ? String(value) : "";
   const ph = spec.default === "" || spec.default === undefined ? t("field.default") : `${t("field.defaultPrefix")}: ${spec.default}`;
   return `<label>${opt} <span class="desc">${optDesc(engine, opt, spec.description)}</span>
     <input type="${inputType}"${step} data-opt="${opt}" data-type="${type}" value="${val}" placeholder="${ph}"/></label>`;
