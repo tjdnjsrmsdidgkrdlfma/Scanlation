@@ -22,7 +22,7 @@
 |---|---|---|---|---|
 | 0 | GPU 레버 실적용 점검(flash-attn env·다운스케일 캡·멀티워커) | 배포 env, README | 없음 | GPU recognize 최대 ~3.7x(문서 실측) 실제 반영 |
 | 0 | `/admin` 조절 힌트(동반 backend `--parallel`) | admin i18n | 없음 | 켠 동시성이 실제로 이득 나게 |
-| 0 | `detect_lock` 직렬 천장 문서화 | README/주석 | 없음 | 오해 방지 |
+| 0 | detect 직렬 천장 문서화 | README/주석 | 없음 | 오해 방지 |
 | 0 | 베이스라인 측정 수립 | 없음(툴 실행) | 없음 | 모든 A/B의 기준선 |
 | 1 | 이벤트 루프 동기 SQLite → threadpool/deferred | server 2파일 | 낮음 | 동시성 시 루프·캐시락 병목 제거 |
 | 1 | deskew `np.asarray` 페이지당 1회 캐시 | `geometry.py` | 낮음 | 회전 크롭 많은 페이지 CPU 절감 |
@@ -56,9 +56,9 @@
 - **할 일**: `/admin` 동작 탭 해당 필드에 **동반 조정 안내 도움말**(ko/en i18n)만 추가. 동작·기본값 불변.
 - **효과/위험**: opt-in 정책 유지하면서 "켜면 실제로 빨라지는" 경로. 순수 텍스트.
 
-### 0-D. `detect_lock` 직렬 천장 문서화
-- **현황**: `gpu_concurrency>1`로 이미지 겹침을 켜도 detect forward는 `detect_lock`([state.py:146](packages/scanlation-server/app/state.py#L146))로 전 이미지 직렬 — 공유 in-process 검출기가 동시 forward에 안전하지 않기 때문(**설계상 의도**).
-- **할 일**: GPU 겹침 사용 시 "detect는 여전히 직렬"이라는 **알려진 천장**을 README/주석에 기록. (해소는 Tier 4 검출기 풀화 후보.)
+### 0-D. detect 직렬 천장 문서화
+- **현황**: `gpu_concurrency>1`로 이미지 겹침을 켜도 detect forward는 전 이미지 직렬 — 검출기가 **1-worker 풀**([engine_pool.py](packages/scanlation-server/app/engine_pool.py))에서 돌기 때문(**설계상 의도**: detect는 페이지당 1회라 팬아웃할 게 없고, 워커 수를 늘리면 모델 사본만 늘어난다).
+- **할 일**: GPU 겹침 사용 시 "detect는 여전히 직렬"이라는 **알려진 천장**을 README/주석에 기록.
 - **효과/위험**: 오해 방지. 코드 변경 없음.
 
 ---
@@ -147,10 +147,10 @@
 이 팀은 채택 전 실측하는 문화이므로([recognize-crop-batching.md](packages/scanlation-server/tools/recognize-crop-batching.md)에서 배치 기각) 모두 **스파이크 브랜치에서 A/B 후 판단**. 계획엔 후보로만 둡니다.
 
 - **RT-DETR ONNX Runtime (CPU detect)**: CPU 경로 detect를 ONNX Runtime으로 — CPU 배포에서 큰 이득 가능성. 정확도/속도 A/B 필수. 현재 transformers safetensors만 fetch.
-- **검출기 풀화 (Tier 0-D 연장)**: detect를 워커 프로세스로 옮겨 GPU 겹침의 `detect_lock` 직렬 천장 제거. 복잡도 높음.
+- **검출기 풀 W>1 (Tier 0-D 연장)**: 검출기는 이미 워커 프로세스에서 돌지만 워커가 1개다. 직렬 천장을 걷으려면 W를 노출해야 하는데, 페이지당 detect는 1회라 이득은 **이미지가 겹칠 때만** 나고 워커마다 모델 사본이 붙는다. 겹침 워크로드에서 detect가 실제 병목으로 측정될 때만.
 - **batch-lookup 엔드포인트**: 콜드 캐시에서 이미지마다 `/run_lookup/`+`/run_pipeline/` 2 RTT([content.js:83](extension/src/content.js#L83)) — N개 md5를 1회 프로브로 묶어 RTT 절감. **localhost에선 무의미**, 원격 배포에서만 가치.
 - **async httpx translator**: [http_translator.py:72](packages/scanlation-sdk/scanlation_sdk/http_translator.py#L72) `httpx.Client`(동기) — 지금은 threadpool에서 돌아 루프를 막지 않으므로 우선순위 낮음. 동시성 상향으로 threadpool 포화가 **관측될 때만**.
-- **부팅 후 1회 워밍업 (의도적 결정 재검토)**: `recognize_pool`은 현재 **의도적으로** 합성 워밍업이 없어 첫 요청이 커널 JIT(PaddleOCR-VL ~12s)를 흡수. 조절값(기본 off) 뒤의 선택적 워밍업으로 "부팅 시간 ↔ 첫 요청 지연"을 맞바꿈. 기존 결정을 뒤집는 것이라 GPU 배포 A/B 후 판단.
+- **부팅 후 1회 워밍업 (의도적 결정 재검토)**: 풀은 현재 **의도적으로** 합성 워밍업이 없어 첫 요청이 커널 JIT(PaddleOCR-VL ~12s)를 흡수. 조절값(기본 off) 뒤의 선택적 워밍업으로 "부팅 시간 ↔ 첫 요청 지연"을 맞바꿈. 기존 결정을 뒤집는 것이라 GPU 배포 A/B 후 판단.
 - **pool 경로 deskew 워커 이동**: 1-B 연장 — deskew를 워커로 옮겨 recognize와 병렬화(현재 fan-out 전 메인 프로세스 CPU 직렬).
 
 ---

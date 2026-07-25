@@ -231,7 +231,7 @@ def clear_stats() -> dict:
 # GET /bench_occupancy/ (see tools/bench_occupancy.py, which does all three per K).
 @router.post("/bench_occupancy_reset/")
 def bench_occupancy_reset() -> dict:
-    from ..recognize_pool import reset_occupancy
+    from ..engine_pool import reset_occupancy
 
     reset_occupancy()
     return {"status": "success"}
@@ -239,6 +239,6 @@ def bench_occupancy_reset() -> dict:
 
 @router.get("/bench_occupancy/")
 def bench_occupancy() -> dict:
-    from ..recognize_pool import active_workers, occupancy_stats
+    from ..engine_pool import active_workers, occupancy_stats
 
     return occupancy_stats(active_workers())

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import time
-from contextlib import nullcontext
 from typing import Any, TypedDict
 
 from PIL import Image
@@ -61,22 +60,26 @@ def assign_reading_order(regions: list[Region], *, rtl: bool) -> list[Region]:
 def detect_regions(
     img: Image.Image,
     *,
-    detector: Detector,
+    detector: Detector | None,
     src: str,
     opt_detect: dict[str, Any],
-    detect_lock: Any = None,
+    pool: Any = None,
+    det_name: str | None = None,
 ) -> tuple[list[Region], float]:
     """DETECT + reading order. Returns ``(regions, detect_ms)``. CPU work in the
     3-device split, so the orchestrator runs it OFF the recognize gate. This is the
     only place ``assign_reading_order`` is called — it sets ``region.order`` in place,
     so a later ``recognize_regions`` sees the same ordered Regions even though detect
-    and recognize are split across the gate. ``detect_lock`` (optional) serializes the
-    shared in-process torch detector; None = no serialization (single-reader path, tests)."""
+    and recognize are split across the gate. Same optional-capability seam as
+    ``recognize_regions``: with a ``pool`` the page runs in a worker process and
+    ``detector`` is unused (the worker owns it — pass its name as ``det_name`` for the
+    log); without one it runs on ``detector`` in-process (tests, single-call use)."""
     t0 = time.perf_counter()
-    with detect_lock or nullcontext():  # shared torch detector: one forward at a time
-        regions = assign_reading_order(detector.detect(img, opt_detect), rtl=(src in LANG_RTL))
+    raw = pool.run([(img, opt_detect)])[0] if pool is not None else detector.detect(img, opt_detect)
+    regions = assign_reading_order(raw, rtl=(src in LANG_RTL))
     detect_ms = round((time.perf_counter() - t0) * 1000, 1)
-    logger.info("detect %s: %d regions %.0fms", getattr(detector, "name", "?"), len(regions), detect_ms)
+    logger.info("detect %s: %d regions %.0fms",
+                det_name or getattr(detector, "name", "?"), len(regions), detect_ms)
     return regions, detect_ms
 
 
@@ -119,15 +122,13 @@ def detect_and_recognize(
     opt_recognize: dict[str, Any],
     pool: Any = None,
     rec_name: str | None = None,
-    detect_lock: Any = None,
 ) -> tuple[list[tuple[str, Region]], dict[str, float]]:
     """Detect then recognize, composed — the reference path (``run_pipeline``, tests).
     The route splits the two halves across the recognize gate by calling
     ``detect_regions`` (off the gate) and ``recognize_regions`` (under it) directly;
     this wrapper keeps the one-call shape + the combined ``{detect_ms, recognize_ms,
     raw_regions, region_details}`` timing for callers that don't need the split."""
-    regions, detect_ms = detect_regions(img, detector=detector, src=src,
-                                        opt_detect=opt_detect, detect_lock=detect_lock)
+    regions, detect_ms = detect_regions(img, detector=detector, src=src, opt_detect=opt_detect)
     out, timing = recognize_regions(img, regions, recognizer=recognizer,
                                     opt_recognize=opt_recognize, pool=pool, rec_name=rec_name)
     return out, {"detect_ms": detect_ms, **timing}

@@ -21,7 +21,7 @@ class InferenceGate:
     """Bounded-concurrency reader/writer gate over the detect+recognize half.
 
     Replaces the single ``gpu_lock`` mutex. Up to K *readers* (inference halves)
-    run at once, so several images' crops fan out into the shared RecognizePool
+    run at once, so several images' crops fan out into the shared recognize pool
     together (cross-image overlap) instead of one image at a time. A *writer*
     (lifecycle mutation: device/worker-count change, idle-unload) drains all K
     permits for exclusivity against every in-flight reader — the invariant the old
@@ -139,11 +139,6 @@ class AppState:
         # permits. K=1 = single mutex. Translation (ollama) is a separate process and
         # runs off the gate, so one image's translate overlaps the next's recognize.
         self.gpu_gate = InferenceGate(self.resolve_gpu_concurrency(self.selection.recognizer))
-        # Serializes detect(): the detector is a SHARED in-process torch model, so
-        # concurrent readers must not forward through it at once (recognize fans out
-        # to separate worker processes and is safe; detect stays serial — it's a small
-        # slice of the half, so serializing it costs little overlap).
-        self.detect_lock = threading.Lock()
         # Bound concurrent translations (they run off the inference gate) so many
         # in-flight images don't overrun the ollama backend's parallel slots.
         # Seeded from the persisted selection; swapped at runtime by set_client_config.

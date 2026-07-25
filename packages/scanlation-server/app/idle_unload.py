@@ -1,16 +1,17 @@
 """Background idle-unload of local model engines.
 
-Local torch engines (detector/recognizer) load onto the GPU on first use, and the
-registry then holds them until the process exits or an /admin device change drops
-them (registry.unload_one). Between reading sessions that means VRAM stays pinned.
-This module runs a periodic sweep that drops a local engine once it's gone unused
-for the /admin-configured window (state.selection.model_idle_unload_minutes; 0 =
-never) — the in-process analog of ollama's OLLAMA_KEEP_ALIVE for the LLM.
+The local (torch) engines — detector and recognizer — live in worker PROCESSES,
+outside the registry (see engine_pool), and hold their model + GPU context for as
+long as those workers run. Between reading sessions that means VRAM stays taken and
+the GPU can't runtime-suspend. This module runs a periodic sweep that tears a pool
+down once it's gone unused for the /admin-configured window
+(state.selection.model_idle_unload_minutes; 0 = never) — the analog of ollama's
+OLLAMA_KEEP_ALIVE for the LLM. Killing the workers is what frees the VRAM AND drops
+their HIP context, letting the GPU reach D3cold (~0W); an in-process engine could
+never do the second part (the server process pins its context for life).
 
-The recognize worker pool (concurrency>1) holds its model in separate PROCESSES,
-outside the registry, so the sweep tears IT down on the same window too — killing
-those workers drops their HIP context, letting the recognizer GPU runtime-suspend
-to ~0W (an in-process engine can't: the server process pins its context for life).
+The registry sweep stays for any engine that a tool or test loaded in-process; in
+the server itself the pools are the path that matters.
 
 Wired in the FastAPI lifespan (app.main): sweep_loop() runs as a task started at
 startup and cancelled at shutdown.
@@ -23,7 +24,7 @@ import time
 
 from starlette.concurrency import run_in_threadpool
 
-from .recognize_pool import recognize_pool
+from .engine_pool import POOLS
 from .registry import registry
 from .state import state
 
@@ -47,38 +48,33 @@ async def sweep_once(now: float) -> list[tuple[str, str]]:
     if minutes <= 0:
         return []
     ttl = minutes * 60
-    pool_idle = recognize_pool.idle_seconds(now)
-    pool_due = pool_idle is not None and pool_idle >= ttl
+    pool_due = any((idle := p.idle_seconds(now)) is not None and idle >= ttl for p in POOLS)
     if not registry.idle_candidates(ttl, now) and not pool_due:  # cheap lock-free early-out
         return []
-    # writer() excludes in-flight RECOGNIZE; the threadpool'd helper also holds
-    # detect_lock to exclude an in-flight DETECT (which runs off the gate now).
+    # writer() excludes in-flight RECOGNIZE; each pool's own drain excludes an in-flight
+    # run of ITS role (detect runs off the gate, so nothing else could).
     async with state.gpu_gate.writer():
         return await run_in_threadpool(_unload_idle_locked, ttl, now, minutes)
 
 
 def _unload_idle_locked(ttl: float, now: float, minutes: int) -> list[tuple[str, str]]:
-    """Re-check idleness and unload under detect_lock — so an in-flight DETECT isn't
-    dropped mid-forward (get() bumped its last-used to a monotonic >= now, so a key
-    used while we waited for the lock drops out of this second idle_candidates).
-    Runs in a threadpool: acquiring detect_lock may wait on a detect (~270ms) and must
-    not block the event loop."""
+    """Re-check idleness and unload. Runs in a threadpool: a pool teardown waits for an
+    in-flight run to finish (a detect is ~270ms) and must not block the event loop."""
     unloaded: list[tuple[str, str]] = []
-    with state.detect_lock:
-        for role, name in registry.idle_candidates(ttl, now):  # re-check under the lock
-            registry.unload_one(role, name)
-            unloaded.append((role, name))
-            logger.info("idle-unloaded %s %r (unused > %dm)", role, name, minutes)
-    # The recognize pool's model lives in its worker PROCESSES, not the registry, so the
-    # loop above never sees it. Tear the workers down when idle past the window — this is
-    # what lets the recognizer's GPU reach D3hot (~0W); an in-process engine can't (the
-    # server process pins its HIP context for life). We hold the gate writer here (no
-    # in-flight recognize), so invalidate() drains and shuts down instantly.
-    idle = recognize_pool.idle_seconds(now)
-    if idle is not None and idle >= ttl:
-        recognize_pool.invalidate()
-        unloaded.append(("recognizer", "__pool__"))
-        logger.info("idle-unloaded recognize pool (unused > %dm)", minutes)
+    for role, name in registry.idle_candidates(ttl, now):  # re-check (a request may have bumped it)
+        registry.unload_one(role, name)
+        unloaded.append((role, name))
+        logger.info("idle-unloaded %s %r (unused > %dm)", role, name, minutes)
+    # The pools' models live in their worker PROCESSES, not the registry, so the loop
+    # above never sees them. Tear idle workers down — this is what lets their GPU reach
+    # D3cold (~0W); an in-process engine can't (the server process pins its context for
+    # life). invalidate() drains any in-flight run of that role first.
+    for pool in POOLS:
+        idle = pool.idle_seconds(now)
+        if idle is not None and idle >= ttl:
+            pool.invalidate()
+            unloaded.append((pool.role, "__pool__"))
+            logger.info("idle-unloaded %s pool (unused > %dm)", pool.role, minutes)
     return unloaded
 
 

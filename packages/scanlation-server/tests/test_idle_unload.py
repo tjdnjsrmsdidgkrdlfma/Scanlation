@@ -140,49 +140,60 @@ def test_sweep_never_touches_translator():
         _cleanup(*_TR_KEY)
 
 
-def test_sweep_tears_down_idle_recognize_pool():
-    """The recognize pool (workers, OUTSIDE the registry) is torn down when idle past the
-    window — freeing worker VRAM so the recognizer GPU can drop to D3hot (~0W). The
-    registry-based loop never sees the pool, so this is a separate teardown path."""
-    from app.recognize_pool import recognize_pool
+def _arm_pool(pool, last_used: float) -> None:
+    """Give ``pool`` a live fake executor with a chosen last-used stamp."""
+    with pool._cond:
+        pool._ex = _FakePoolExec()
+        pool._key = ("__probe__", "", 2)
+        pool._last_used = last_used
+
+
+def _disarm_pool(pool) -> None:
+    with pool._cond:
+        pool._ex = None
+        pool._key = None
+        pool._last_used = None
+
+
+def test_sweep_tears_down_idle_pools():
+    """Both pools (workers, OUTSIDE the registry) are torn down when idle past the
+    window — freeing worker VRAM AND dropping their GPU context so the card can reach
+    D3cold (~0W). The registry-based loop never sees them, so this is a separate
+    teardown path; it covers every role's pool, not just the recognizer's."""
+    from app.engine_pool import detect_pool, recognize_pool
     saved = state.selection.model_idle_unload_minutes
-    with recognize_pool._cond:
-        recognize_pool._ex = _FakePoolExec()
-        recognize_pool._key = ("__rec_probe__", "", 2)
-        recognize_pool._last_used = 0.0              # ancient -> idle past any window
+    _arm_pool(detect_pool, 0.0)                      # ancient -> idle past any window
+    _arm_pool(recognize_pool, 0.0)
     try:
         state.selection.model_idle_unload_minutes = 5    # ttl 300s
         unloaded = _run(sweep_once(10_000.0))
+        assert ("detector", "__pool__") in unloaded
         assert ("recognizer", "__pool__") in unloaded
-        assert recognize_pool._ex is None            # workers torn down
+        assert detect_pool._ex is None and recognize_pool._ex is None   # workers torn down
     finally:
         state.selection.model_idle_unload_minutes = saved
-        with recognize_pool._cond:
-            recognize_pool._ex = None
-            recognize_pool._key = None
-            recognize_pool._last_used = None
+        _disarm_pool(detect_pool)
+        _disarm_pool(recognize_pool)
 
 
 def test_sweep_skips_recently_used_pool():
-    """A recognize pool used more recently than the window survives the sweep."""
-    from app.recognize_pool import recognize_pool
+    """A pool used more recently than the window survives — and independently of the
+    other role's pool, which is idle and does get torn down in the same pass."""
+    from app.engine_pool import detect_pool, recognize_pool
     saved = state.selection.model_idle_unload_minutes
-    fake = _FakePoolExec()
-    with recognize_pool._cond:
-        recognize_pool._ex = fake
-        recognize_pool._key = ("__rec_probe__", "", 2)
-        recognize_pool._last_used = 9_950.0          # 50s ago at now=10_000 (< 300)
+    _arm_pool(recognize_pool, 9_950.0)               # 50s ago at now=10_000 (< 300)
+    _arm_pool(detect_pool, 0.0)                      # ancient -> due
+    fake = recognize_pool._ex
     try:
         state.selection.model_idle_unload_minutes = 5
         unloaded = _run(sweep_once(10_000.0))
         assert ("recognizer", "__pool__") not in unloaded
         assert recognize_pool._ex is fake            # survived
+        assert ("detector", "__pool__") in unloaded  # the idle one still goes
     finally:
         state.selection.model_idle_unload_minutes = saved
-        with recognize_pool._cond:
-            recognize_pool._ex = None
-            recognize_pool._key = None
-            recognize_pool._last_used = None
+        _disarm_pool(detect_pool)
+        _disarm_pool(recognize_pool)
 
 
 TESTS = [
@@ -190,7 +201,7 @@ TESTS = [
     test_sweep_disabled_when_zero,
     test_sweep_skips_recently_used,
     test_sweep_never_touches_translator,
-    test_sweep_tears_down_idle_recognize_pool,
+    test_sweep_tears_down_idle_pools,
     test_sweep_skips_recently_used_pool,
 ]
 

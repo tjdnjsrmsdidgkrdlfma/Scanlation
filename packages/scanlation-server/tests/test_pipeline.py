@@ -140,7 +140,7 @@ def test_no_batch_method_falls_back_to_per_text():
 
 
 class _FakePool:
-    """Stand-in for RecognizePool: records that the pool path ran and echoes
+    """Stand-in for the recognize EnginePool: records that the pool path ran and echoes
     POOL-<i> per crop in input order (so we can assert order is preserved without
     spawning real worker processes — the real multiprocess run is bench-validated).
     ``boom`` makes run() raise BrokenProcessPool to exercise the propagate path."""
@@ -187,7 +187,7 @@ def test_no_pool_uses_per_crop_loop():
 def test_recognize_pool_broken_propagates():
     # A pool that stays broken (after its own internal rebuild+retry) propagates:
     # the request fails rather than the pipeline silently loading the model in-process
-    # (which would double the VRAM the pool exists to isolate). See RecognizePool.run.
+    # (which would double the VRAM the pool exists to isolate). See EnginePool.run.
     img = Image.new("RGB", (400, 300), (255, 255, 255))
     raised = False
     try:
@@ -207,6 +207,26 @@ def test_detect_regions_orders_in_place_and_times():
     img = Image.new("RGB", (400, 300), (255, 255, 255))
     regions, detect_ms = detect_regions(img, detector=DummyDetector(), src="ja", opt_detect={})
     assert [r.order for r in regions] == [0, 1]          # ja page: right-to-left order assigned
+    assert isinstance(detect_ms, float) and detect_ms >= 0
+
+
+def test_detect_regions_pool_path_orders_worker_output():
+    # With a pool the forward happens in a worker (detector is None here) and the pool
+    # gets the whole page as ONE item; reading order is still assigned by the caller,
+    # since the worker returns raw regions.
+    img = Image.new("RGB", (400, 300), (255, 255, 255))
+    raw = DummyDetector().detect(img, {})
+    seen = []
+
+    class _DetPool:
+        def run(self, items):
+            seen.append(items)
+            return [raw]
+
+    regions, detect_ms = detect_regions(img, detector=None, src="ja",
+                                        opt_detect={"num_boxes": 2}, pool=_DetPool(), det_name="fake")
+    assert seen == [[(img, {"num_boxes": 2})]]           # one (image, options) item per page
+    assert [r.order for r in regions] == [0, 1]          # order assigned here, not in the worker
     assert isinstance(detect_ms, float) and detect_ms >= 0
 
 
@@ -260,6 +280,7 @@ TESTS = [
     test_no_pool_uses_per_crop_loop,
     test_recognize_pool_broken_propagates,
     test_detect_regions_orders_in_place_and_times,
+    test_detect_regions_pool_path_orders_worker_output,
     test_recognize_regions_pool_path_and_order_preserved,
     test_recognize_regions_inprocess_path,
     test_recognize_regions_broken_pool_propagates,

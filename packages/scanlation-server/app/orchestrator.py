@@ -19,8 +19,8 @@ from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
 from .cache import cache, opt_hash
+from .engine_pool import detect_pool, recognize_pool
 from .pipeline import detect_regions, recognize_regions, recognized_to_result, translate_regions
-from .recognize_pool import recognize_pool
 from .registry import registry
 from .state import state
 
@@ -75,19 +75,21 @@ def cached_result(plan: RunPlan, md5: str) -> list | None:
 
 
 def _detect_sync(img, plan: RunPlan):
-    """DETECT stage (CPU) — run OFF the recognize gate. Resolves the detector +
-    translator (both off-GPU: the translator is an ollama HTTP client and must not
-    hold a recognize permit while it instantiates). ``detect_lock`` spans BOTH the
-    detector resolve and the forward, so an /admin device change or idle-unload — which
-    can no longer be excluded by the gate WRITER now that detect is off the gate —
-    can't drop the detector mid-forward (see set_engine_device / idle_unload). Returns
-    (regions, translator, detect_ms). registry.get is self-thread-safe."""
-    with state.detect_lock:
-        detector = registry.get("detector", plan.detector)
-        regions, detect_ms = detect_regions(
-            img, detector=detector, src=plan.src,
-            opt_detect=plan.opt_detect, detect_lock=None,  # already held above
-        )
+    """DETECT stage — run OFF the recognize gate. ALWAYS runs in a 1-worker pool: the
+    detector is NOT registry-loaded here, so its torch context lives only in that
+    worker, never in this process. That isolation is the point — an in-process load
+    pins THIS process's GPU context for life (transformers probes torch.cuda even for a
+    CPU model), which would keep every card at D0 and make the recognizer GPU's idle
+    ~0W impossible. 1 worker, not more: detect runs once per page, so there is nothing
+    to fan out. The pool's own drain also serializes the forward against teardown (an
+    /admin device change or idle-unload can't drop the detector mid-forward), which is
+    what a caller-side lock used to do. Also resolves the translator — off-GPU, an HTTP
+    client that must not hold a recognize permit while it instantiates. Returns
+    (regions, translator, detect_ms)."""
+    detect_pool.ensure(plan.detector, state.resolve_device_for(plan.detector))
+    regions, detect_ms = detect_regions(img, detector=None, src=plan.src,
+                                        opt_detect=plan.opt_detect,
+                                        pool=detect_pool, det_name=plan.detector)
     translator = registry.get("translator", plan.translator)
     return regions, translator, detect_ms
 
@@ -197,9 +199,9 @@ async def run_page(plan: RunPlan, md5: str, contents: str, *, skip_translate: bo
         t0 = time.perf_counter()
         img = _decode_image(contents)
         t_dec = time.perf_counter()
-        # DETECT off the gate (CPU; serialized by detect_lock inside _detect_sync).
-        # Detect no longer holds a recognize permit, so the K gate slots feed recognize
-        # only — already-detected images' crops are what's resident in the pool.
+        # DETECT off the gate (its own 1-worker pool serializes it). Detect no longer
+        # holds a recognize permit, so the K gate slots feed recognize only —
+        # already-detected images' crops are what's resident in the pool.
         regions, translator, detect_ms = await run_in_threadpool(_detect_sync, img, plan)
         t_det = time.perf_counter()
         # RECOGNIZE under the gate (reader; up to K images' crops share the pool =

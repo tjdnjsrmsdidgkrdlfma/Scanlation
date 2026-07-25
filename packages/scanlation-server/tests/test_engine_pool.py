@@ -1,8 +1,9 @@
-"""RecognizePool self-protection: teardown drains in-flight runs, concurrent runs
+"""EnginePool self-protection: teardown drains in-flight runs, concurrent runs
 share the pool, and a broken-pool rebuild doesn't deadlock on its own in-flight
-counter. A fake executor stands in for the real spawn ProcessPoolExecutor (no worker
+counter. That drain is also what lets the detector run without a caller-side lock.
+A fake executor stands in for the real spawn ProcessPoolExecutor (no worker
 processes) so the locking is exercised without a GPU — the real multiprocess run is
-bench-validated separately.
+bench-validated separately. Role-agnostic: both singletons are this one class.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import threading
 import time
 from concurrent.futures.process import BrokenProcessPool
 
-from app.recognize_pool import RecognizePool
+from app.engine_pool import EnginePool
 
 from tests.helpers import run
 
@@ -33,8 +34,8 @@ class _FakeExecutor:
         self.shutdown_calls += 1
 
 
-def _mk_pool(fake: _FakeExecutor, key=("eng", "", 2)) -> RecognizePool:
-    pool = RecognizePool()
+def _mk_pool(fake: _FakeExecutor, key=("eng", "", 2)) -> EnginePool:
+    pool = EnginePool("recognizer", lambda item: item)
     pool._ex = fake
     pool._key = key
     return pool
@@ -152,4 +153,4 @@ TESTS = [
 if __name__ == "__main__":
     import sys
 
-    sys.exit(run(TESTS, "test_recognize_pool"))
+    sys.exit(run(TESTS, "test_engine_pool"))

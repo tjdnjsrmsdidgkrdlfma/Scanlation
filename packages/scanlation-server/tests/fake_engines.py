@@ -72,20 +72,31 @@ class DummyTranslator(EngineBase):
         return f"[{src}->{dst}] {text}"
 
 
-class _FakeRecognizePool:
-    """In-process stand-in for the recognize worker pool. recognize now ALWAYS goes
-    through the pool (orchestrator._recognize_sync), whose spawn workers re-discover the
-    recognizer by ENTRY POINT — but these fakes are registered straight into the registry,
-    not pip-installed, so a real spawn worker can't find "dummy". This runs the registered
-    DummyRecognizer in-process instead (no subprocess), injecting region.order = i (the
-    crop's index == its region.order, since detect returns regions in reading order), so
-    the golden "REGION-<order>" output is reproduced exactly."""
-    def ensure(self, name, device, workers): pass
+class _FakePool:
+    """In-process stand-in for a worker pool. Both halves now ALWAYS go through one
+    (orchestrator._detect_sync / _recognize_sync), and the spawn workers re-discover
+    their engine by ENTRY POINT — but these fakes are registered straight into the
+    registry, not pip-installed, so a real worker can't find "dummy". This runs the
+    registered fake in-process instead (no subprocess). Subclasses supply ``run``."""
+    def ensure(self, name, device, workers=1): pass
     def invalidate(self, name=None): pass
     def shutdown(self): pass
     def idle_seconds(self, now): return None
 
-    def run(self, items):  # items = [(crop, opt), ...] — same contract as RecognizePool.run
+
+class _FakeDetectPool(_FakePool):
+    """items = [(image, opt)] -> [list[Region]] — same contract as EnginePool.run for
+    the detect task (one page per run, raw regions; the caller orders them)."""
+    def run(self, items):
+        det = DummyDetector()
+        return [det.detect(img, opt) for img, opt in items]
+
+
+class _FakeRecognizePool(_FakePool):
+    """items = [(crop, opt), ...] -> [(text, ms), ...]. Injects region.order = i (the
+    crop's index == its region.order, since detect returns regions in reading order),
+    so the golden "REGION-<order>" output is reproduced exactly."""
+    def run(self, items):
         rec = DummyRecognizer()
         out = []
         for i, (crop, opt) in enumerate(items):
@@ -108,11 +119,13 @@ def install_fakes() -> None:
     state.selection.recognizer = "dummy"
     state.selection.translator = "dummy"
 
-    # recognize now ALWAYS runs through the worker pool. Rebind ONLY orchestrator's
-    # `recognize_pool` name to the in-process fake, so route tests exercise the always-
-    # pool path without spawning workers (and without touching the real singleton, which
-    # test_idle_unload/test_recognize_pool drive directly). Idempotent so client()'s
+    # Both halves now ALWAYS run through a worker pool. Rebind ONLY orchestrator's
+    # names to the in-process fakes, so route tests exercise the always-pool paths
+    # without spawning workers (and without touching the real singletons, which
+    # test_idle_unload/test_engine_pool drive directly). Idempotent so client()'s
     # cache can call install_fakes again harmlessly.
     import app.orchestrator as _orch
+    if not isinstance(_orch.detect_pool, _FakeDetectPool):
+        _orch.detect_pool = _FakeDetectPool()
     if not isinstance(_orch.recognize_pool, _FakeRecognizePool):
         _orch.recognize_pool = _FakeRecognizePool()

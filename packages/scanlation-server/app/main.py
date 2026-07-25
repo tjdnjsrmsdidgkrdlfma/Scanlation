@@ -85,10 +85,11 @@ async def lifespan(app: FastAPI):
             await sweep_task
         except asyncio.CancelledError:
             pass
-        # Terminate recognize worker processes (reclaim their VRAM) so spawned
+        # Terminate the engines' worker processes (reclaim their VRAM) so spawned
         # workers don't outlive the server.
-        from .recognize_pool import recognize_pool
-        recognize_pool.shutdown()
+        from .engine_pool import POOLS
+        for pool in POOLS:
+            pool.shutdown()
 
 
 def create_app() -> FastAPI:

@@ -13,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 from scanlation_sdk.context import LANGUAGES
 from . import require_known_engine
-from ..recognize_pool import recognize_pool
+from ..engine_pool import POOLS, recognize_pool
 from ..registry import ROLE_NAMES, registry
 from ..schemas import (
     SetEngineDeviceRequest,
@@ -55,23 +55,23 @@ def set_languages(req: SetLanguagesRequest) -> dict:
 
 def _apply_engine_device(engine: str, dev: str | None) -> None:
     """Persist the device + drop the engine's cached instance so its next request
-    reloads on it. Holds ``detect_lock`` so an in-flight DETECT — which runs OFF the
-    gpu_gate now, so the writer around this doesn't exclude it — can't have the
-    detector torn out mid-forward. Runs in a threadpool (detect can take ~270ms, so
-    acquiring the lock must not block the event loop)."""
-    with state.detect_lock:
-        state.set_engine_device(engine, dev)
-        for role in ROLE_NAMES:
-            if registry.has(role, engine):
-                registry.unload_one(role, engine)
-        recognize_pool.invalidate(engine)  # rebuild on the new device (no-op if not the pooled engine)
+    reloads on it. Each pool's invalidate drains its own in-flight run first, so a
+    DETECT — which runs OFF the gpu_gate, and so isn't excluded by the writer around
+    this — can't have its engine torn out mid-forward. Runs in a threadpool (that
+    drain can wait on a detect, ~270ms, and must not block the event loop)."""
+    state.set_engine_device(engine, dev)
+    for role in ROLE_NAMES:
+        if registry.has(role, engine):
+            registry.unload_one(role, engine)
+    for pool in POOLS:  # rebuild on the new device (no-op for a pool not holding it)
+        pool.invalidate(engine)
 
 
 @router.post("/set_engine_device/")
 async def set_engine_device(req: SetEngineDeviceRequest) -> dict:
     """Per-engine compute-device override (empty device removes it -> the engine's
     DEFAULT_DEVICE). On a real change, drop that engine's cached instance (under the
-    gate writer for recognize + detect_lock for the off-gate detector) so its next
+    gate writer for recognize; each pool drains its own in-flight run) so its next
     request reloads on the resolved device."""
     dev = req.device.strip().lower()
     if dev and not _DEVICE_RE.match(dev):

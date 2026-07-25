@@ -1,26 +1,41 @@
-"""A persistent worker-process pool for the recognize half of the pipeline.
+"""Persistent worker-process pools for the local (torch) halves of the pipeline.
 
-The recognizer (a GPU VLM like PaddleOCR-VL) is compute-bound, and a single B=1
-request leaves the GPU partly idle. Running several B=1 recognizes AT ONCE fills
-that idle — the measured lever (see ``tools/recognize-gpu-speed.md``: ~1.38x at
-W=4). It must be *processes*, not threads: ROCm has no MPS, so only separate
-device contexts time-slice the idle in; threads on one default stream serialise.
-Crop batching was the other candidate and was rejected (straggler + O(n²) vision;
-see ``tools/recognize-crop-batching.md``).
+Local engines run in worker PROCESSES, never in the server process. Two reasons,
+and both are load-bearing:
+
+* **Throughput (recognize).** The recognizer (a GPU VLM like PaddleOCR-VL) is
+  compute-bound, and a single B=1 request leaves the GPU partly idle. Running
+  several B=1 recognizes AT ONCE fills that idle — the measured lever (see
+  ``tools/recognize-gpu-speed.md``: ~1.38x at W=4). It must be *processes*, not
+  threads: ROCm has no MPS, so only separate device contexts time-slice the idle
+  in; threads on one default stream serialise. Crop batching was the other
+  candidate and was rejected (straggler + O(n²) vision; see
+  ``tools/recognize-crop-batching.md``).
+* **Idle power (both roles).** A torch/HIP context opens the GPU's kfd + render
+  nodes and holds them for the PROCESS's lifetime — pinning every card at D0, so
+  the GPU can never runtime-suspend (~0W) between reading sessions. Third-party
+  code reaches for the GPU whether or not the engine wants one: transformers
+  probes ``torch.cuda.device_count()`` while choosing an attention implementation
+  and again inside the forward, so even a CPU-only detector pins the cards when it
+  loads in-process. Env masking does not help (ROCm's amdsmi enumerates every
+  physical GPU BEFORE ``HIP_VISIBLE_DEVICES`` is applied). Only a process that
+  EXITS releases the context — hence workers, torn down by the idle-unload sweep.
+  The server core must never touch torch.cuda (see also ``gpus.list_gpus``, which
+  probes in a throwaway subprocess for the same reason).
 
 So this mirrors ``tools/bench_recognize_gpu_concurrency.py`` for production: a
-``ProcessPoolExecutor`` (spawn) whose workers each load the recognizer once and
-hold it resident, and a page's deskewed crops fan out across them (order
-preserved). The pool is a SERVER concern (like ``translate_sem``), keyed on
-(engine, device, workers); the worker count is a per-engine setting resolved by
-``state.resolve_recognize_concurrency`` (1 = a 1-worker pool: the recognizer always
-runs off-process, so idle-unload can drop its GPU to ~0W; >1 fans crops across procs).
+``ProcessPoolExecutor`` (spawn) whose workers each load one engine once and hold
+it resident, and work fans out across them (order preserved). A pool is a SERVER
+concern (like ``translate_sem``), keyed on (engine, device, workers).
+
+One class, two singletons — ``recognize_pool`` (workers = the per-engine
+``state.resolve_recognize_concurrency``; a page's crops fan out) and
+``detect_pool`` (always 1 worker: detect is once per page, so there is nothing to
+fan out — the pool is there for process isolation, not parallelism).
 
 Invariant (shared with ``_bench_common``): NOTHING heavy at import time. torch and
 the engine plugin are imported only inside the worker, so importing this module in
-the main process (and re-importing it in a spawned worker) stays cheap. The main
-process never loads the recognizer when the pool is used — the workers own it, so
-its VRAM lives once per worker, not also in the app process.
+the main process (and re-importing it in a spawned worker) stays cheap.
 """
 from __future__ import annotations
 
@@ -31,10 +46,10 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool  # not re-exported by the package top-level
 
-logger = logging.getLogger("scanlation.recognize_pool")
+logger = logging.getLogger("scanlation.engine_pool")
 
 # --- per-worker process globals (set once by the pool initializer) -----------
-_REC = None
+_ENGINE = None
 
 # --- TEMP occupancy bench (revert via git) -----------------------------------
 # Every worker crop reports its wall-clock execution window (time.time(), which IS
@@ -49,25 +64,25 @@ _OCC: list[tuple[float, float]] = []
 
 
 def _worker_init(group: str, name: str, device: str | None) -> None:
-    """Runs once in each freshly spawned worker: resolve the recognizer class by
+    """Runs once in each freshly spawned worker: resolve the engine class by
     entry-point name (the same discovery the registry uses, minus its process-wide
     state machine), load it onto the resolved device, and hold it resident in a
     process global. One model copy per worker — that copy is the VRAM cost the
-    worker count is capped by. The first real recognize absorbs the kernel JIT
-    (cold start); there is no synthetic warmup here (it would only move the same
-    one-time cost, since the pool builds lazily on the first request anyway)."""
-    global _REC
+    worker count is capped by. The first real call absorbs the kernel JIT (cold
+    start); there is no synthetic warmup here (it would only move the same one-time
+    cost, since the pool builds lazily on the first request anyway)."""
+    global _ENGINE
     from app.plugins_path import ensure_on_path, iter_entry_points
 
     ensure_on_path()  # volume-installed engine packages importable in the worker too
     cls = next((ep.load() for ep in iter_entry_points(group) if ep.name == name), None)
     if cls is None:
-        raise RuntimeError(f"recognizer {name!r} not found in entry-point group {group!r}")
-    rec = cls()
+        raise RuntimeError(f"engine {name!r} not found in entry-point group {group!r}")
+    eng = cls()
     if device:
-        rec._device_override = device  # honored by LocalModelEngineBase.load()
-    rec.load()
-    _REC = rec
+        eng._device_override = device  # honored by LocalModelEngineBase.load()
+    eng.load()
+    _ENGINE = eng
 
 
 def _recognize_one(item) -> tuple[str, float, float, float]:
@@ -84,17 +99,26 @@ def _recognize_one(item) -> tuple[str, float, float, float]:
     region = Region.from_bbox(0, 0, crop.width, crop.height)
     t_start = time.time()
     t0 = time.perf_counter()
-    text = _REC.recognize(crop, region, options).strip()
+    text = _ENGINE.recognize(crop, region, options).strip()
     ms = (time.perf_counter() - t0) * 1000
     return text, ms, t_start, time.time()
 
 
+def _detect_one(item) -> list:
+    """One page's detect in the worker. ``item`` is ``(image, options)``; returns the
+    raw ``list[Region]``. Reading order is assigned by the CALLER (pipeline), not here
+    — it's pure geometry with no model, so it stays in the main process where the rest
+    of the page's bookkeeping lives."""
+    image, options = item
+    return _ENGINE.detect(image, options)
+
+
 # --- TEMP occupancy bench helpers (revert via git) ---------------------------
 def _split_occ(raw: list) -> list:
-    """Peel ``(t_start, t_end)`` off the 4-tuple worker results into the occupancy
-    sink and return the ``(text, ms)`` pairs the pipeline expects. Non-tuple results
-    (the unit-test fake executor's placeholder strings) pass through untouched, so the
-    pool's locking tests stay green without knowing about this instrumentation."""
+    """Peel ``(t_start, t_end)`` off the 4-tuple recognize results into the occupancy
+    sink and return the ``(text, ms)`` pairs the pipeline expects. Anything else passes
+    through untouched — detect results (a ``list[Region]``) and the unit-test fake
+    executor's placeholder strings — so this instrumentation is invisible to them."""
     out, occ = [], []
     for r in raw:
         if isinstance(r, tuple) and len(r) == 4:
@@ -116,7 +140,7 @@ def reset_occupancy() -> None:
 
 
 def active_workers() -> int:
-    """W of the live pool (0 if none built) — the denominator for utilization."""
+    """W of the live recognize pool (0 if none built) — the denominator for utilization."""
     key = recognize_pool._key
     return key[2] if key else 0
 
@@ -155,17 +179,24 @@ def occupancy_stats(workers: int) -> dict:
     }
 
 
-class RecognizePool:
-    """Process-wide singleton owning the recognize worker pool. Rebuilt lazily when
-    (engine, device, workers) changes; torn down on idle/engine/device/W change and
-    at shutdown. SELF-PROTECTED: an in-flight-run counter guarded by a Condition lets
-    teardown DRAIN live ``run``s before shutting the executor down, so the pool no
-    longer leans on an external gpu_lock for that safety. Concurrent readers (the
+class EnginePool:
+    """Process-wide owner of ONE role's worker pool. Rebuilt lazily when (engine,
+    device, workers) changes; torn down on idle/engine/device/W change and at
+    shutdown. SELF-PROTECTED: an in-flight-run counter guarded by a Condition lets
+    teardown DRAIN live ``run``s before shutting the executor down — which is also
+    what makes a separate caller-side lock unnecessary (an /admin device change or an
+    idle-unload can't tear an engine out mid-forward). Concurrent readers (the
     InferenceGate lets up to K run at once) can call ``run`` together —
     ``ProcessPoolExecutor.submit`` is thread-safe — and a teardown (ensure key-change
-    / invalidate / shutdown) waits them out instead of shutting an executor mid-map."""
+    / invalidate / shutdown) waits them out instead of shutting an executor mid-map.
 
-    def __init__(self) -> None:
+    ``role`` selects the entry-point group its workers resolve engines in;
+    ``task`` is the module-level function each worker runs per item (it must be
+    picklable, so it lives at module scope, not on this class)."""
+
+    def __init__(self, role: str, task) -> None:
+        self.role = role
+        self._task = task
         self._ex: ProcessPoolExecutor | None = None
         self._key: tuple[str, str, int] | None = None  # (name, device, workers)
         # Condition = lock + wait/notify. Guards the executor-lifecycle transitions
@@ -175,11 +206,11 @@ class RecognizePool:
         # time.monotonic() of the last run() (and of the initial build), or None when no
         # pool is live. The idle-unload sweep reads this via idle_seconds() to tear the
         # workers down after the /admin window — freeing their VRAM AND letting the GPU
-        # drop to D3hot (~0W), which an in-process engine can't (the server process pins
+        # drop to D3cold (~0W), which an in-process engine can't (the server process pins
         # its HIP context for life).
         self._last_used: float | None = None
 
-    def ensure(self, name: str, device: str | None, workers: int) -> None:
+    def ensure(self, name: str, device: str | None, workers: int = 1) -> None:
         """Build the pool for (name, device, workers) if it isn't already that. A
         change drains in-flight runs, tears the old pool down (releasing its VRAM),
         then builds new."""
@@ -190,10 +221,9 @@ class RecognizePool:
             self._teardown_locked()   # waits for in-flight runs, then shuts the old ex
             self._build_locked(key)
 
-    def run(self, items: list) -> list[tuple[str, float]]:
-        """Recognize every ``(crop, options)`` in ``items``, ``(text, elapsed_ms)``
-        aligned to input order. Registers as in-flight so a concurrent teardown waits
-        for it. On
+    def run(self, items: list) -> list:
+        """Run the role's task over every item, results aligned to input order.
+        Registers as in-flight so a concurrent teardown waits for it. On
         ``BrokenProcessPool`` (a worker died/OOMed) rebuild the broken executor once
         and retry; if the retry also breaks, drop the pool (next request rebuilds
         fresh) and propagate — this request fails rather than silently loading the
@@ -201,7 +231,7 @@ class RecognizePool:
         with self._cond:
             ex, key = self._ex, self._key
             if ex is None:
-                raise RuntimeError("recognize pool not built; call ensure() first")
+                raise RuntimeError(f"{self.role} pool not built; call ensure() first")
             self._inflight += 1
         try:
             return self._map_with_retry(ex, key, items)
@@ -215,7 +245,7 @@ class RecognizePool:
     def invalidate(self, name: str | None = None) -> None:
         """Tear the pool down so the next ``ensure`` rebuilds it — after a device or
         worker-count change. ``name`` filters to that engine (a change to a
-        non-active recognizer is then a no-op, since the pool holds only the active
+        non-active engine is then a no-op, since the pool holds only the active
         one)."""
         with self._cond:
             if self._ex is None:
@@ -233,7 +263,7 @@ class RecognizePool:
     def idle_seconds(self, now: float) -> float | None:
         """Monotonic seconds since the last run (``now`` from time.monotonic()), or None
         when no pool is live. The idle-unload sweep uses this to tear the workers down
-        after the /admin window: the recognizer lives in the worker processes, not the
+        after the /admin window: the engine lives in the worker processes, not the
         registry, so the registry-based sweep can't see it — this is the hook that does."""
         with self._cond:
             if self._ex is None or self._last_used is None:
@@ -241,17 +271,17 @@ class RecognizePool:
             return now - self._last_used
 
     # --- internals ---
-    def _map_with_retry(self, ex: ProcessPoolExecutor, key, items: list) -> list[tuple[str, float]]:
-        """Map OUTSIDE the lock (long GPU work). On a broken pool, rebuild only the
+    def _map_with_retry(self, ex: ProcessPoolExecutor, key, items: list) -> list:
+        """Map OUTSIDE the lock (long model work). On a broken pool, rebuild only the
         broken executor (no drain — a broken map has no live run to wait for, so this
         can't deadlock on this run's own _inflight) and retry once."""
         try:
-            return _split_occ(list(ex.map(_recognize_one, items)))
+            return _split_occ(list(ex.map(self._task, items)))
         except BrokenProcessPool:
-            logger.warning("recognize pool broke (worker died/OOM); rebuilding + retrying once")
+            logger.warning("%s pool broke (worker died/OOM); rebuilding + retrying once", self.role)
         ex2 = self._rebuild_broken(ex, key)
         try:
-            return _split_occ(list(ex2.map(_recognize_one, items)))
+            return _split_occ(list(ex2.map(self._task, items)))
         except BrokenProcessPool:
             self._drop_if_current(ex2)   # retry broke too -> drop so the next request rebuilds
             raise
@@ -281,11 +311,11 @@ class RecognizePool:
         ctx = mp.get_context("spawn")  # fork + CUDA/HIP is unsafe
         self._ex = ProcessPoolExecutor(
             max_workers=workers, mp_context=ctx, initializer=_worker_init,
-            initargs=(ROLES["recognizer"], name, device or None),
+            initargs=(ROLES[self.role], name, device or None),
         )
         self._key = key
         self._last_used = time.monotonic()   # start the idle clock at build (first run bumps it)
-        logger.info("recognize pool: %d workers for %r on %s", workers, name, device or "default")
+        logger.info("%s pool: %d workers for %r on %s", self.role, workers, name, device or "default")
 
     def _teardown_locked(self) -> None:
         """Drain in-flight runs, then shut the executor down. Only called from OUTSIDE
@@ -303,4 +333,9 @@ class RecognizePool:
             self._last_used = None
 
 
-recognize_pool = RecognizePool()
+recognize_pool = EnginePool("recognizer", _recognize_one)
+detect_pool = EnginePool("detector", _detect_one)
+
+# Both pools, for the callers that treat them uniformly (idle-unload sweep, lifespan
+# shutdown, /admin device change) — so adding a third role touches one list, not three.
+POOLS: tuple[EnginePool, ...] = (detect_pool, recognize_pool)

@@ -25,9 +25,9 @@ isn't there and stage separation is moot — no need to build it to find out.
   # sweep K on the running GPU server; compare wall vs util down the rows
   python tools/bench_occupancy.py /path/to/chapter --server http://127.0.0.1:4010 --k 2 4 8 16 21
 
-Requires the matching temp instrumentation (app/recognize_pool.py) + routes
-(app/routes/admin.py) on this branch, and a server running the GPU recognizer (a real
-pool with W>1). With the CPU in-process recognizer there is no pool and crops=0.
+Requires the matching temp instrumentation (app/engine_pool.py) + routes
+(app/routes/admin.py) on this branch, and a server running the GPU recognizer with
+W>1. At W=1 there is nothing to fan out, so utilization is trivially 1.0.
 """
 from __future__ import annotations
 
