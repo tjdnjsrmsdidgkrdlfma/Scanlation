@@ -127,6 +127,8 @@ torch 안의 레버가 다 막힌 뒤 "공식/커뮤니티에 우리가 안 본 
 | **llama.cpp c=1** | **1.242 (2.2x)** | ~800ms | — | **1.8GB** |
 | llama.cpp c=4 | 1.326 | 2646ms | 6712ms | 1.8GB |
 
+> 이 표의 llama.cpp 값은 워밍업 crop 1개가 캐시된 상태라 ~2% 과대다(전 설정 동일하므로 비교는 유효). **캐시를 완전히 막고 다시 잰 값은 §6**(pow2 = 1.262) — 결론은 안 바뀐다. 캐시 함정 자체는 §7.
+
 - **per-crop 2.2x, 프로덕션 대비 ~1.6x, VRAM 4.3배 절감**(모델 사본이 워커마다가 아니라 서버에 하나), **꼬리 지연 5x**(max 5014→1011ms, 편차 19배→1.4배).
 - **동시성은 쓰지 않는다.** c=4는 처리량 1.06x인데 per-crop이 3.3배 느려진다 — 호스트 오버헤드가 사라져 **GPU가 이미 포화**라 채울 유휴가 없다. transformers에서 W=4가 1.38x를 벌던 것과 정반대이고, 이 대비 자체가 §3 진단의 확증이다.
 - **정확도는 실질 동등.** 42개 중 24 동일 + 11 표기차(`...`↔`・・・`, ♥ 개수/♥↔♡, 줄바꿈, `?`↔`？`) = **35/42**. 나머지는 **개선 3**(`ばつかり`→`ばっかり`, `::`→`・・・` 2건 — transformers의 기존 결함을 고침) 대 **악화 4**(#4 truncation 4줄→1줄이 유일한 실손실, #6·#26 오독, #20 소소). c=4의 diff 목록이 c=1과 완전히 동일 → 동시성이 correctness를 안 건드리고 결정적이다.
@@ -135,14 +137,80 @@ torch 안의 레버가 다 막힌 뒤 "공식/커뮤니티에 우리가 안 본 
 
 **구현**: `scanlation-llama-cpp` 플러그인에 engine 추가([recognizer.py](../../scanlation-llama-cpp/scanlation_llama_cpp/recognizer.py)) — translator는 무수정, transformers 경로도 `/admin`에 그대로 남아 폴백 가능. env `LLAMACPP_RECOGNIZE_ENDPOINT`(기본 `:8090`), 유닛 예시 [deploy/llama.cpp-PaddleOCR-VL-For-Manga.service.example](../../../deploy/llama.cpp-PaddleOCR-VL-For-Manga.service.example).
 
+## 6. llama.cpp 안쪽 튜닝 — 병목은 decode가 아니라 vision이었다
+
+전환 뒤 남은 레버를 마저 짰다. 출발점은 llama-server 자체 계측(`slot print_timing`)이고, 이게 §3(transformers)과는 **다른 그림**을 보여준다:
+
+```
+prompt eval (vision 인코딩 + prefill) = 739 ms / 229 tokens   ← 89%
+eval (decode)                         =  48~93 ms / 18~34 tokens
+```
+
+**decode는 6~11%로 사실상 무료**다. 그래서 §3의 "decode가 95%"는 **transformers 한정**이었고, llama.cpp에선 병목이 vision 쪽으로 옮겨간다.
+
+### 왜 토큰 수가 crop과 무관하게 229로 고정이었나 — `image_min_pixels`
+
+mmproj GGUF 메타데이터:
+
+| 키 | 값 |
+|---|---|
+| `clip.vision.image_min_pixels` | **147,384** ← 이보다 작으면 **업스케일** |
+| `clip.vision.image_max_pixels` | 2,822,400 (안 걸림) |
+| `patch_size` / `n_merge` | 14 / 2 → 토큰당 28×28 = 784 px |
+
+147384 ÷ 784 = **188 vision 토큰**. 즉 작은 crop이 전부 이 바닥으로 늘어나 토큰 수가 고정됐던 것이다. **우리 캡(150k)이 이 바닥 바로 위**라 우연히 맞아떨어졌다.
+
+**바닥 위에서는 픽셀에 선형**이다(실측 ~4.7µs/px, 1000px당 4.6~4.8ms로 재현): 174k→837ms, 367k→1931ms, 586k→2696ms.
+
+→ **150k가 "공짜로 쓸 수 있는 최대 해상도"**다. 그 아래로 줄이면 비용은 그대로인데 정보만 잃고, 위로 올리면 선형으로 비용을 낸다.
+
+### 네 설정 실측 (전부 anti-cache, 42 crop, Q8_0, c=1)
+
+| 설정 | 우리 캡 | `min_pixels` | 모델이 보는 정보량 | crops/sec | 사람 채점 |
+|---|---|---|---|---|---|
+| transformers (기준) | 150k/pow2 | — | 65k | 0.557 | 29 |
+| **pow2** (현행) | 150k/pow2 | 147384 | 65k → 147k 부풀림 | **1.262** | **28** |
+| box | 150k/**box** | 147384 | 150k 진짜 | 1.250 | 29 |
+| minpx25k | 150k/pow2 | **25088** | 65k | **1.887** | 28 |
+| native | **off** | 25088 | 259k 원본 | 0.909 | — |
+
+**사람 채점 = 42 crop을 원본 이미지와 대조해 "맞게 읽은 것"에 투표**([bench_recognize_llamacpp.py](bench_recognize_llamacpp.py) `--html`의 클릭 채점 페이지, `tools/compare`의 vote 페이지와 같은 관례).
+
+### 판정
+
+- **`pow2` 유지.** `box`가 같은 토큰 값에 정보량 2.3배(65k→150k)라 더 나을 것으로 추론했으나 **채점 28 vs 29로 차이 없었다.** 그 해상도 구간에서 모델의 한계가 해상도가 아니다. 속도도 동일(1.262 vs 1.250)하니 **현행 기본값을 그대로 둔다** — 인프로세스 엔진과 같은 모드라 두 recognizer가 갈라지지도 않는다.
+- **`native`(캡 off)는 폐기.** 가장 느리다(0.909). 픽셀이 곧 비용인데 얻는 게 없다.
+- **`minpx25k`는 보류된 다이얼.** 채점 동급인데 **1.5x 빠르다**(1.887). 대가는 `image_min_pixels`를 손댄 mmproj 파일을 배포에 들고 다니는 것 = 모델을 학습 분포 밖으로 미는 것이라, 42개 표본으로는 채택 근거가 얇다. 더 큰 표본으로 재평가할 값이 있다.
+  - 만드는 법: `gguf_set_metadata.py <mmproj> clip.vision.image_min_pixels 25088` (numpy+gguf 필요).
+  - CLI `--image-min-tokens`는 **이 경로에 안 먹는다**(실측: 토큰 수 불변). GGUF 수정만 통한다.
+- **Q8_0 채택 가능(선택).** BF16 893MB → **476MB**, 출력이 **42개 전부 바이트 동일**, 속도는 동일(대역폭이 병목이 아니므로). VRAM 417MB가 공짜인 셈. 단 `token_embd`가 Vulkan에 못 올라가 CPU 폴백된다(임베딩 조회라 비용은 작음) — 거슬리면 `--token-embd-type bf16`.
+- **Q4는 안 한다.** Q8_0이 속도를 1도 못 준 시점에서 대역폭이 병목이 아님이 확정됐다. Q4는 손상만 늘린다.
+- **`-fa`(flash attention)는 무효.** on/off가 1.240 vs 1.242로 동일. 이미 켜져 있거나 이 워크로드에 무관.
+- **PaddleOCR-VL 1.5/1.6 제외** — 공식 GGUF가 있으나 만화 fine-tune을 잃어 정확도가 눈에 띄게 떨어진다(별도 확인).
+
+## 7. ⚠️ 방법론 — llama-server 프롬프트 캐시가 측정을 세 번 망쳤다
+
+벤치는 **같은 crop을 매번 다시 보낸다.** llama-server는 이미 본 프롬프트(이미지 포함)를 슬롯 캐시에서 돌려주므로, ~740ms짜리 vision prefill이 **~100ms로** 끝난다. 그 결과:
+
+| 잘못 나온 값 | 실제 | 어떻게 들켰나 |
+|---|---|---|
+| 동시성 c=4 **11.047** crops/sec | 1.32 | 재현 불가 → A/B로 폐기 |
+| box150k **1.920** | 1.250 | per-crop 37ms가 물리적으로 불가능(188토큰 × 3.2ms = 600ms+) |
+| 4연속 스윕 **8.7~9.6** | 1.2~1.9 | med 89~114ms |
+
+**막지 못한 것들:**
+- 요청의 `cache_prompt: false` — **이 빌드가 무시한다**(실측).
+- 사후 이상치 탐지 — **전부 캐시되면 중앙값이 같이 내려가 아무 이상치도 안 남는다.** 실제로 8.7x 런에서 경고가 침묵했다.
+
+**해법은 캐시를 애초에 못 맞추게 하는 것**: `--pad-uncached`가 crop마다 몇 px(런마다 다른 값)을 덧대 모든 요청을 새것으로 만든다. 비용은 패치 한 열(~190개 중 1개). 정확도 런에는 쓰지 않는다(입력을 건드리므로).
+
+> **교훈**: 속도만 보고 나머지를 확인하지 않은 게 공통 원인이다. 위 셋 중 첫 번째는 **출력을 아예 안 봤고**(`--no-reference`), 나머지 둘은 **per-crop 분포를 안 봤다.** 집계값 하나만 보면 안 된다.
+
 ## 남은 일
 
-**torch 스택의 per-crop 레버는 전부 막혔고**(양자화·MI50·`torch.compile`), 그 벽은 llama.cpp로 우회했다. 이제 남은 튜닝은 **llama.cpp 안쪽**이다 — 토큰당 ~26ms가 대역폭 roofline(~1.9ms)의 13배라 아직 여유가 있다:
-
-- **`-fa`(flash attention)** — 켜져 있는지 미확인. vision prefill에 유효할 수 있다.
-- **양자화 재도전 (Q8_0 → Q4)** — 지금은 **BF16**(936MB)이다. §3에서 양자화를 기각한 건 "weight read가 9%"라는 **transformers 기준**인데, 호스트 오버헤드가 사라진 지금은 병목이 옮겨가 전제가 다르다. `llama-quantize`로 만들어 같은 벤치로 속도·정확도를 재면 된다.
-- **llama-swap** — 위 ~15W(D3hot 상실) 회수.
-- **PaddleOCR-VL 1.5/1.6** — 공식 GGUF가 있으나 **만화 fine-tune을 잃어** 정확도가 눈에 띄게 떨어졌다(별도 확인). 제외.
+- **실배포** — systemd 유닛 등록([deploy/llama.cpp-PaddleOCR-VL-For-Manga.service.example](../../../deploy/llama.cpp-PaddleOCR-VL-For-Manga.service.example)) + `/admin`에서 recognizer를 `llama.cpp`로 전환 + `llama.cpp` 플러그인 재설치(recognizer entry point가 새로 생겼다).
+- **llama-swap** — 유휴 언로드가 사라져 9060 XT가 상시 ~15W다(§5 대가). TTL 프록시로 회수 가능, 콜드스타트 ~1.9초.
+- **`minpx25k` 재평가** — 더 큰 표본에서 1.5x가 정말 공짜인지.
 
 ## 관련
 
