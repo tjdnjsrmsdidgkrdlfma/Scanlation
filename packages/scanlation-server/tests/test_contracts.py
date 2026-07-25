@@ -8,7 +8,7 @@ import types
 import numpy as np
 
 from scanlation_sdk.contracts import BatchTranslator, Detector, Recognizer, Region, Translator
-from scanlation_sdk.device import device_label, pick_device
+from scanlation_sdk.device import device_label, pick_device, release_cuda_cache
 from scanlation_sdk.local_engine import LocalModelEngineBase
 from tests.fake_engines import DummyDetector, DummyRecognizer, DummyTranslator
 
@@ -103,6 +103,39 @@ def test_pick_device_index_preserved_and_ranged():
         assert pick_device("cpu") == "cpu"
         sys.modules["torch"] = _fake_torch(False, 0)
         assert pick_device("cuda:1") == "cpu"      # no GPU -> cpu fallback
+    finally:
+        if orig is not None:
+            sys.modules["torch"] = orig
+        else:
+            sys.modules.pop("torch", None)
+
+
+def test_release_cuda_cache_never_initializes():
+    """release_cuda_cache empties the cache only when a HIP/CUDA context already
+    exists (is_initialized). It must NOT consult is_available() (which initializes
+    the runtime) on an uninitialized process: that context would open every GPU's
+    node for the process lifetime and pin the cards at D0, blocking idle
+    runtime-suspend after a CPU-only engine's unload."""
+    orig = sys.modules.get("torch")
+    try:
+        calls: list[str] = []
+
+        def _stub(initialized):
+            m = types.ModuleType("torch")
+            m.cuda = types.SimpleNamespace(
+                is_initialized=lambda: initialized,
+                # both are tripwires: calling either on the uninitialized path is the bug
+                is_available=lambda: calls.append("is_available") or True,
+                empty_cache=lambda: calls.append("empty_cache"),
+            )
+            return m
+
+        sys.modules["torch"] = _stub(False)
+        release_cuda_cache()
+        assert calls == []                       # no context -> nothing touched, no init probe
+        sys.modules["torch"] = _stub(True)
+        release_cuda_cache()
+        assert calls == ["empty_cache"]          # context exists -> cache actually freed
     finally:
         if orig is not None:
             sys.modules["torch"] = orig
@@ -217,6 +250,7 @@ TESTS = [
     test_pick_device_cpu_is_pinned,
     test_pick_device_gpu_uses_cuda_when_available,
     test_pick_device_index_preserved_and_ranged,
+    test_release_cuda_cache_never_initializes,
     test_device_label_index,
     test_local_engine_lifecycle,
     test_local_engine_device_override,

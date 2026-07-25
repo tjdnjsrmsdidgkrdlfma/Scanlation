@@ -43,10 +43,16 @@ def device_label(device: str) -> str:
 
 
 def release_cuda_cache() -> None:
-    """Free cached VRAM after an unload; silent no-op without torch/GPU."""
+    """Free cached VRAM after an unload; silent no-op without torch/GPU. Guarded on
+    is_initialized() (NOT is_available()) so it never CREATES a HIP/CUDA context just
+    to empty a cache that can't exist yet: is_available() initializes the runtime,
+    which opens every GPU's kfd/render node for the process lifetime and pins the
+    cards at D0 — so a CPU-only engine's unload would block the recognizer GPU from
+    ever reaching idle runtime-suspend (~0W). If no context was ever created here,
+    there is nothing to release."""
     try:
         import torch
-        if torch.cuda.is_available():
+        if torch.cuda.is_initialized():
             torch.cuda.empty_cache()
     except Exception:  # noqa: BLE001
         pass
