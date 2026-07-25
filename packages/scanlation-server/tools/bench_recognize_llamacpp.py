@@ -270,18 +270,26 @@ def _write_html(path: str, crops, ref_text, variants, src: str) -> None:
         f.write("".join(P))
 
 
-def _warn_cache(label: str, ms: list[float]) -> None:
-    """Shout if any crop came back far under the median. Vision prefill dominates and is
-    roughly flat per crop, so an outlier that fast means the server answered from its
-    prompt cache — the exact artifact that faked a 8.6x and a 1.5x here. A backstop for
-    the cache_prompt=False request flag, in case a server build ignores it."""
+def _warn_cache(label: str, ms: list[float], rows: list | None = None) -> None:
+    """Shout if crops came back far under the median. Vision prefill dominates and is
+    roughly flat per crop, so an outlier that fast means the server answered from cache
+    instead of encoding the image — the artifact that faked an 8.6x and a 1.5x here.
+
+    This is the ONLY reliable detector: the ``cache_prompt: false`` request flag is
+    ignored by at least some llama-server builds (measured), so a clean number needs the
+    server RESTARTED between configs. The warning also goes into the report, since piping
+    the run through ``tail`` is exactly how it got missed."""
     if len(ms) < 4:
         return
-    med, fast = statistics.median(ms), [x for x in ms if x < 0.25 * statistics.median(ms)]
-    if fast:
-        print(f"  !! [{label}] {len(fast)} crop(s) returned under 25% of the median "
-              f"({min(fast):.0f}ms vs med {med:.0f}ms) — looks like prompt-cache hits, so this "
-              f"rate is INFLATED. Restart llama-server and re-run.")
+    med = statistics.median(ms)
+    fast = [x for x in ms if x < 0.25 * med]
+    if not fast:
+        return
+    msg = (f"{len(fast)} crop(s) returned under 25% of the median ({min(fast):.0f}ms vs med "
+           f"{med:.0f}ms) — cache hits, so this rate is INFLATED. Restart llama-server and re-run.")
+    print(f"  !! [{label}] {msg}")
+    if rows is not None:
+        rows.append(f"> **!! {label}: {msg}**")
 
 
 def _report_pass(label: str, ms: list[float], rows: list) -> float:
@@ -289,7 +297,7 @@ def _report_pass(label: str, ms: list[float], rows: list) -> float:
     print(f"  [{label}] {rate:.3f} crops/sec | per-crop ms "
           f"min {min(ms):.0f} / med {statistics.median(ms):.0f} / max {max(ms):.0f}")
     rows.append(f"| {label} | {rate:.3f} | {min(ms):.0f} | {statistics.median(ms):.0f} | {max(ms):.0f} |")
-    _warn_cache(label, ms)
+    _warn_cache(label, ms, rows)
     return rate
 
 
@@ -411,7 +419,7 @@ def main() -> int:
                   f"per-crop ms min {min(ms):.0f} / med {statistics.median(ms):.0f} / max {max(ms):.0f}")
             rows.append(f"| {label} (concurrency {args.concurrency}) | {rate:.3f} | {min(ms):.0f} | "
                         f"{statistics.median(ms):.0f} | {max(ms):.0f} |")
-            _warn_cache(label, ms)
+            _warn_cache(label, ms, rows)
         else:
             rate = _report_pass(label, ms, rows)
         variants.append((label, got, rate))
