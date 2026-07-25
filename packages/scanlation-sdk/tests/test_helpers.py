@@ -41,20 +41,19 @@ def test_downscale_to_cap_pow2_halves_until_under():
     assert out.width * out.height <= 150000
 
 
-def test_downscale_to_cap_box_area_lands_at_cap_aspect_kept():
-    """box/area shrink to ~cap px with aspect ratio preserved."""
-    for mode in ("area", "box"):
-        out = downscale_to_cap(Image.new("RGB", (1200, 800)), 150000, mode)  # 3:2
-        assert out.width * out.height <= 150000
-        assert abs(out.width / out.height - 1.5) < 0.02
+def test_downscale_to_cap_box_lands_at_cap_aspect_kept():
+    """box shrinks to ~cap px with aspect ratio preserved — it SPENDS the budget
+    where pow2 overshoots to a power-of-two fraction of it."""
+    out = downscale_to_cap(Image.new("RGB", (1200, 800)), 150000, "box")  # 3:2
+    assert 0.99 * 150000 <= out.width * out.height <= 150000
+    assert abs(out.width / out.height - 1.5) < 0.02
 
 
-def test_downscale_to_cap_grid_modes_multiple_of_28():
-    """grid28/boxgrid snap each side down to a multiple of the 28px patch grid."""
-    for mode in ("grid28", "boxgrid"):
-        out = downscale_to_cap(Image.new("RGB", (1200, 800)), 150000, mode)
-        assert out.width % 28 == 0 and out.height % 28 == 0
-        assert out.width * out.height <= 150000
+def test_downscale_to_cap_unknown_mode_falls_back_to_pow2():
+    """An unrecognized mode must not silently become `box`: pow2 is the safe default,
+    and the admin only ever offers DOWNSCALE_MODES."""
+    img = Image.new("RGB", (1000, 1000))
+    assert downscale_to_cap(img, 150000, "grid28").size == downscale_to_cap(img, 150000, "pow2").size
 
 
 def test_install_hint_default_matches_template():
@@ -115,8 +114,8 @@ TESTS = [
     test_to_rgb_converts_non_rgb,
     test_downscale_to_cap_noop_when_off_or_small,
     test_downscale_to_cap_pow2_halves_until_under,
-    test_downscale_to_cap_box_area_lands_at_cap_aspect_kept,
-    test_downscale_to_cap_grid_modes_multiple_of_28,
+    test_downscale_to_cap_box_lands_at_cap_aspect_kept,
+    test_downscale_to_cap_unknown_mode_falls_back_to_pow2,
     test_install_hint_default_matches_template,
     test_install_hint_extra_replaces_period,
     test_engine_base_log_is_namespaced,

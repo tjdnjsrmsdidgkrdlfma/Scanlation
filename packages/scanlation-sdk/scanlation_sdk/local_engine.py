@@ -22,34 +22,35 @@ def to_rgb(img: Image.Image) -> Image.Image:
     return img if img.mode == "RGB" else img.convert("RGB")
 
 
-GRID = 28  # dynamic-res VLM vision patch grid (PaddleOCR-VL: patch14 x merge2)
 # The downscale modes downscale_to_cap understands — the authoritative set a
 # recognizer's OPTION_SCHEMA should defer to instead of hardcoding its own whitelist
-# (an unknown mode falls back to pow2 below). pow2 = BOX integer halving; box/area =
-# BOX/LANCZOS scale; the grid variants snap to the VLM patch grid first.
-DOWNSCALE_MODES = ("pow2", "box", "area", "grid28", "boxgrid")
+# (an unknown mode falls back to pow2 below). Both average over the source area, which
+# is what a bake-off found to matter (packages/scanlation-server/tools/recognize-gpu-speed.md):
+# LANCZOS rings on thin strokes and lost to every BOX variant, so no LANCZOS mode is
+# offered. They differ only in the scale factors allowed.
+DOWNSCALE_MODES = ("pow2", "box")
 
 
 def downscale_to_cap(crop: Image.Image, cap: int, mode: str = "pow2") -> Image.Image:
     """Shrink a crop to <= ``cap`` pixels (aspect preserved) so a dynamic-resolution
-    VLM recognizer emits fewer vision tokens. ``pow2`` (BOX integer halving) is the
-    validated-best mode — packages/scanlation-server/tools/recognize-gpu-speed.md.
-    An unrecognized ``mode`` falls back to ``pow2``. ``cap <= 0`` or an already-small
-    crop is returned unchanged (same object)."""
+    VLM recognizer emits fewer vision tokens. ``cap <= 0`` or an already-small crop is
+    returned unchanged (same object); an unrecognized ``mode`` falls back to ``pow2``.
+
+    ``pow2`` halves repeatedly, so each output pixel is the exact mean of a 2^k block —
+    but the only reachable areas are 1, 1/4, 1/16…, and a crop barely over the cap
+    drops a whole step to a QUARTER of the budget. ``box`` computes the scale that
+    lands on the cap and area-averages onto it: the same kind of mean over a
+    non-integer footprint, spending the budget instead of overshooting it
+    (recognize-decode-bound.md §7 — the overshoot truncated a crop's text)."""
     w, h = crop.width, crop.height
     if cap <= 0 or w * h <= cap:
         return crop
-    if mode not in DOWNSCALE_MODES:
-        mode = "pow2"
-    if mode == "pow2":
+    if mode != "box":
         while crop.width * crop.height > cap and crop.width >= 2 and crop.height >= 2:
             crop = crop.reduce(2)
         return crop
     scale = (cap / (w * h)) ** 0.5
-    tw, th = max(1, int(w * scale)), max(1, int(h * scale))
-    if mode in ("grid28", "boxgrid"):
-        tw, th = max(GRID, tw - tw % GRID), max(GRID, th - th % GRID)
-    return crop.resize((tw, th), Image.BOX if mode in ("box", "boxgrid") else Image.LANCZOS)
+    return crop.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.BOX)
 
 
 def install_hint(name: str, extra: str = "") -> str:
