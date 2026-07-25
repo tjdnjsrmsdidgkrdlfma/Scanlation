@@ -13,7 +13,7 @@
 |---|---|---|
 | **llama.cpp로 서빙** | ✅ **채택 — 10x, VRAM 1/4** (§5) | Python/torch 디스패치 계층이 없어 오버헤드를 애초에 안 문다. 정확도는 실질 동등 |
 | **GPU 핀을 `GGML_VK_VISIBLE_DEVICES`로** | ✅ **필수 — 이걸 놓치면 4.4x를 잃는다** (§6) | `--device`는 LM만 GPU에 올리고 vision 인코더를 남긴다. 같은 229 토큰이 739ms → 93ms |
-| **`downscale_mode=box` + cap 300k** | ✅ **채택 — 절단 하나를 7%에 산다** (§7) | `pow2`는 배율이 2의 거듭제곱뿐이라 예산의 최대 4배를 버린다. 302k 크롭이 150k 캡에서 **75k로** 접혀 4줄이 1줄로 잘렸다 |
+| **`downscale_mode=box` + cap 300k** | ✅ **채택 — 절단 하나를 페이지당 105ms(+4.7%)에 산다** (§7) | `pow2`는 배율이 2의 거듭제곱뿐이라 예산의 최대 4배를 버린다. 302k 크롭이 150k 캡에서 **75k로** 접혀 4줄이 1줄로 잘렸다 |
 | **동시성 W4·K2** | 🔸 transformers 한정 채택(1.5x) | llama.cpp 쪽 동시성은 잘못된 GPU 핀 상태에서만 재봤다 — 현 구성 기준 미측정(§6) |
 | **양자화 (weight-only INT8/INT4)** | ❌ 폐기(transformers 기준) | decode의 weight read가 토큰당 ~5.6ms로 **전체의 ~9%**뿐. 작은 모델(0.9B)이라 줄일 여지 자체가 작다 |
 | **MI50로 recognize** | ❌ 폐기 | torch rocm7.0 rocBLAS에 **gfx906 Tensile 라이브러리가 없음** — 로드는 되지만 첫 matmul에서 죽는다. (llama.cpp는 gfx906에서 도니 **이 판정은 torch 한정**이다) |
@@ -197,7 +197,16 @@ per-crop이 168ms로 내려오면서 §3의 비용 구조가 통째로 바뀌었
 
 **`box` 300k가 캡 off보다 낫다** — 텍스트가 더 정확하고, 빠르고(4.277 vs 4.005), **꼬리가 훨씬 낫다**(max 410 vs 595ms: 캡이 남아 있어 거대 crop이 폭주하지 않는다). 캡 off는 선택지에서 빠진다.
 
-**대가는 파이프라인 기준 +7%다.** recognize per-crop이 1.29x 느려지지만 recognize는 전체의 21%뿐이라(§8), 페이지 중앙값 1788ms → 약 1913ms. 크롭 하나가 통째로 잘리는 걸 그 값에 산다.
+**대가는 파이프라인 기준 +4.7%다.** 두 설정을 각각 **양 llama-server 재시작 직후**(캐시 없음)에 21장 챕터로 돌린 A/B:
+
+| 중앙값 | `pow2` 150k | `box` 300k | 차이 |
+|---|---|---|---|
+| detect | 301.0ms | 302.1ms | — |
+| **recognize** | 397.8ms | **502.8ms** | **+105ms (1.26x)** |
+| translate | 1298.0ms | 1293.8ms | — |
+| 페이지 total | 2008.4ms | 2101.6ms | **+4.7%** |
+
+**대가는 recognize 한 스테이지에만 붙는다.** 인식이 살아나 텍스트가 늘면 번역도 무거워질 거라 예상했지만(#4가 1줄 → 4줄), translate는 4ms 안에서 같다. 크롭 하나가 통째로 잘리는 걸 페이지당 105ms에 산다.
 
 > 나머지 41개 crop은 캡으로 갈리지 않았다 — 원본이 이미 캡 아래라 어느 설정에서도 손을 안 탄다. 갈린 것들은 작가가 폰트 없이 손으로 쓴 의성어라 인식 문제가 아니라 **detect 단계에서 걸러야 할 대상**이다.
 
@@ -205,25 +214,26 @@ per-crop이 168ms로 내려오면서 §3의 비용 구조가 통째로 바뀌었
 
 ## 8. 파이프라인에서의 결과 — 이제 translate 바운드
 
-recognize 교체의 값은 결국 파이프라인에서 재야 한다. 같은 21장 챕터, `run_report.py` serial(스테이지별 시간이 깨끗하게 나온다):
+recognize 교체의 값은 결국 파이프라인에서 재야 한다. 같은 21장 챕터, `run_report.py` serial(스테이지별 시간이 깨끗하게 나온다), 채택 설정(`box` 300k), **양 llama-server 재시작 직후**:
 
-| 스테이지 | 합계 | 중앙값 | 비중 |
-|---|---|---|---|
-| decode | 0.25s | 12.0ms | 0.6% |
-| detect | 9.10s | 302.0ms | 21.6% |
-| recognize | 8.78s | 391.9ms | **20.8%** |
-| **translate** | **24.03s** | 1081.6ms | **57.0%** |
-| lockwait / semwait | 0 / 0 | — | 서버 측 직렬화 없음 |
+| 스테이지 | 중앙값 | 비중 |
+|---|---|---|
+| decode | 11.9ms | 0.6% |
+| detect | 302.1ms | 14.4% |
+| recognize | 502.8ms | 23.9% |
+| **translate** | **1293.8ms** | **61.6%** |
+| lockwait / semwait | 0 / 0 | 서버 측 직렬화 없음 |
+| **페이지 total** | **2101.6ms** | serial 0.43 p/s · **동시성 2에서 21장 32.8초(0.64 p/s)** |
 
-| 시점 | recognize 엔진 | recognize 비중 | wall(21장, serial) |
-|---|---|---|---|
-| 2026-07-12 | PaddleOCR-VL (transformers) | **64.7%** | — |
-| 2026-07-16 | manga-ocr (CPU) | ~26% | 42.5s |
-| **2026-07-26** | **PaddleOCR-VL (llama.cpp)** | **20.8%** | **42.4s** |
+| 시점 | recognize 엔진 | recognize 비중 |
+|---|---|---|
+| 2026-07-12 | PaddleOCR-VL (transformers) | **64.7%** |
+| 2026-07-16 | manga-ocr (CPU) | ~26% |
+| **2026-07-26** | **PaddleOCR-VL (llama.cpp)** | **23.9%** |
 
-**wall이 manga-ocr 시절과 사실상 같다**(42.5 → 42.4s). 즉 지금은 **manga-ocr 속도로 PaddleOCR-VL 정확도를 얻는 상태**다. 이게 §5 교체의 실질 성과다.
+**병목이 recognize에서 translate로 넘어갔다.** recognize는 전체의 1/4이 채 안 되고, 그 자리를 translate가 62%로 대신한다. **다음 레버는 translate이고, 그 다음은 detect**(14.4%, CPU RT-DETR)다.
 
-그리고 **detect(21.6%)가 recognize(20.8%)와 동급 비용이 됐다** — CPU에서 도는 172MB RT-DETR이 이제 recognize만큼 든다. 다음 레버는 translate이고, 그 다음이 detect다.
+> **비교할 때 캐시를 맞출 것.** 이 절을 처음 쓸 때는 llama-server가 데워진 런을 썼고, 그래서 translate가 1082ms·57%로 나왔다. 서버를 재시작하고 다시 재니 1294ms·62%다 — 결론(translate 바운드)은 같지만 숫자가 20% 틀렸다. §9 참조.
 
 ## 9. ⚠️ 방법론 — 측정이 다섯 번 틀렸다
 
@@ -268,8 +278,8 @@ recognize 교체의 값은 결국 파이프라인에서 재야 한다. 같은 21
 
 ## 남은 일
 
-- **translate** — 이제 파이프라인의 **57%**다(§8). 다음 레버는 여기다. 2026-07-16 동시성 스윕의 **열 상한(동시성 4 = junction 100°C)은 그대로다** — 그때도 recognize는 CPU였고 MI50는 translate 전용이었으니 이번 변경은 MI50 부하를 안 건드린다. 바뀐 건 **공급**이다: 그 스윕이 "다음 병목은 CPU recognize 직렬화(lockwait 0→172→996ms)"로 끝났는데, 지금은 **lockwait이 0**이라 translate 슬롯이 처음으로 제대로 채워진다. 같은 동시성에서 더 나올 여지가 여기 있다.
-- **detect** — 21.6%로 recognize와 동급이 됐다(§8). [TODO](../../../README.md)의 detector 풀링·GPU detect가 여기서 값이 생긴다.
+- **translate** — 이제 파이프라인의 **62%**다(§8). 다음 레버는 여기다. 2026-07-16 동시성 스윕의 **열 상한(동시성 4 = junction 100°C)은 그대로다** — 그때도 recognize는 CPU였고 MI50는 translate 전용이었으니 이번 변경은 MI50 부하를 안 건드린다. 바뀐 건 **공급**이다: 그 스윕이 "다음 병목은 CPU recognize 직렬화(lockwait 0→172→996ms)"로 끝났는데, 지금은 **lockwait이 0**이라 translate 슬롯이 처음으로 제대로 채워진다. 같은 동시성에서 더 나올 여지가 여기 있다.
+- **detect** — 14.4%다(§8). CPU RT-DETR 302ms가 통째로 사라질 수 있으니, translate 다음으로는 [TODO](../../../README.md)의 detector 풀링·GPU detect다.
 - **남은 전처리 노브** — §6의 미측정 목록 중 `image_min_pixels`·동시성(캡은 §7에서 완료).
 - **llama-swap** — 유휴 언로드가 사라져 9060 XT가 상시 ~15W다(§5 대가). TTL 프록시로 회수 가능, 콜드스타트 ~1.9초.
 - ~~**플러그인 재설치 경로**~~ — 해결. `/install_plugins/`·`/install_plugin_stream/`이 `force`를 받고, `/admin` 플러그인 탭의 **재설치** 버튼이 그걸 쓴다. 설치 여부 판정은 "import 되는가"라 **코드가 최신인지는 안 본다** — 서버 이미지를 다시 빌드해도 `/plugins` 볼륨의 플러그인은 그대로이므로, 플러그인 코드를 고쳤으면 이 버튼을 눌러야 반영된다.
