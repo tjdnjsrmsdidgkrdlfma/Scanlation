@@ -3,9 +3,12 @@
 # named after it: llama-server holds exactly one, an LLM there and this vision
 # model (+ its mmproj) here.
 #
-# Pin each to its own GPU with --device (list them: llama-server --list-devices):
-# translate on the MI50, recognize on the 9060 XT. Without --device llama.cpp picks
-# for itself and can take the card the other one wants.
+# Pin each to its own GPU so the two servers don't compete: translate on the MI50,
+# recognize on the 9060 XT. GGML_VK_VISIBLE_DEVICES hides every other card (index from
+# `llama-server --list-devices` run WITHOUT the env — here 2 = 9060 XT / RADV GFX1200),
+# matching the sibling translate unit. Do NOT also pass --device: it validates against
+# the devices VISIBLE to the process, so with the env set the only device is renumbered
+# to Vulkan0 and "--device Vulkan2" exits 1 at argument parsing.
 #
 # Weights: the GGUF pair (model + mmproj) of the manga fine-tune —
 #   huggingface.co/adambarbato/PaddleOCR-VL-For-Manga-GGUF
@@ -26,10 +29,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+Environment="GGML_VK_VISIBLE_DEVICES=2"
 ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server \
   -m /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-BF16.gguf \
   --mmproj /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-mmproj-BF16.gguf \
-  --device Vulkan2 -ngl 99 --temp 0 --host 0.0.0.0 --port 8090
+  -ngl 99 --temp 0 --host 0.0.0.0 --port 8090
 Restart=on-failure
 
 [Install]

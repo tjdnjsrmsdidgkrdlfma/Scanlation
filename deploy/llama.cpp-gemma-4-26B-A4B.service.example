@@ -1,18 +1,25 @@
-# One unit per MODEL, named after it: llama-server holds exactly one, so each model
-# it serves is its own long-running service (see the sibling
-# llama.cpp-PaddleOCR-VL-For-Manga.service.example, the vision half).
+# llama.cpp server for gemma-4-26B-A4B — the translate half. One unit per MODEL,
+# named after it: llama-server holds exactly one, this LLM here and the vision model
+# in the sibling llama.cpp-PaddleOCR-VL-For-Manga.service.example.
 #
-# --device pins this to the MI50 (list them: llama-server --list-devices). Be explicit
-# once a second instance exists — otherwise llama.cpp picks for itself and can take the
-# card the other one wants.
+# GPU pinning is by ENV, not by --device: GGML_VK_VISIBLE_DEVICES hides every other
+# card, so llama.cpp sees exactly one and numbers it Vulkan0. Two reasons that beats
+# `--device Vulkan1`:
+#   * --device validates its argument against the devices VISIBLE to that process, so
+#     the two mechanisms don't compose — with the env set, "Vulkan1" doesn't exist and
+#     the server exits 1 at argument parsing.
+#   * the index is the one from `llama-server --list-devices` run WITHOUT the env
+#     (here 1 = MI50 / RADV VEGA20, 2 = 9060 XT / RADV GFX1200; 0 is the iGPU).
+# InaccessiblePaths additionally hides the other card's render node from the unit.
+# Find yours: ls -l /dev/dri/by-path/ (or check which renderD* each card owns).
 [Unit]
-Description=llama.cpp translate server (MI50, Vulkan, gemma-4)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStartPre=/usr/bin/rocm-smi -d 0 --setpoweroverdrive 150
-ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -hf unsloth/gemma-4-26B-A4B-it-qat-GGUF --device Vulkan1 -ngl 99 -c 16384 --parallel 4 --n-predict 1024 --host 0.0.0.0 --port 8080
+Environment="GGML_VK_VISIBLE_DEVICES=1"
+InaccessiblePaths=/dev/dri/renderD129
+ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -hf unsloth/gemma-4-26B-A4B-it-qat-GGUF -ngl 99 -c 16384 --parallel 8 --n-predict 1024 --host 0.0.0.0 --port 8080
 Restart=on-failure
 
 [Install]
