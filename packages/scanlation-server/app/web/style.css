@@ -297,6 +297,7 @@ button.pa-install:hover { background: rgba(110, 168, 254, .18); border-color: rg
 }
 .toast.ok { border-color: var(--ok); }
 .toast.err { border-color: var(--danger); }
+.toast.warn { border-color: var(--warn); }
 
 /* login gate — shown only when the server requires a token and we don't have a
    valid one; covers the whole page so the app stays hidden until authenticated */

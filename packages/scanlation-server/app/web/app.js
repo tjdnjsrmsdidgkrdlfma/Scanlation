@@ -547,18 +547,25 @@ async function runInstall(name) {
   setAction(name, busyChip());
   const row = document.querySelector(`.plugin[data-name="${name}"]`);
   const log = openPluginLog(row);
-  let ok = false;
+  let ok = false, result = null;
   try {
-    await streamInstall(name, (ev) => log.handle(ev), force);
+    await streamInstall(name, (ev) => { if (ev.event === "done") result = ev.result; log.handle(ev); }, force);
     ok = true;
   } catch (e) {
     log.fail(e.message);
     toast(t("toast.installFail", { name, msg: e.message }), "err");
   }
   if (ok) {
-    toast(t("toast.installed", { name }), "ok");
+    // A reinstall replaces the files on the plugins volume, but this process already
+    // imported the old module — Python serves it from sys.modules, so the new code
+    // (engines, option schemas) only appears after a restart. Say so instead of
+    // letting a green toast imply it took effect.
+    const reinstalled = result && result.package === "reinstalled";
+    toast(reinstalled ? t("toast.reinstalled", { name }) : t("toast.installed", { name }),
+          reinstalled ? "warn" : "ok");
     setAction(name, doneChip());
-    hidePluginLog(name);
+    if (reinstalled) log.note(t("plugins.restartNeeded"));
+    else hidePluginLog(name);
   } else {
     setAction(name, installButton(name));      // keep the (error) log; allow retry
   }
@@ -717,6 +724,15 @@ function openPluginLog(row) {
       record("✖ " + (msg || "error"), "err");
       out.hidden = false;           // reveal the log so the cause is visible
       toggle.classList.add("open");
+    },
+    // A reinstall finishes with the new files on disk but the OLD module still in
+    // this process — leave the panel up saying so, since a toast fades in 2.6s and
+    // this one is an instruction, not an acknowledgement.
+    note(msg) {
+      phaseEl.textContent = "⚠ " + msg;
+      pctEl.textContent = "";
+      bar.classList.remove("indet");
+      record("⚠ " + msg, "log");
     },
   };
 }
