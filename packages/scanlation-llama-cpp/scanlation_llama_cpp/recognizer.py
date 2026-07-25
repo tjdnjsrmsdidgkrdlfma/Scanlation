@@ -66,12 +66,23 @@ class LlamaCppRecognizer(HttpEngineBase):
                        "description": "Max output tokens per crop; lower to cap runaway generation."},
         "temperature": {"type": float, "default": 0.0,
                         "description": "0 = greedy/deterministic, which is what OCR wants."},
+        # The cap matters MORE here than in-process: llama.cpp's vision cost is linear in
+        # pixels above a floor (~4.7us/px measured), so uncapped crops cost 1.4x. But it
+        # must land AT the cap, not under it -- see downscale_mode.
         "max_pixels": {"type": int,
                        "default": int(os.environ.get("SCANLATION_RECOGNIZE_MAX_PIXELS", "150000")),
-                       "description": "Downscale crops above this many pixels before OCR to cut vision tokens (~1.66x). 0 = off."},
+                       "description": "Downscale crops above this many pixels before OCR to cut vision tokens. "
+                                      "150k sits just above the model's own floor, where resolution is still free. 0 = off."},
+        # `box` here, not the in-process engine's `pow2`. pow2 only halves, so it
+        # overshoots the cap (a 259k crop lands at 65k) -- and llama.cpp then scales that
+        # back UP to its clip.vision.image_min_pixels floor (147384). Same token count,
+        # same speed, 2.3x less real detail, and a crop that truncated because of it.
+        # `box` lands exactly at the cap with the same non-ringing area-average filter.
         "downscale_mode": {"type": str,
-                           "default": os.environ.get("SCANLATION_RECOGNIZE_DOWNSCALE_MODE", "pow2"),
-                           "description": f"How to downscale when max_pixels applies: {' / '.join(DOWNSCALE_MODES)} (pow2 recommended)."},
+                           "default": os.environ.get("SCANLATION_RECOGNIZE_DOWNSCALE_MODE", "box"),
+                           "description": f"How to downscale when max_pixels applies: {' / '.join(DOWNSCALE_MODES)}. "
+                                          "box (recommended here) lands exactly at the cap; pow2 undershoots it and the "
+                                          "server just upscales again, losing detail for nothing."},
     }
     SUPPORTED_SRC = ["ja", "en", "zh", "ko"]
 

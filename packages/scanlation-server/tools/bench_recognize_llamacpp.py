@@ -113,15 +113,24 @@ def _pad_unique(crops, pad: int):
     return out
 
 
-def _parse_endpoints(spec: str) -> list[tuple[str, str]]:
-    """``"a=http://x,http://y:8091"`` -> [("a", "http://x"), (":8091", "http://y:8091")].
-    An unlabelled entry is named by its port, which is what actually distinguishes two
-    servers that differ only in config."""
+def _parse_endpoints(spec: str, cap: int, mode: str) -> list[tuple[str, str, int, str]]:
+    """``"a=http://x,b=http://y@150000/box"`` -> [(label, url, cap, mode), ...].
+
+    The optional ``@<pixels>/<mode>`` tail gives a variant its OWN downscale, because
+    the interesting comparisons are often about preprocessing rather than the server:
+    pow2 vs box at the same cap runs against one endpoint. Without it a variant uses the
+    global cap. An unlabelled entry is named by its port, which is what distinguishes two
+    servers differing only in config."""
     out = []
     for part in (p.strip() for p in spec.split(",") if p.strip()):
         label, _, url = part.rpartition("=")
+        url, _, capspec = url.partition("@")
         url = url.rstrip("/")
-        out.append((label or ":" + url.rsplit(":", 1)[-1], url))
+        vcap, vmode = cap, mode
+        if capspec:
+            px, _, m = capspec.partition("/")
+            vcap, vmode = int(px), (m or mode)
+        out.append((label or ":" + url.rsplit(":", 1)[-1], url, vcap, vmode))
     return out
 
 
@@ -266,7 +275,7 @@ def _write_html(path: str, crops, ref_text, variants, src: str) -> None:
          "칸 색: <span style='background:#2f2410;padding:0 4px'>오독(빨간 표시 = 다른 구간)</span> · "
          "<span style='background:#20262e;padding:0 4px'>공백/줄바꿈만 다름</span> · "
          "<span style='opacity:.45'>레퍼런스와 동일</span></small></div></div>",
-         "<table><tr><th>#</th><th>crop (as sent)</th>"
+         "<table><tr><th>#</th><th>crop (original)</th>"
          + "".join(f"<th>{esc(l)}</th>" for l in labels) + "</tr>"]
     for _r, i, cls, crop, texts in graded:
         P.append(f"<tr class='{cls}'><td>{i}</td>"
@@ -333,7 +342,9 @@ def main() -> int:
     ap.add_argument("--endpoint", default=os.getenv("LLAMACPP_RECOGNIZE_ENDPOINT", "http://host.docker.internal:8090"),
                     help="llama-server base URL serving the PaddleOCR-VL GGUF (+ its mmproj). Comma-separate "
                          "several (optionally 'label=url') to compare configs side by side in ONE run — e.g. two "
-                         "servers differing only in the mmproj's image_min_pixels.")
+                         "servers differing only in the mmproj's image_min_pixels. Append '@<pixels>/<mode>' to "
+                         "give a variant its own downscale (e.g. 'box=http://h:8090@150000/box'), which is how "
+                         "pow2-vs-box gets compared against a single server.")
     ap.add_argument("--html", default="",
                     help="also write an HTML report embedding each CROP IMAGE next to every variant's text. "
                          "char-sim only says outputs DIFFER, not which is right — the reference is another "
@@ -375,17 +386,17 @@ def main() -> int:
     # transformers pass re-applies the same cap inside recognize() -- idempotent, since a
     # crop already under the cap is returned unchanged.
     from scanlation_sdk.local_engine import downscale_to_cap, to_rgb
-    capped = [downscale_to_cap(to_rgb(c), CAP_PIXELS, CAP_MODE) for c in crops]
-    n_down = sum(1 for a, b in zip(crops, capped) if a is not b)
+    originals = [to_rgb(c) for c in crops]           # what the HTML shows: the undegraded crop
+    capped = [downscale_to_cap(c, CAP_PIXELS, CAP_MODE) for c in originals]   # reference input
+    n_down = sum(1 for a, b in zip(originals, capped) if a is not b)
     print(f"{len(crops)} crops ({src}) | cap {CAP_PIXELS}/{CAP_MODE}: {n_down} downscaled | "
           f"max_tokens {args.max_tokens}")
-    if args.pad_uncached:
-        # Vary the width per run so consecutive runs can't cache each other. Seconds is
-        # plenty — runs are minutes apart — and a 1..7px stripe costs at most one patch
-        # column of the ~190 the model sees.
-        pad = int(time.time()) % 7 + 1
-        capped = _pad_unique(capped, pad)
-        src += f", +{pad}px anti-cache"
+    # Vary the width per run so consecutive runs can't cache each other. Seconds is
+    # plenty — runs are minutes apart — and a 1..7px stripe costs at most one patch
+    # column of the ~190 the model sees. Applied to the SERVER's input only: the
+    # reference runs in-process with no cache to defeat, so leave it undisturbed.
+    pad = (int(time.time()) % 7 + 1) if args.pad_uncached else 0
+    if pad:
         print(f"anti-cache: every crop widened by {pad}px (speed run — text may shift slightly)")
     print(f"endpoint: {args.endpoint}")
 
@@ -415,11 +426,17 @@ def main() -> int:
 
     # --- candidate passes: one per endpoint ----------------------------------
     variants = []  # (label, texts, rate)
-    for label, url in _parse_endpoints(args.endpoint):
-        print(f"\n== candidate: {label} ({url}) ==")
+    for label, url, vcap, vmode in _parse_endpoints(args.endpoint, CAP_PIXELS, CAP_MODE):
+        # Each variant downscales for itself, so a run can compare preprocessing (pow2 vs
+        # box) as well as servers. Reused unchanged when it matches the global cap.
+        vcrops = capped if (vcap, vmode) == (CAP_PIXELS, CAP_MODE) else \
+            [downscale_to_cap(c, vcap, vmode) for c in originals]
+        if pad:
+            vcrops = _pad_unique(vcrops, pad)
+        print(f"\n== candidate: {label} ({url}, cap {vcap}/{vmode}) ==")
         try:  # one untimed warm call: absorbs model/mmproj load if the server is cold
             with silenced():
-                llamacpp_recognize(url, capped[0], args.max_tokens, args.timeout)
+                llamacpp_recognize(url, vcrops[0], args.max_tokens, args.timeout)
         except urllib.error.URLError as exc:
             sys.exit(f"cannot reach llama-server at {url}: {exc}\n"
                      "Start it with the PaddleOCR-VL GGUF + --mmproj (needs llama.cpp build b8110+).")
@@ -435,11 +452,11 @@ def main() -> int:
         if args.concurrency > 1:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=args.concurrency) as ex:
-                out = list(ex.map(_one, capped))  # order preserved
+                out = list(ex.map(_one, vcrops))  # order preserved
             got, ms = [r[0] for r in out], [r[1] for r in out]
         else:
             got, ms = [], []
-            for i, c in enumerate(capped):
+            for i, c in enumerate(vcrops):
                 text, el = _one(c)
                 got.append(text)
                 ms.append(el)
@@ -449,7 +466,7 @@ def main() -> int:
         if args.concurrency > 1:
             # Concurrent: per-crop times overlap, so the sum is meaningless -- the real
             # throughput is the batch wall clock (same convention as the K/W gate bench).
-            rate = len(capped) / batch_s
+            rate = len(vcrops) / batch_s
             print(f"  [{label} c={args.concurrency}] {rate:.3f} crops/sec (batch wall {batch_s:.1f}s) | "
                   f"per-crop ms min {min(ms):.0f} / med {statistics.median(ms):.0f} / max {max(ms):.0f}")
             rows.append(f"| {label} (concurrency {args.concurrency}) | {rate:.3f} | {min(ms):.0f} | "
@@ -484,7 +501,7 @@ def main() -> int:
                  "below against the crop image.", "",
                  "| # | transformers | " + " | ".join(l for l, _, _ in variants) + " |",
                  "|---|---|" + "---|" * len(variants)]
-        for i in range(len(capped)):
+        for i in range(len(originals)):
             texts = [v[1][i] for v in variants]
             if any(t != ref_text[i] for t in texts):
                 print(f"    #{i} ref {ref_text[i]!r}")
@@ -493,7 +510,7 @@ def main() -> int:
                 rows.append(f"| {i} | `{ref_text[i]}` | " + " | ".join(f"`{t}`" for t in texts) + " |")
 
     if args.html:
-        _write_html(args.html, capped, ref_text, variants, src)
+        _write_html(args.html, originals, ref_text, variants, src)
         print(f"\nHTML (crop images + every variant): {args.html}")
 
     return write_report(rows, "bench_report_llamacpp")
