@@ -1,23 +1,27 @@
 """HttpTranslatorBase — the shared skeleton for LLM translators that talk to a
 local HTTP backend (ollama, llama.cpp / any OpenAI-compatible server).
 
-Both backends want the exact same lifecycle (a lazily-created httpx client keyed
-off an endpoint env var), the same guardrails (skip blank inputs, require a
-model chosen in /admin), and the same prompt selection (per-call ``system_prompt``
-falling back to ``DEFAULT_SYSTEM_PROMPT``). Only two things actually differ: the
-request body shape and how the response text is pulled out. Subclasses provide
-those via ``_translate()`` (+ ``_models_url``/``_parse_models`` for the picker).
+The client lifecycle (endpoint env, lazy httpx client, ``_post``, model list) is
+role-agnostic and lives in ``HttpEngineBase``; this adds what is specific to
+TRANSLATING: the guardrails (skip blank inputs, require a model chosen in /admin),
+the prompt selection (per-call ``system_prompt`` falling back to
+``DEFAULT_SYSTEM_PROMPT``), and the batch-with-fallback path. Only two things
+differ per backend — the request body shape and how the response text is pulled
+out — provided via ``_translate()`` (+ ``_models_url``/``_parse_models``).
 
-httpx is imported lazily inside methods so the SDK's install-time deps stay
-numpy + pillow only (the server core imports this module transitively).
+``http_timeout``/``list_timeout`` are re-exported here: they moved to
+``http_engine`` with the lifecycle, and this stays their established import path.
 """
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
-from scanlation_sdk.contracts import EngineBase
+from scanlation_sdk.http_engine import (  # noqa: F401 - re-exported (established import path)
+    HttpEngineBase,
+    http_timeout,
+    list_timeout,
+)
 from scanlation_sdk.prompt import (
     DEFAULT_SYSTEM_PROMPT,
     batch_schema,
@@ -35,68 +39,12 @@ COMMON_LLM_OPTIONS: dict = {
 }
 
 
-def http_timeout() -> float:
-    """HTTP client timeout (seconds) for LLM translators — SCANLATION_HTTP_TIMEOUT
-    (default 10.0). Read from env directly: the SDK is plugin-facing and does not
-    import the server's config."""
-    return float(os.getenv("SCANLATION_HTTP_TIMEOUT", "10.0"))
-
-
-def list_timeout() -> float:
-    """HTTP timeout (seconds) for the admin model-list probe —
-    SCANLATION_HTTP_LIST_TIMEOUT (default 4.0). Deliberately shorter than
-    http_timeout(): the /admin picker must stay responsive, so an unreachable
-    backend yields an empty list fast instead of blocking the settings page."""
-    return float(os.getenv("SCANLATION_HTTP_LIST_TIMEOUT", "4.0"))
-
-
-class HttpTranslatorBase(EngineBase):
-    # --- subclass config ---
-    ENDPOINT_ENV: str = ""          # env var holding the backend base URL
-    DEFAULT_ENDPOINT: str = ""      # fallback base URL when the env var is unset
-
-    def __init__(self) -> None:
-        # rstrip so a trailing slash in the env var can't produce a `//path` URL.
-        self.endpoint = os.getenv(self.ENDPOINT_ENV, self.DEFAULT_ENDPOINT).rstrip("/")
-        self._client = None
-
-    def load(self) -> None:
-        if self._client is not None:
-            return
-        import httpx
-
-        # Short timeout (default 10s, SCANLATION_HTTP_TIMEOUT): think-off translations
-        # return in ~1s, so if a request hangs (backend stall) fail over to the per-text
-        # fallback fast instead of sitting for minutes. Keep the model warm
-        # (OLLAMA_KEEP_ALIVE=-1) so a cold model reload can't eat this budget.
-        self._client = httpx.Client(timeout=http_timeout())
-        self._log.info("%s translator ready (endpoint=%s)", self.name, self.endpoint)
-
-    def unload(self) -> None:
-        if self._client is not None:
-            self._client.close()
-            self._client = None
-
-    def list_models(self) -> list[str]:
-        """Model ids the backend reports (for the admin picker). [] if the backend
-        is unreachable or doesn't expose a list — never raises."""
-        try:
-            import httpx
-
-            resp = httpx.get(self._models_url(), timeout=list_timeout())
-            resp.raise_for_status()
-            return sorted(self._parse_models(resp.json()))
-        except Exception:  # noqa: BLE001 - backend unreachable is expected; picker just stays empty
-            return []
-
-    def _post(self, path: str, body: dict) -> dict:
-        """POST ``body`` to ``endpoint + path`` and return the parsed JSON.
-        Isolated so request-building stays unit-testable without a live server."""
-        if self._client is None:
-            self.load()
-        resp = self._client.post(f"{self.endpoint}{path}", json=body)
-        resp.raise_for_status()
-        return resp.json()
+class HttpTranslatorBase(HttpEngineBase):
+    # Short timeout (default 10s, SCANLATION_HTTP_TIMEOUT — HttpEngineBase._timeout):
+    # think-off translations return in ~1s, so if a request hangs (backend stall) fail
+    # over to the per-text fallback fast instead of sitting for minutes. Keep the model
+    # warm (OLLAMA_KEEP_ALIVE=-1) so a cold model reload can't eat this budget.
+    ROLE_LABEL = "translator"
 
     def translate(self, text: str, src: str, dst: str, options: dict[str, Any]) -> str:
         text = text.strip()
@@ -165,10 +113,4 @@ class HttpTranslatorBase(EngineBase):
         """Send a batch request whose output is constrained to ``schema`` (native
         structured output) and return the raw JSON string. Subclass hook, mirrors
         ``_translate``."""
-        raise NotImplementedError
-
-    def _models_url(self) -> str:
-        raise NotImplementedError
-
-    def _parse_models(self, payload: dict) -> list[str]:
         raise NotImplementedError

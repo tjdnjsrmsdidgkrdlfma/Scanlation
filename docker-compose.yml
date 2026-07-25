@@ -54,6 +54,11 @@ services:
       #     Environment="OLLAMA_MAX_LOADED_MODELS=1"
       OLLAMA_ENDPOINT: http://host.docker.internal:11434/api
       LLAMACPP_ENDPOINT: http://host.docker.internal:8080
+      # The llama.cpp RECOGNIZER talks to a SECOND llama-server — a vision model
+      # (+ its mmproj), not the LLM — so it gets its own port. Serving both from one
+      # instance isn't possible: llama-server holds one model. Pin each to its own GPU
+      # with llama-server's --device (see packages/scanlation-server/tools/recognize-decode-bound.md).
+      LLAMACPP_RECOGNIZE_ENDPOINT: http://host.docker.internal:8090
       SCANLATION_HTTP_TIMEOUT: 10
       SCANLATION_HTTP_LIST_TIMEOUT: 4   # shorter timeout for the /admin model-list probe
     extra_hosts:

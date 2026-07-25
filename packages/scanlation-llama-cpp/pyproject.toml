@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scanlation-llama-cpp"
 version = "0.1.0"
-description = "llama.cpp / OpenAI-compatible LLM translator plugin for the Scanlation server."
+description = "llama.cpp / OpenAI-compatible translator + recognizer plugin for the Scanlation server."
 requires-python = ">=3.11"
 dependencies = [
     "scanlation-sdk>=0.1.0",
@@ -13,8 +13,14 @@ dependencies = [
 ]
 
 # Auto-discovered by the server registry once installed (no core edit needed).
+# One install unit (plugin), two engines: both talk /v1 to a llama-server, but to
+# DIFFERENT instances — the translator serves an LLM, the recognizer a vision model.
+# Groups are PLURAL — they match app/registry.py ROLES.
 [project.entry-points."scanlation.translators"]
 "llama.cpp" = "scanlation_llama_cpp.plugin:LlamaCppTranslator"
+
+[project.entry-points."scanlation.recognizers"]
+"llama.cpp" = "scanlation_llama_cpp.recognizer:LlamaCppRecognizer"
 
 [tool.setuptools.packages.find]
 where = ["."]

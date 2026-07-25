@@ -12,6 +12,7 @@ from scanlation_sdk.contracts import (
     Translator,
 )
 from scanlation_sdk.device import pick_device, release_cuda_cache
+from scanlation_sdk.http_engine import HttpEngineBase
 from scanlation_sdk.http_translator import COMMON_LLM_OPTIONS, HttpTranslatorBase
 from scanlation_sdk.local_engine import (
     LocalModelEngineBase,
@@ -22,6 +23,7 @@ from scanlation_sdk.local_engine import (
 
 __all__ = [
     "EngineBase",
+    "HttpEngineBase",
     "HttpTranslatorBase",
     "COMMON_LLM_OPTIONS",
     "LocalModelEngineBase",

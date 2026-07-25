@@ -50,8 +50,10 @@ _CATALOG: dict[str, dict] = {
     "llama.cpp": {
         "package": "scanlation-llama-cpp",
         "display_name": "llama.cpp",
-        "roles": ["translator"],
-        "description": "LLM translation via an OpenAI-compatible /v1 server (llama.cpp, vllm, LM Studio…; must be running, model selected in /admin).",
+        # One package, two engines against SEPARATE llama-server instances: an LLM for
+        # translation, a vision model (+ mmproj) for recognition.
+        "roles": ["translator", "recognizer"],
+        "description": "Translation and text recognition via OpenAI-compatible /v1 servers (llama.cpp, vllm, LM Studio…; must be running, model selected in /admin).",
         "pip_args": [],
     },
 }
