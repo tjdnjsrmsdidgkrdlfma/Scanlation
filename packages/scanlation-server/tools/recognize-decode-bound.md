@@ -9,7 +9,7 @@
 | **양자화 (weight-only INT8/INT4)** | ❌ 폐기 | decode의 weight read가 토큰당 ~5.6ms로 **전체의 ~9%**뿐. 작은 모델(0.9B)이라 줄일 여지 자체가 작다 |
 | **MI50로 recognize** | ❌ 폐기 | torch rocm7.0 rocBLAS에 **gfx906 Tensile 라이브러리가 없음** — 로드는 되지만 첫 matmul에서 죽는다 |
 | **동시성 W4·K2** | ✅ 채택(무료 1.5x) | 오버헤드 바운드 decode는 런치 사이 GPU가 놀아, 워커가 그 유휴를 채우는 게 정확히 이 상황 ([recognize-gpu-speed.md](recognize-gpu-speed.md) §동시성) |
-| **decode 오버헤드 제거** (`torch.compile` / HIP graph) | ❌ **폐기(이 스택)** — 프로브로 3중 벽 확인(§4) | 런치 오버헤드는 회수 대상이 맞지만, 큰 이득(그래프 캡처)이 **동적 shape과 근본 충돌** + inductor는 Triton·C컴파일러 부재로 실패 |
+| **decode 오버헤드 제거** (`torch.compile` / HIP graph) | ❌ **실측 폐기(이 스택)** — §4 | 벽 다 넘어도 inductor+dynamic는 **1.11x뿐** + **출력 2/8 오독**(っ→コ·♥→✓) + ~11s/shape라 dynamic-res서 상각 불가. 큰 이득(그래프 캡처)은 동적 shape과 원천 충돌 |
 | **manga-ocr로 전환/하이브리드** | 🔸 정확도 트레이드 대안 | 더 가벼운 recognizer. 단 오버헤드 바운드면 이득 메커니즘이 달라 자체 벤치 필요 |
 
 ## 측정 셋업
@@ -78,17 +78,32 @@ steady/token이 크롭 크기에 **안 늘어난다**는 건 vision-attention(KV
 이게 레버 랭킹을 바꾼다:
 - **양자화**는 그 ~9% weight read만 줄인다 → 잘해야 5~7%. 작은 모델이라 상한 자체가 낮다. **폐기.**
 - **동시성**은 오히려 딱 맞는다 — 런치 사이 GPU 유휴를 다른 워커가 채운다(문서의 "W=1에서 GPU가 ~76% 바쁨, ~24% 회수"가 바로 이 오버헤드의 유휴). **무료 1.5x, 채택.**
-- **런치 오버헤드 자체를 접는 것**(static KV cache + `torch.compile`, 또는 HIP graph 캡처)이 정확도를 안 버리는 유일한 큰 per-crop 레버 — 였으나 **프로브 결과 이 스택에선 막혔다(§4)**.
+- **런치 오버헤드 자체를 접는 것**(static KV cache + `torch.compile`, 또는 HIP graph 캡처)이 유일하게 남았던 큰 per-crop 후보 — 였으나 **프로브 실측 결과 1.11x + 출력 파손으로 폐기(§4)**. accuracy-neutral일 거란 기대와 달리 inductor가 출력을 바꿨다.
 
-## 4. torch.compile 프로브 — 3중 벽으로 폐기
+## 4. torch.compile 프로브 — 실측으로 폐기
 
-decode가 런치 오버헤드 바운드니 `torch.compile`(런치 제거)이 이론상 정답이라, 플러그인 손대기 전 standalone 프로브([bench_recognize_compile.py](bench_recognize_compile.py))로 9060 XT(GPU 1)에서 재봤다. baseline은 **0.651 crops/sec / per-crop med 1343ms**(flash on, 정상). compile은 세 겹의 벽에 막혔다:
+decode가 런치 오버헤드 바운드니 `torch.compile`(런치 제거)이 이론상 정답이라, 플러그인 손대기 전 standalone 프로브([bench_recognize_compile.py](bench_recognize_compile.py))로 9060 XT(GPU 1)에서 재봤다. 셋업 벽 셋을 다 넘어 실측까지 갔고, 결과가 셋 다 폐기 사유다.
 
-1. **inductor 백엔드 = Triton 필요, 이미지에 없음.** `torch._inductor.exc.TritonMissing`. → `/plugins`에 `pytorch-triton-rocm`(3.5.1) 설치로 넘김.
-2. **Triton AMD 백엔드 = C 컴파일러 필요, slim 런타임 이미지에 없음.** Triton이 HIP util 모듈을 런타임에 빌드하는데 `RuntimeError: Failed to find C compiler`. → gcc를 이미지에 넣어야 넘어감(안 함).
-3. **큰 이득(그래프 캡처)은 동적 shape과 근본 충돌.** `--backend cudagraphs`는 Triton·컴파일러 없이 HIP 그래프를 캡처하는데, 이 모델 forward의 처리 시퀀스 길이가 스텝마다 바뀌어(`size of tensor a (213) must match b (214)`) 캡처 그래프에 다음 호출을 못 흘려넣고 죽는다. static KV cache로 캐시는 고정해도 **처리 시퀀스가 가변**(dynamic-resolution)이라 replay가 불가능하다 — 설정이 아니라 그래프 캡처의 본질이라 못 고친다.
+**셋업 벽(넘김):**
+1. **inductor = Triton 필요, 이미지에 없음** (`TritonMissing`) → `/plugins`에 `pytorch-triton-rocm` 3.5.1 설치.
+2. **Triton AMD 백엔드 = C 컴파일러 필요, slim 이미지에 없음** (`Failed to find C compiler`) → 컨테이너에 `build-essential`(gcc/g++) 설치.
+3. **그래프 캡처(cudagraphs/reduce-overhead = 런치를 통째로 없애는 큰 이득)는 동적 shape과 원천 충돌** (`size of tensor a (213) must match b (214)`). static KV cache로 캐시는 고정해도 처리 시퀀스가 가변(dynamic-resolution)이라 그래프 replay가 불가 — 그래프 캡처의 본질이라 gcc로도 못 고친다. → 남는 건 동적 shape을 견디는 **inductor + `dynamic=True`(fusion)**뿐.
 
-즉 런치 오버헤드를 통째로 없애는 유일한 길(그래프 캡처)이 dynamic-res와 원천 충돌하고, 남는 inductor-fusion 경로(부분 이득)마저 Triton + C컴파일러 두 겹의 이미지 부채를 요구하는 데다 mrope graph break로 fusion 이득이 쪼개질 리스크까지 있어, **이 스택에서 `torch.compile`은 값을 못 한다.** 프로브 스크립트는 이미지에 컴파일러+Triton이 생기면 재실행할 수 있게 남겨둔다.
+**실측 (inductor + dynamic, 벽 다 넘은 뒤):**
+
+| | baseline | compiled |
+|---|---|---|
+| crops/sec | 0.649 | 0.721 (**1.11x**) |
+| per-crop med | 1347ms | 1159ms |
+| compile warm | — | 86.8s / 8 shapes (~11s/shape) |
+| 출력 동일성 | — | **✗ 2/8 변함** (`っ→コ`, `♥→✓` 등 실오독) |
+
+셋 다 폐기 사유:
+- **이득이 작다 (1.11x).** fusion은 런치 *횟수*만 줄이고(그래프 캡처는 배제), mrope graph break로 그마저 쪼개져 ~90% 오버헤드의 일부만 회수.
+- **정확도가 깨진다.** 8개 중 2개 출력이 바뀌고 `っ→コ`·`♥→✓` 같은 실제 오독이 낀다. inductor의 부동소수 재결합이 노이즈 플로어의 그리디 디코드를 뒤집는다 — accuracy-first 엔진엔 치명적.
+- **프로덕션에서 상각 불가.** ~11s/shape 컴파일인데 dynamic-res라 crop마다 새 shape → 매 crop이 컴파일 비용을 물어 오히려 훨씬 느려진다. 프로브의 1.11x는 같은 shape을 재사용한 best case일 뿐.
+
+→ **이 스택에서 `torch.compile`은 실측으로 폐기.** 프로브 스크립트는 남겨둔다(스택/모델이 바뀌면 재실행).
 
 ## 남은 일
 
