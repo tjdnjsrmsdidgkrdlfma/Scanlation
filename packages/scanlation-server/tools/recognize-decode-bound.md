@@ -268,7 +268,7 @@ recognize 교체의 값은 결국 파이프라인에서 재야 한다. 같은 21
 
 ## 남은 일
 
-- **translate** — 이제 파이프라인의 **57%**다(§8). 다음 레버는 여기다. `--parallel 8`·`translate_concurrency 4`는 이미 켜져 있으니 남은 건 MI50 쪽(양자화·배치)이고, 2026-07-16 스윕에서 동시성 4가 junction 100°C로 막혔던 조건은 **recognize가 9060 XT로 빠지면서 달라졌다** — 재평가 가치가 있다.
+- **translate** — 이제 파이프라인의 **57%**다(§8). 다음 레버는 여기다. 2026-07-16 동시성 스윕의 **열 상한(동시성 4 = junction 100°C)은 그대로다** — 그때도 recognize는 CPU였고 MI50는 translate 전용이었으니 이번 변경은 MI50 부하를 안 건드린다. 바뀐 건 **공급**이다: 그 스윕이 "다음 병목은 CPU recognize 직렬화(lockwait 0→172→996ms)"로 끝났는데, 지금은 **lockwait이 0**이라 translate 슬롯이 처음으로 제대로 채워진다. 같은 동시성에서 더 나올 여지가 여기 있다.
 - **detect** — 21.6%로 recognize와 동급이 됐다(§8). [TODO](../../../README.md)의 detector 풀링·GPU detect가 여기서 값이 생긴다.
 - **남은 전처리 노브** — §6의 미측정 목록 중 `image_min_pixels`·동시성(캡은 §7에서 완료).
 - **llama-swap** — 유휴 언로드가 사라져 9060 XT가 상시 ~15W다(§5 대가). TTL 프록시로 회수 가능, 콜드스타트 ~1.9초.
