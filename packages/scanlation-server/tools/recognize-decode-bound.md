@@ -144,7 +144,19 @@ llama-server를 **어떻게 GPU에 핀하느냐**가 recognize 속도를 4.4배 
 | `--device Vulkan2` | **739 ms** / 229 tokens (3.23 ms/token) | 1.274 crops/sec |
 | **`GGML_VK_VISIBLE_DEVICES=2`** | **93 ms** / 229 tokens (0.41 ms/token) | **5.585 crops/sec** |
 
-**토큰 수가 229로 동일하다.** 전처리가 달라져 일이 준 게 아니라 **같은 일을 8배 빠르게** 한다 — 즉 `--device`로는 vision 인코더(mmproj)가 GPU를 타지 못하고 LM만 올라간다. per-crop의 대부분이 vision 인코딩이라 그게 전체를 4.4배 끌어내린다.
+**토큰 수가 229로 동일하다.** 전처리가 달라져 일이 준 게 아니라 **같은 일을 8배 빠르게** 한다. 원인은 기동 로그(`-lv 5`)에 그대로 찍힌다:
+
+```
+--device Vulkan2 :
+  device_info:  Vulkan1 = VEGA20(MI50, 1968 MiB free)  Vulkan2 = GFX1200(9060 XT, 16246 MiB free)
+  [mtmd] adding 927.03 MiB to fit_params_target for device Vulkan1   ← vision 인코더가 MI50로
+  llama_prepare_model_devices: using device Vulkan2                  ← LM만 9060 XT로
+GGML_VK_VISIBLE_DEVICES=2 :
+  device_info:  Vulkan0 = GFX1200 (하나뿐)
+  [mtmd] adding 927.03 MiB to fit_params_target for device Vulkan0   ← vision도 9060 XT로
+```
+
+**`--device`는 LM 레이어만 제한한다.** vision 인코더(mtmd, 927 MiB)는 그 제한을 받지 않고 **여전히 보이는 목록에서 스스로 고르며, 여기선 MI50를 골랐다** — 번역용 LLM이 올라가 여유가 1968 MiB뿐인 카드다. 그래서 crop마다 이미지 인코딩이 경합 중인 옆 GPU에서 돌고 LM decode만 9060 XT에서 돌았다. env는 다른 카드를 **아예 안 보이게** 만들어 mtmd가 고를 여지를 없앤다.
 
 → **유닛은 반드시 `Environment="GGML_VK_VISIBLE_DEVICES=<idx>"`로 핀한다**(예시: [deploy/](../../../deploy/)의 두 유닛). 인덱스는 `llama-server --list-devices`를 **env 없이** 돌린 목록 기준이다.
 
