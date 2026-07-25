@@ -94,6 +94,39 @@ def _parse_endpoints(spec: str) -> list[tuple[str, str]]:
     return out
 
 
+def _read_html(path: str):
+    """Recover ``(crops, ref_text, variants, src)`` from a page this tool wrote.
+
+    The page already embeds everything it was built from — the crop PNGs and every
+    variant's text — so restyling it must not cost another run: a 42-crop pass burns
+    minutes of GPU and two live llama-servers, while the layout is the part we actually
+    iterate on."""
+    import re
+
+    from PIL import Image
+
+    doc = open(path, encoding="utf-8").read()
+    labels = [re.sub(r"\s*\(reference\)$", "", h) for h in re.findall(r"<th>(.*?)</th>", doc, re.S)][2:]
+    rows = []
+    for block in re.findall(r"<tr class='\w+'>(.*?)</tr>", doc, re.S):
+        idx = int(re.search(r"<td>(\d+)</td>", block).group(1))
+        b64 = re.search(r"base64,([A-Za-z0-9+/=]+)'", block).group(1)
+        crop = Image.open(io.BytesIO(base64.b64decode(b64)))
+        crop.load()
+        # <mark> is added by the renderer, not part of the text -> strip before reuse.
+        texts = [html.unescape(re.sub(r"</?mark>", "", p))
+                 for p in re.findall(r"<pre>(.*?)</pre>", block, re.S)]
+        rows.append((idx, crop, texts))
+    if not rows:
+        sys.exit(f"{path}: no rows found — is this a page written by this tool?")
+    rows.sort(key=lambda r: r[0])
+    crops = [r[1] for r in rows]
+    cols = [[r[2][k] for r in rows] for k in range(len(rows[0][2]))]
+    m = re.search(r"<div>(.*?) — \d+ crops", doc, re.S)
+    src = html.unescape(m.group(1)) if m else re.sub(r" — .*", "", path)
+    return crops, cols[0], [(labels[k], cols[k], 0.0) for k in range(1, len(cols))], src
+
+
 def _squash(s: str) -> str:
     """Text with ALL whitespace removed — the key for "same reading, different wrapping".
     Line breaks and spaces are the single most common disagreement between these
@@ -155,7 +188,10 @@ pre{margin:0;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace}
 mark{background:#5a2d2d;color:#ffd7d7;border-radius:2px}
 .eng{cursor:pointer}
 .eng:hover{outline:1px solid #666}
-.eng.sel{background:#1f3d1f;outline:2px solid #4caf50}
+td.eq{opacity:.45}
+td.wsdiff{background:#20262e}
+td.misread{background:#2f2410}
+.eng.sel{background:#1f3d1f;outline:2px solid #4caf50;opacity:1}
 tr.ws td{background:#20262e}
 tr.same{opacity:.4}
 button{background:#333;color:#ddd;border:1px solid #555;border-radius:4px;padding:4px 10px;cursor:pointer}
@@ -196,16 +232,27 @@ def _write_html(path: str, crops, ref_text, variants, src: str) -> None:
          f"<b>{n['same']}</b> 동일 &nbsp;·&nbsp; <button id='reset'>선택 초기화</button></div>",
          "<div><small>맞게 읽은 칸을 클릭해 채점(다시 클릭하면 해제, 여러 칸 선택 가능). "
          "레퍼런스도 모델 출력이라 틀릴 수 있으니 그림을 보고 판단. "
-         "빨간 표시는 레퍼런스와 다른 구간.</small></div></div>",
+         "칸 색: <span style='background:#2f2410;padding:0 4px'>오독(빨간 표시 = 다른 구간)</span> · "
+         "<span style='background:#20262e;padding:0 4px'>공백/줄바꿈만 다름</span> · "
+         "<span style='opacity:.45'>레퍼런스와 동일</span></small></div></div>",
          "<table><tr><th>#</th><th>crop (as sent)</th>"
          + "".join(f"<th>{esc(l)}</th>" for l in labels) + "</tr>"]
     for _r, i, cls, crop, texts in graded:
         P.append(f"<tr class='{cls}'><td>{i}</td>"
                  f"<td><img src='data:image/png;base64,{_png_b64(crop)}'><br>"
                  f"<small>{crop.width}×{crop.height} = {crop.width * crop.height // 1000}k px</small></td>")
-        for label, t in zip(labels, texts):
-            body = esc(t) if label == labels[0] else _marked(texts[0], t, esc)
-            P.append(f"<td class='eng' data-eng='{esc(label)}' data-key='{i}|{esc(label)}'>"
+        for k, (label, t) in enumerate(zip(labels, texts)):
+            # Per-CELL grade, so a row flagged for one variant's misread still shows at a
+            # glance which cells actually misread and which merely wrapped differently.
+            if k == 0:
+                cell, body = "", esc(t)
+            elif t == texts[0]:
+                cell, body = "eq", esc(t)
+            elif _squash(t) == _squash(texts[0]):
+                cell, body = "wsdiff", esc(t)   # same reading -> don't mark every space
+            else:
+                cell, body = "misread", _marked(texts[0], t, esc)
+            P.append(f"<td class='eng {cell}' data-eng='{esc(label)}' data-key='{i}|{esc(label)}'>"
                      f"<pre>{body}</pre></td>")
         P.append("</tr>")
     P.append("</table>")
@@ -246,7 +293,19 @@ def main() -> int:
                     help="in-flight requests for the llama.cpp pass (its server has n_slots; >1 measures "
                          "whether those slots add throughput, the HTTP analog of the process pool's W). "
                          "Rate is then wall-clock over the whole batch, not the sum of per-crop times.")
+    ap.add_argument("--rehtml", default="",
+                    help="re-render a page this tool wrote (crops + texts are embedded in it) with the "
+                         "current layout, without running any model or server. Needs --html for the output.")
     args = ap.parse_args()
+
+    if args.rehtml:  # pure re-render: no crops to load, no endpoint to reach
+        if not args.html:
+            sys.exit("--rehtml needs --html <output path>")
+        crops, ref_text, variants, src = _read_html(args.rehtml)
+        _write_html(args.html, crops, ref_text, variants, src)
+        print(f"re-rendered {len(crops)} crops from {args.rehtml} -> {args.html}")
+        return 0
+
     if not args.data:
         sys.exit("no data path: pass a folder/image or set $BENCH_DATA")
 
