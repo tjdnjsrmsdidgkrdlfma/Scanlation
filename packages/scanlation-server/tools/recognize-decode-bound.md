@@ -9,7 +9,7 @@
 | **양자화 (weight-only INT8/INT4)** | ❌ 폐기 | decode의 weight read가 토큰당 ~5.6ms로 **전체의 ~9%**뿐. 작은 모델(0.9B)이라 줄일 여지 자체가 작다 |
 | **MI50로 recognize** | ❌ 폐기 | torch rocm7.0 rocBLAS에 **gfx906 Tensile 라이브러리가 없음** — 로드는 되지만 첫 matmul에서 죽는다 |
 | **동시성 W4·K2** | ✅ 채택(무료 1.5x) | 오버헤드 바운드 decode는 런치 사이 GPU가 놀아, 워커가 그 유휴를 채우는 게 정확히 이 상황 ([recognize-gpu-speed.md](recognize-gpu-speed.md) §동시성) |
-| **decode 오버헤드 제거** (`torch.compile` + static KV cache / HIP graph) | ⭐ **남은 유일한 accuracy-neutral per-crop 레버** — 미검증(프로브 필요) | 0.9B가 ~15 tok/s면 하드웨어 대비 비정상적으로 느림 = 회수 가능한 런치 오버헤드 |
+| **decode 오버헤드 제거** (`torch.compile` / HIP graph) | ❌ **폐기(이 스택)** — 프로브로 3중 벽 확인(§4) | 런치 오버헤드는 회수 대상이 맞지만, 큰 이득(그래프 캡처)이 **동적 shape과 근본 충돌** + inductor는 Triton·C컴파일러 부재로 실패 |
 | **manga-ocr로 전환/하이브리드** | 🔸 정확도 트레이드 대안 | 더 가벼운 recognizer. 단 오버헤드 바운드면 이득 메커니즘이 달라 자체 벤치 필요 |
 
 ## 측정 셋업
@@ -78,12 +78,24 @@ steady/token이 크롭 크기에 **안 늘어난다**는 건 vision-attention(KV
 이게 레버 랭킹을 바꾼다:
 - **양자화**는 그 ~9% weight read만 줄인다 → 잘해야 5~7%. 작은 모델이라 상한 자체가 낮다. **폐기.**
 - **동시성**은 오히려 딱 맞는다 — 런치 사이 GPU 유휴를 다른 워커가 채운다(문서의 "W=1에서 GPU가 ~76% 바쁨, ~24% 회수"가 바로 이 오버헤드의 유휴). **무료 1.5x, 채택.**
-- **런치 오버헤드 자체를 접는 것**(static KV cache + `torch.compile`, 또는 HIP graph 캡처)이 정확도를 안 버리는 유일한 큰 per-crop 레버. CUDA에선 소형 모델 decode에 2~4x가 흔하다. ROCm(torch 2.10/rocm7)에서 먹히는지는 **미검증** — inductor ROCm 백엔드 성숙도 + PaddleOCR-VL의 mrope로 인한 graph break 리스크가 있어 **플러그인 손대기 전 bench 프로브 먼저**.
+- **런치 오버헤드 자체를 접는 것**(static KV cache + `torch.compile`, 또는 HIP graph 캡처)이 정확도를 안 버리는 유일한 큰 per-crop 레버 — 였으나 **프로브 결과 이 스택에선 막혔다(§4)**.
+
+## 4. torch.compile 프로브 — 3중 벽으로 폐기
+
+decode가 런치 오버헤드 바운드니 `torch.compile`(런치 제거)이 이론상 정답이라, 플러그인 손대기 전 standalone 프로브([bench_recognize_compile.py](bench_recognize_compile.py))로 9060 XT(GPU 1)에서 재봤다. baseline은 **0.651 crops/sec / per-crop med 1343ms**(flash on, 정상). compile은 세 겹의 벽에 막혔다:
+
+1. **inductor 백엔드 = Triton 필요, 이미지에 없음.** `torch._inductor.exc.TritonMissing`. → `/plugins`에 `pytorch-triton-rocm`(3.5.1) 설치로 넘김.
+2. **Triton AMD 백엔드 = C 컴파일러 필요, slim 런타임 이미지에 없음.** Triton이 HIP util 모듈을 런타임에 빌드하는데 `RuntimeError: Failed to find C compiler`. → gcc를 이미지에 넣어야 넘어감(안 함).
+3. **큰 이득(그래프 캡처)은 동적 shape과 근본 충돌.** `--backend cudagraphs`는 Triton·컴파일러 없이 HIP 그래프를 캡처하는데, 이 모델 forward의 처리 시퀀스 길이가 스텝마다 바뀌어(`size of tensor a (213) must match b (214)`) 캡처 그래프에 다음 호출을 못 흘려넣고 죽는다. static KV cache로 캐시는 고정해도 **처리 시퀀스가 가변**(dynamic-resolution)이라 replay가 불가능하다 — 설정이 아니라 그래프 캡처의 본질이라 못 고친다.
+
+즉 런치 오버헤드를 통째로 없애는 유일한 길(그래프 캡처)이 dynamic-res와 원천 충돌하고, 남는 inductor-fusion 경로(부분 이득)마저 Triton + C컴파일러 두 겹의 이미지 부채를 요구하는 데다 mrope graph break로 fusion 이득이 쪼개질 리스크까지 있어, **이 스택에서 `torch.compile`은 값을 못 한다.** 프로브 스크립트는 이미지에 컴파일러+Triton이 생기면 재실행할 수 있게 남겨둔다.
 
 ## 남은 일
 
-- **static-cache + `torch.compile` 프로브**: 9060 XT에서 `model.generate(cache_implementation="static")` + `torch.compile(model)`이 steady/token을 실제로 줄이는지 bench로 측정. 줄면 [PaddleOCR-VL plugin](../../scanlation-paddleocr-vl-for-manga/scanlation_paddleocr_vl_for_manga/plugin.py)에 env 기본값 + `/admin` 토글로 노출(하드코딩 금지 규칙). 안 줄거나 mrope로 깨지면 폐기.
-- 그래도 부족하면 **manga-ocr 하이브리드**(정확도 트레이드)를 자체 벤치로 재검토.
+per-crop 레버(양자화·MI50·`torch.compile`)가 전부 이 스택에서 막혔다. per-crop은 현재 바닥(~1.34s med, flash+cap 적용)이고, "여러 장 동시"의 급성 문제는 동시성(W4·K2)으로 이미 풀렸다. 남은 선택지는 둘:
+
+- **현상 유지** — 정확도(PaddleOCR-VL 88%, no weak category)를 지키고 per-crop 바닥을 받아들인다.
+- **manga-ocr로 전환/하이브리드** — 훨씬 가벼운 recognizer로 per-crop을 크게 줄이되 정확도를 트레이드. 채택 전 [tools/compare](compare/)로 정확도, 자체 벤치로 속도를 실측.
 
 ## 관련
 
