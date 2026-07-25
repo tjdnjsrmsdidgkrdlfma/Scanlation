@@ -91,6 +91,28 @@ def llamacpp_recognize(endpoint: str, crop, max_tokens: int, timeout: float,
     return (data["choices"][0]["message"]["content"] or "").strip()
 
 
+def _pad_unique(crops, pad: int):
+    """Every crop widened by ``pad`` white pixels — enough to make it novel to the
+    server's cache, too little to change what it costs to encode (one patch column at
+    most) or what the model reads.
+
+    This is how a SPEED run stays honest without restarting llama-server between
+    configs: a bench re-sends byte-identical crops, the server answers from cache in
+    ~100ms instead of the ~740ms vision prefill, and `cache_prompt: false` is ignored by
+    at least some builds (measured). Detecting it after the fact doesn't work either —
+    when EVERY crop is cached the median drops with them and no outlier remains. So the
+    fix is to never let the cache hit. ``pad`` varies per run (see the caller), because
+    two runs padding by the same amount would cache each other."""
+    from PIL import Image
+
+    out = []
+    for c in crops:
+        w = Image.new("RGB", (c.width + pad, c.height), "white")
+        w.paste(c, (0, 0))
+        out.append(w)
+    return out
+
+
 def _parse_endpoints(spec: str) -> list[tuple[str, str]]:
     """``"a=http://x,http://y:8091"`` -> [("a", "http://x"), (":8091", "http://y:8091")].
     An unlabelled entry is named by its port, which is what actually distinguishes two
@@ -325,6 +347,11 @@ def main() -> int:
                     help="in-flight requests for the llama.cpp pass (its server has n_slots; >1 measures "
                          "whether those slots add throughput, the HTTP analog of the process pool's W). "
                          "Rate is then wall-clock over the whole batch, not the sum of per-crop times.")
+    ap.add_argument("--pad-uncached", action="store_true",
+                    help="widen every crop by a few pixels (varying per run) so llama-server's cache "
+                         "cannot hit. Use for SPEED runs — otherwise a re-sent crop returns from cache "
+                         "and the rate is several x too high. Slightly perturbs the input, so leave it "
+                         "off when comparing text.")
     ap.add_argument("--rehtml", default="",
                     help="re-render a page this tool wrote (crops + texts are embedded in it) with the "
                          "current layout, without running any model or server. Needs --html for the output.")
@@ -352,6 +379,14 @@ def main() -> int:
     n_down = sum(1 for a, b in zip(crops, capped) if a is not b)
     print(f"{len(crops)} crops ({src}) | cap {CAP_PIXELS}/{CAP_MODE}: {n_down} downscaled | "
           f"max_tokens {args.max_tokens}")
+    if args.pad_uncached:
+        # Vary the width per run so consecutive runs can't cache each other. Seconds is
+        # plenty — runs are minutes apart — and a 1..7px stripe costs at most one patch
+        # column of the ~190 the model sees.
+        pad = int(time.time()) % 7 + 1
+        capped = _pad_unique(capped, pad)
+        src += f", +{pad}px anti-cache"
+        print(f"anti-cache: every crop widened by {pad}px (speed run — text may shift slightly)")
     print(f"endpoint: {args.endpoint}")
 
     rows = ["# recognize: llama.cpp vs transformers", "",
