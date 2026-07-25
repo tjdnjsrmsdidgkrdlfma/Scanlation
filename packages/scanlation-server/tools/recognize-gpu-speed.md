@@ -265,7 +265,7 @@ flash-ON 2.9s/crop 대 4070 Ti Super ~1s/crop ≈ **2.9배**. CUDA는 SDPA가 �
 
 ## 관련
 
-- flash·cap·멀티워커를 다 짠 뒤 "그래도 느린" per-crop의 정체(decode는 **런치 오버헤드 바운드**)와 MI50(gfx906)가 torch recognize에 못 쓰는 이유는 [recognize-decode-bound.md](recognize-decode-bound.md).
+- flash·cap·멀티워커를 다 짠 뒤 "그래도 느린" per-crop의 정체(decode는 **런치 오버헤드 바운드**)와 MI50(gfx906)가 torch recognize에 못 쓰는 이유는 [recognize-decode-bound.md](recognize-decode-bound.md). 이 문서의 단계들이 그 뒤 llama.cpp 교체까지 어떻게 이어지는지는 그쪽 맨 앞의 **전체 변천사** 표 하나에 다 있다(flash-OFF 대비 46x).
 - 배치 축(단일 forward에 N크롭)은 [recognize-crop-batching.md](recognize-crop-batching.md) — 양쪽 엔진 다 기각.
 - CPU 멀티워커(manga-ocr)는 [recognize-cpu-threads.md](recognize-cpu-threads.md) — 8w×1t 1.88x.
 - 동시성·`gpu_lock`·translate 배치 그림은 아티팩트 [동시성과 번역 배치](https://claude.ai/code/artifact/543ff4c0-d2be-4d4f-9d70-fc35fac17c1f).
