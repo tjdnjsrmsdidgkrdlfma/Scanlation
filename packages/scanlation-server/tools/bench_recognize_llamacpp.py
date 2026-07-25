@@ -103,6 +103,10 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=180.0, help="HTTP timeout per crop, seconds")
     ap.add_argument("--no-reference", action="store_true",
                     help="skip the transformers pass (endpoint smoke test only; no accuracy comparison)")
+    ap.add_argument("--concurrency", type=int, default=1,
+                    help="in-flight requests for the llama.cpp pass (its server has n_slots; >1 measures "
+                         "whether those slots add throughput, the HTTP analog of the process pool's W). "
+                         "Rate is then wall-clock over the whole batch, not the sum of per-crop times.")
     args = ap.parse_args()
     if not args.data:
         sys.exit("no data path: pass a folder/image or set $BENCH_DATA")
@@ -155,13 +159,36 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 - a bad response IS the finding
         sys.exit(f"llama-server rejected the request: {type(exc).__name__}: {exc}")
 
-    got, ms = [], []
-    for i, c in enumerate(capped):
+    def _one(c):
         t0 = time.perf_counter()
-        got.append(llamacpp_recognize(args.endpoint, c, args.max_tokens, args.timeout))
-        ms.append((time.perf_counter() - t0) * 1000)
-        print(f"    {i:>3} {c.width:>4}x{c.height:<4} {ms[-1]:>7.0f}ms  {got[-1][:40]!r}")
-    cand_rate = _report_pass("llama.cpp", ms, rows)
+        text = llamacpp_recognize(args.endpoint, c, args.max_tokens, args.timeout)
+        return text, (time.perf_counter() - t0) * 1000
+
+    t_batch = time.perf_counter()
+    if args.concurrency > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=args.concurrency) as ex:
+            out = list(ex.map(_one, capped))  # order preserved
+        got, ms = [r[0] for r in out], [r[1] for r in out]
+    else:
+        got, ms = [], []
+        for i, c in enumerate(capped):
+            text, el = _one(c)
+            got.append(text)
+            ms.append(el)
+            print(f"    {i:>3} {c.width:>4}x{c.height:<4} {el:>7.0f}ms  {text[:40]!r}")
+    batch_s = time.perf_counter() - t_batch
+
+    if args.concurrency > 1:
+        # Concurrent: per-crop times overlap, so the sum is meaningless -- the real
+        # throughput is the batch wall clock (same convention as the K/W gate bench).
+        cand_rate = len(capped) / batch_s
+        print(f"  [llama.cpp c={args.concurrency}] {cand_rate:.3f} crops/sec (batch wall {batch_s:.1f}s) | "
+              f"per-crop ms min {min(ms):.0f} / med {statistics.median(ms):.0f} / max {max(ms):.0f}")
+        rows.append(f"| llama.cpp (concurrency {args.concurrency}) | {cand_rate:.3f} | {min(ms):.0f} | "
+                    f"{statistics.median(ms):.0f} | {max(ms):.0f} |")
+    else:
+        cand_rate = _report_pass("llama.cpp", ms, rows)
     rows.append("")
 
     # --- verdict -------------------------------------------------------------
