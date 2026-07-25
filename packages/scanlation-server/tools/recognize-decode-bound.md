@@ -3,7 +3,7 @@
 작성 2026-07-25. 측정 도구: [bench_recognize_gpu_concurrency.py](bench_recognize_gpu_concurrency.py) `--profile-decode`, [bench_recognize_llamacpp.py](bench_recognize_llamacpp.py). flash·cap·멀티워커를 다 짜낸([recognize-gpu-speed.md](recognize-gpu-speed.md)) 뒤 "그래도 recognize가 느리다 / per-crop을 더 내릴 레버가 뭐냐"를 끝까지 판 기록.
 
 **결론 세 줄:**
-1. cap을 켠 스택에서 per-crop은 **~95%가 decode**이고, 그 decode는 대역폭도 연산도 아닌 **호스트 측 오버헤드**다(steady/token이 crop 크기와 무관하게 flat ~64ms, weight read 9% + compute <1%).
+1. cap을 켠 스택에서 per-crop은 **~95%가 decode**이고, 그 decode는 대역폭도 연산도 아닌 **호스트 측 오버헤드**다 — steady/token이 crop 크기와 무관하게 flat ~64ms인데 그중 weight read 4% + compute <1%. **카드 대역폭의 5%만 쓰고 있었다**(§3).
 2. 그래서 **torch 안의 레버는 전부 죽는다** — 양자화도, MI50도, `torch.compile`도(§1·§4).
 3. 답은 튜닝이 아니라 **런타임 교체**였다. 같은 모델을 llama.cpp가 서빙하면 **per-crop 10x·VRAM 1/4**이다(0.557 → 5.585 crops/sec, §5). 단 그 10배는 **GPU 핀을 env로 걸 때만** 나온다 — `--device`로 걸면 vision 인코더가 GPU를 못 타고 4.4배를 잃는다(§6).
 
@@ -18,7 +18,7 @@
 | 2 | **+ AOTriton flash attention** | 0.345 | **3.7x** | ~21x | 〃 — env 한 줄. sdpa가 math 폴백 대신 flash 커널을 탄다 |
 | 3 | + 해상도 캡 150k / `pow2` | 0.58 | 1.7x | ~35x | 〃 — vision 토큰 감소 |
 | 4 | + 멀티워커 W4·K2 | ~0.77 | 1.3x | ~46x | 〃 — 호스트 오버헤드가 만든 GPU 유휴를 다른 워커가 채운다 |
-| 5 | **llama.cpp로 런타임 교체** | 1.274 | 1.7x | ~76x | §5 — decode의 ~90%인 호스트 오버헤드를 계층째 제거 |
+| 5 | **llama.cpp로 런타임 교체** | 1.274 | 1.7x | ~76x | §5 — decode의 ~95%인 호스트 오버헤드를 계층째 제거 |
 | 6 | **+ GPU 핀을 env로** | **5.585** | **4.4x** | **~340x** | §6 — vision 인코더가 옆 GPU로 새던 것 |
 | 7 | 현재 — `box` / 300k | 4.277 | 0.77x | **~260x** | §7 — **일부러 되돌린 단계.** 절단되던 크롭을 산다 |
 
@@ -34,11 +34,11 @@
 | **GPU 핀을 `GGML_VK_VISIBLE_DEVICES`로** | ✅ **필수 — 이걸 놓치면 4.4x를 잃는다** (§6) | `--device`는 LM만 GPU에 올리고 vision 인코더를 남긴다. 같은 229 토큰이 739ms → 93ms |
 | **`downscale_mode=box` + cap 300k** | ✅ **채택 — 절단 하나를 페이지당 105ms(+4.7%)에 산다** (§7) | `pow2`는 배율이 2의 거듭제곱뿐이라 예산의 최대 4배를 버린다. 302k 크롭이 150k 캡에서 **75k로** 접혀 4줄이 1줄로 잘렸다 |
 | **동시성 W4·K2** | 🔸 transformers 한정 채택(1.5x) | llama.cpp 쪽 동시성은 잘못된 GPU 핀 상태에서만 재봤다 — 현 구성 기준 미측정(§6) |
-| **양자화 (weight-only INT8/INT4)** | ❌ 폐기(transformers 기준) | decode의 weight read가 토큰당 ~5.6ms로 **전체의 ~9%**뿐. 작은 모델(0.9B)이라 줄일 여지 자체가 작다 |
+| **양자화 (weight-only INT8/INT4)** | ❌ 폐기(transformers 기준) | decode가 읽는 건 LM(893MB)뿐이라 weight read가 토큰당 ~2.8ms = **전체의 ~4%**. 다 없애도 3%다 |
 | **MI50로 recognize** | ❌ 폐기 | torch rocm7.0 rocBLAS에 **gfx906 Tensile 라이브러리가 없음** — 로드는 되지만 첫 matmul에서 죽는다. (llama.cpp는 gfx906에서 도니 **이 판정은 torch 한정**이다) |
 | **decode 오버헤드 제거** (`torch.compile` / HIP graph) | ❌ **실측 폐기(이 스택)** — §4 | 벽 다 넘어도 inductor+dynamic는 **1.11x뿐** + **출력 2/8 오독**(っ→コ·♥→✓) + ~11s/shape라 dynamic-res서 상각 불가. 큰 이득(그래프 캡처)은 동적 shape과 원천 충돌 |
 | vLLM / SGLang / FastDeploy / ONNX / OpenVINO | ❌ 조사 단계에서 배제 | RDNA4에서 vLLM은 Docker 기동 버그 미해결 + 최적화 커널 부재(커뮤니티 실측: **llama.cpp Vulkan이 vLLM ROCm보다 29% 빠름**), FastDeploy는 AMD 미지원, ONNX는 export 경로 자체가 없음(optimum "not planned"), OpenVINO는 Intel 전용 |
-| **manga-ocr로 전환/하이브리드** | 🔸 보류 | 정확도 트레이드 대안. llama.cpp가 정확도 손실 없이 2.2x를 줬으므로 **당장은 불필요** |
+| **manga-ocr로 전환/하이브리드** | 🔸 보류 | 정확도 트레이드 대안. llama.cpp가 정확도 손실 없이 10x를 줬으므로 **당장은 불필요** |
 
 ## 측정 셋업
 
@@ -93,22 +93,35 @@ torch rocm7.0의 rocBLAS가 **gfx906 Tensile 라이브러리를 안 담고** 있
 
 ## 3. decode는 대역폭도 연산도 아니라 호스트 오버헤드 바운드
 
-steady/token이 크롭 크기에 **안 늘어난다**는 건 vision-attention(KV 캐시 읽기)이 병목이 아니라는 결정적 증거다(그랬다면 큰 crop = 더 많은 vision 토큰 = 토큰당 느려야 함). 그럼 ~64ms의 정체를 분해하면:
+steady/token이 크롭 크기에 **안 늘어난다**는 건 vision-attention(KV 캐시 읽기)이 병목이 아니라는 결정적 증거다(그랬다면 큰 crop = 더 많은 vision 토큰 = 토큰당 느려야 함). 그럼 ~64ms를 분해해 보자.
+
+B=1 디코드의 물리적 하한은 **토큰마다 LM 가중치를 한 번 읽는 것**이다. 이 모델은 LM과 vision 타워가 갈려 있고(GGUF로 893MB + 841MB), **디코드는 LM만 읽는다** — vision 타워는 prefill에서 한 번 돈다:
 
 | 성분 | 시간 | 비중 |
 |---|---|---|
-| weight read (1.8GB ÷ ~320 GB/s) | ~5.6ms | ~9% |
-| compute (2×0.9B FLOP ÷ 수십 TFLOPS) | ~0.2ms | <1% |
-| **잔차 = 호스트 측 오버헤드** | **~58ms** | **~90%** |
+| weight read (LM 893MB ÷ ~320 GB/s) | ~2.8ms | ~4% |
+| compute (2×0.45B FLOP ÷ 수십 TFLOPS) | ~0.1ms | <1% |
+| **잔차 = 호스트 측 오버헤드** | **~61ms** | **~95%** |
 
-0.9B 모델이 **~15.6 tok/s**면 이 하드웨어 능력 대비 비정상적으로 느리다 — GPU가 바빠서가 아니라 **놀아서** 느린 것이고, B=1 eager decode가 스텝마다 작은 커널 수백 개를 던지는 전형적 그림이다.
+0.45B LM이 **~15.6 tok/s**면 이 하드웨어 능력 대비 비정상적으로 느리다 — GPU가 바빠서가 아니라 **놀아서** 느린 것이고, B=1 eager decode가 스텝마다 작은 커널 수백 개를 던지는 전형적 그림이다.
 
-> **잔차의 내부 구성은 증명하지 않았다.** 문서화된 커널 런치 비용은 토큰당 50~100µs 규모라 58ms와 세 자릿수 차이다 — 즉 순수 런치뿐 아니라 per-token CPU↔GPU 동기화, HF `generate` 루프의 파이썬 오버헤드 등이 섞여 있다. **확실한 건 "대역폭도 연산도 아닌 호스트 측"이라는 것**이고, 그거면 레버를 고르는 데 충분하다(원인이 런치든 sync든 파이썬이든 처방이 같다 — 그 계층을 없애는 것). §5의 llama.cpp 10x가 이 진단의 경험적 확증이다.
+**대역폭 지붕에 대보면 한 줄로 끝난다** (같은 카드, 같은 모델, 같은 crop):
+
+| | 토큰당 | 실효 대역폭 | ~320 GB/s 대비 |
+|---|---|---|---|
+| transformers (BF16 LM 893MB) | 64ms | ~14 GB/s | **4.6%** |
+| **llama.cpp (Q8_0 LM 476MB)** | **2.38ms** | **~210 GB/s** | **65%** |
+
+transformers는 **카드 대역폭의 5%만** 쓰고 있었고, 나머지 95%는 GPU가 호스트를 기다린 시간이다. llama.cpp의 65%는 B=1 디코드가 실제로 닿는 영역이다(peak에는 원래 못 간다) — 즉 **여기서 더 짜낼 게 없다**는 뜻이기도 하다. llama.cpp 수치는 서버 자체 계측(`slot print_timing`: `eval time = 81.37 ms / 34 tokens (2.39 ms per token)`).
+
+> **잔차의 내부 구성은 증명하지 않았다.** 문서화된 커널 런치 비용은 토큰당 50~100µs 규모라 61ms와 세 자릿수 차이다 — 즉 순수 런치뿐 아니라 per-token CPU↔GPU 동기화, HF `generate` 루프의 파이썬 오버헤드, 연산마다 무는 torch 디스패처 비용 등이 섞여 있다. **확실한 건 "대역폭도 연산도 아닌 호스트 측"이라는 것**이고, 그거면 레버를 고르는 데 충분하다(원인이 런치든 sync든 파이썬이든 처방이 같다 — 그 계층을 없애는 것). 위 65%가 이 진단의 경험적 확증이다: 그 계층을 없앴더니 남은 게 정확히 대역폭이었다.
 
 이게 레버 랭킹을 바꾼다:
-- **양자화**는 그 ~9% weight read만 줄인다 → 잘해야 5~7%. 작은 모델이라 상한 자체가 낮다. **폐기.**
+- **양자화**는 그 ~4% weight read만 줄인다 → **잘해야 3%**. 작은 모델이라 상한 자체가 낮다. **폐기.**
 - **동시성**은 오히려 딱 맞는다 — 런치 사이 GPU 유휴를 다른 워커가 채운다(문서의 "W=1에서 GPU가 ~76% 바쁨, ~24% 회수"가 바로 이 오버헤드의 유휴). **무료 1.5x, 채택.**
 - **런치 오버헤드 자체를 접는 것**(static KV cache + `torch.compile`, 또는 HIP graph 캡처)이 유일하게 남았던 큰 per-crop 후보 — 였으나 **프로브 실측 결과 1.11x + 출력 파손으로 폐기(§4)**. accuracy-neutral일 거란 기대와 달리 inductor가 출력을 바꿨다.
+
+정리하면 시도는 전부 이 두 조각 중 하나를 겨눴다: **4%를 겨눈 것**(양자화)은 상한이 3%라 애초에 무의미했고, **95%를 겨눈 것**(동시성 1.5x, `torch.compile` 1.11x)은 torch 안에 있는 한 일부만 회수했다. 계층 자체를 걷어내야 전부 돌아온다는 게 §5다.
 
 ## 4. torch.compile 프로브 — 실측으로 폐기
 
@@ -129,7 +142,7 @@ decode가 런치 오버헤드 바운드니 `torch.compile`(런치 제거)이 이
 | 출력 동일성 | — | **✗ 2/8 변함** (`っ→コ`, `♥→✓` 등 실오독) |
 
 셋 다 폐기 사유:
-- **이득이 작다 (1.11x).** fusion은 런치 *횟수*만 줄이고(그래프 캡처는 배제), mrope graph break로 그마저 쪼개져 ~90% 오버헤드의 일부만 회수.
+- **이득이 작다 (1.11x).** fusion은 런치 *횟수*만 줄이고(그래프 캡처는 배제), mrope graph break로 그마저 쪼개져 ~95% 오버헤드의 일부만 회수.
 - **정확도가 깨진다.** 8개 중 2개 출력이 바뀌고 `っ→コ`·`♥→✓` 같은 실제 오독이 낀다. inductor의 부동소수 재결합이 노이즈 플로어의 그리디 디코드를 뒤집는다 — accuracy-first 엔진엔 치명적.
 - **프로덕션에서 상각 불가.** ~11s/shape 컴파일인데 dynamic-res라 crop마다 새 shape → 매 crop이 컴파일 비용을 물어 오히려 훨씬 느려진다. 프로브의 1.11x는 같은 shape을 재사용한 best case일 뿐.
 

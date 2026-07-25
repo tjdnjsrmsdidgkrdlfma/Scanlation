@@ -7,10 +7,12 @@ own crops (``tools/recognize-decode-bound.md``): **~10x the per-crop throughput 
 3 fixes, 4 regressions).
 
 The win is structural, not tuning: per-crop time was ~95% autoregressive decode at
-a flat ~64ms/token of which weight-read is ~9% and compute <1% — i.e. host-side
+a flat ~64ms/token of which weight-read is ~4% and compute <1% — i.e. host-side
 overhead of the eager transformers loop, which llama.cpp has no Python/torch
-dispatch layer to pay. It also holds ONE model copy server-side for all callers,
-where the worker pool holds one per worker.
+dispatch layer to pay. It decodes at 2.4ms/token here — ~65% of the card's memory
+bandwidth, where transformers reached 4.6% — so what is left is the physical floor
+of a B=1 decode. It also holds ONE model copy server-side for all callers, where
+the worker pool holds one per worker.
 
 The 10x needs the server pinned to its GPU by ``GGML_VK_VISIBLE_DEVICES``, not by
 ``--device``: the latter constrains only the LM layers and lets the vision encoder
@@ -52,7 +54,7 @@ class LlamaCppRecognizer(HttpEngineBase):
     display_name = "llama.cpp"
     homepage = "https://github.com/ggml-org/llama.cpp"
     description = ("Text recognition via an OpenAI-compatible /v1 vision server (llama.cpp, vllm…; "
-                   "must be running with a VLM + its mmproj). ~2.2x faster and ~1/4 the VRAM of the "
+                   "must be running with a VLM + its mmproj). ~10x faster and ~1/4 the VRAM of the "
                    "in-process engine.")
     # Its own endpoint: the recognizer serves a DIFFERENT model than the translator,
     # so it is a second llama-server instance on its own port, not the same one.
