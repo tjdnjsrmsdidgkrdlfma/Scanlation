@@ -27,6 +27,14 @@ recognize 게이트는 지금 **이미지 K장**을 들여보내는데(프로덕
 
 - [ ] 당장은 대응 노브 존재: 1크롭 위주 자료면 /admin에서 K를 `W ÷ 평균 크롭`(=4)으로. 크롭 예산 게이트는 **그런 자료가 실사용에 실재할 때** 구현(그 전엔 과설계) — 9060 XT 재장착 후 실사용 크롭 분포 확인이 선행.
 
+## detector도 워커 풀로 (recognize_pool 대칭 · GPU 검출 시 필요)
+
+detector는 지금 **본체 프로세스에서 in-process로** 돈다(recognize는 워커 풀). 그래서 detector를 GPU에 올리면 `pick_device`가 본체에서 HIP를 init → **모든 GPU render 노드를 열어** 카드를 프로세스 수명 내내 D0로 pin → recognize GPU(9060 XT)가 idle에 D3cold(~0W)로 못 내려간다. 원칙: **idle-0W가 필요한 GPU는 throwaway 프로세스(워커 풀·서브프로세스)만 건드려야 한다** — recognize=풀([recognize_pool.py](packages/scanlation-server/app/recognize_pool.py)), list_gpus=서브프로세스([gpus.py](packages/scanlation-server/app/gpus.py))가 이미 이 원칙이고, detector만 예외다.
+
+지금은 **detector=CPU라 무관**(in-process CPU는 HIP를 안 건드림; `pick_device("cpu")` short-circuit). GPU 검출 속도가 실측상 필요해지면:
+
+- [ ] detector를 recognize처럼 **워커 풀로** 뺀다 — `recognize_pool` 미러링(spawn `ProcessPoolExecutor`, `_worker_init`에서 entry-point로 detector 로드, idle-unload가 풀 teardown). 그러면 detector를 GPU에 둬도 워커가 죽을 때 HIP 컨텍스트가 풀려 카드가 잠든다. 대가: 프로세스 경계로 **페이지 이미지 전체**를 넘기고(detect 입력) region 결과를 직렬화해야 함(recognize는 크롭만 넘김). detect는 페이지당 1회라 CPU로도 감당되니, **GPU 검출이 실사용에서 병목일 때만** — 그 전엔 과설계.
+
 ## 참고 — translate/MI50 남은 배포
 
 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md)의 "남은 일"/"복구 런북" 참조:
