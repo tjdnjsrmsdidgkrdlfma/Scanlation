@@ -66,9 +66,17 @@ def _post(endpoint: str, path: str, body: dict, timeout: float) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def llamacpp_recognize(endpoint: str, crop, max_tokens: int, timeout: float) -> str:
+def llamacpp_recognize(endpoint: str, crop, max_tokens: int, timeout: float,
+                       cache_prompt: bool = False) -> str:
     """One crop -> text via llama-server's OpenAI-compatible vision chat endpoint.
-    temperature 0 = greedy, matching the plugin's deterministic default."""
+    temperature 0 = greedy, matching the plugin's deterministic default.
+
+    ``cache_prompt`` is OFF here on purpose. llama-server caches a prompt (image
+    included) per slot, so a crop it has already seen returns in tens of ms instead of
+    doing the ~740ms vision prefill — and since a bench re-sends byte-identical crops
+    every run, that silently inflates the rate by several x. It bit this investigation
+    twice before the timings gave it away, so the bench opts out rather than relying on
+    remembering to restart the server."""
     body = {
         "messages": [{"role": "user", "content": [
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_png_b64(crop)}"}},
@@ -77,6 +85,7 @@ def llamacpp_recognize(endpoint: str, crop, max_tokens: int, timeout: float) -> 
         "temperature": 0,
         "max_tokens": max_tokens,
         "stream": False,
+        "cache_prompt": cache_prompt,
     }
     data = _post(endpoint, "/v1/chat/completions", body, timeout)
     return (data["choices"][0]["message"]["content"] or "").strip()
@@ -261,11 +270,26 @@ def _write_html(path: str, crops, ref_text, variants, src: str) -> None:
         f.write("".join(P))
 
 
+def _warn_cache(label: str, ms: list[float]) -> None:
+    """Shout if any crop came back far under the median. Vision prefill dominates and is
+    roughly flat per crop, so an outlier that fast means the server answered from its
+    prompt cache — the exact artifact that faked a 8.6x and a 1.5x here. A backstop for
+    the cache_prompt=False request flag, in case a server build ignores it."""
+    if len(ms) < 4:
+        return
+    med, fast = statistics.median(ms), [x for x in ms if x < 0.25 * statistics.median(ms)]
+    if fast:
+        print(f"  !! [{label}] {len(fast)} crop(s) returned under 25% of the median "
+              f"({min(fast):.0f}ms vs med {med:.0f}ms) — looks like prompt-cache hits, so this "
+              f"rate is INFLATED. Restart llama-server and re-run.")
+
+
 def _report_pass(label: str, ms: list[float], rows: list) -> float:
     rate = len(ms) / (sum(ms) / 1000)
     print(f"  [{label}] {rate:.3f} crops/sec | per-crop ms "
           f"min {min(ms):.0f} / med {statistics.median(ms):.0f} / max {max(ms):.0f}")
     rows.append(f"| {label} | {rate:.3f} | {min(ms):.0f} | {statistics.median(ms):.0f} | {max(ms):.0f} |")
+    _warn_cache(label, ms)
     return rate
 
 
@@ -387,6 +411,7 @@ def main() -> int:
                   f"per-crop ms min {min(ms):.0f} / med {statistics.median(ms):.0f} / max {max(ms):.0f}")
             rows.append(f"| {label} (concurrency {args.concurrency}) | {rate:.3f} | {min(ms):.0f} | "
                         f"{statistics.median(ms):.0f} | {max(ms):.0f} |")
+            _warn_cache(label, ms)
         else:
             rate = _report_pass(label, ms, rows)
         variants.append((label, got, rate))
