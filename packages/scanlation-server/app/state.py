@@ -60,6 +60,12 @@ class InferenceGate:
                     self._slots.release()
 
 
+def opt_key(role: str, engine_name: str) -> str:
+    """Storage key for ``Selection.options``. Role-scoped so a dual-role engine
+    name keeps one option set per role."""
+    return f"{role}:{engine_name}"
+
+
 @dataclass
 class Selection:
     detector: str = settings.default_detector
@@ -67,7 +73,9 @@ class Selection:
     translator: str = settings.default_translator
     lang_src: str = settings.default_lang_src
     lang_dst: str = settings.default_lang_dst
-    # {engine_name: {opt: val}} overrides applied on top of schema defaults.
+    # {"role:engine_name": {opt: val}} overrides applied on top of schema defaults.
+    # Keyed by role too because one engine name can serve several roles (llama.cpp
+    # is both a translator and a recognizer) with completely different schemas.
     options: dict[str, dict[str, Any]] = field(default_factory=dict)
     # {engine_name: "cpu"|"cuda"|"cuda:N"} per-engine compute-device override (N =
     # GPU index). Absent -> the engine's DEFAULT_DEVICE (its code default). Only
@@ -269,27 +277,30 @@ class AppState:
             self.selection.torch_index = torch_index.strip()
         self.save()
 
-    def set_options(self, engine_name: str, options: dict[str, Any]) -> None:
-        """Persist per-engine option overrides (the admin 'engine options' form).
+    def set_options(self, role: str, engine_name: str, options: dict[str, Any]) -> None:
+        """Persist per-(role, engine) option overrides (the admin 'engine options' form).
 
         A value of None or "" *removes* the override, so the field reverts to the
         engine's schema default (e.g. clearing the translator model unsets it).
         """
-        cur = dict(self.selection.options.get(engine_name, {}))
-        for key, val in (options or {}).items():
+        key = opt_key(role, engine_name)
+        cur = dict(self.selection.options.get(key, {}))
+        for k, val in (options or {}).items():
             if val is None or val == "":
-                cur.pop(key, None)
+                cur.pop(k, None)
             else:
-                cur[key] = val
+                cur[k] = val
         if cur:
-            self.selection.options[engine_name] = cur
+            self.selection.options[key] = cur
         else:
-            self.selection.options.pop(engine_name, None)
+            self.selection.options.pop(key, None)
         self.save()
 
-    def options_for(self, engine_name: str, request_options: dict | None) -> dict:
-        """Merge persisted overrides with this request's options (request wins)."""
-        merged = dict(self.selection.options.get(engine_name, {}))
+    def options_for(self, role: str, engine_name: str, request_options: dict | None) -> dict:
+        """Merge persisted overrides with this request's options (request wins).
+        Request options stay keyed by engine name — a request names one engine per
+        role, so there is nothing to disambiguate on that side."""
+        merged = dict(self.selection.options.get(opt_key(role, engine_name), {}))
         if request_options:
             merged.update(request_options.get(engine_name, {}) or {})
         return merged
@@ -302,7 +313,7 @@ class AppState:
 
     def translator_options(self, engine_name: str, request_options: dict | None) -> dict:
         """options_for + the active system prompt injected (unless overridden)."""
-        opts = self.options_for(engine_name, request_options)
+        opts = self.options_for("translator", engine_name, request_options)
         opts.setdefault("system_prompt", self.active_system_prompt())
         return opts
 

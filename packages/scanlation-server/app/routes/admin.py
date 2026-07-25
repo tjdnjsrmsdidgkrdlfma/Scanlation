@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException
 
 from .. import __version_array__
 from scanlation_sdk.context import LANGUAGES
-from . import require_known_engine
+from . import require_known_engine, require_role_engine
 from ..cache import cache
 from ..config import settings
 from ..catalog import catalog
@@ -32,7 +32,7 @@ from ..schemas import (
     SetClientConfigRequest,
     SetOptionsRequest,
 )
-from ..state import state
+from ..state import opt_key, state
 
 router = APIRouter()
 
@@ -52,7 +52,7 @@ def _engine_entries(role: str) -> list[dict]:
             "installed": safe_is_installed(cls),
             "installed_package": True,
             "schema": serialize_schema(cls),
-            "options": dict(state.selection.options.get(name, {})),
+            "options": dict(state.selection.options.get(opt_key(role, name), {})),
             "device": state.selection.devices.get(name, ""),
             # per-engine recognize worker-pool override ("" = the global default);
             # the admin UI shows this field only for recognizers that load onto a device
@@ -142,10 +142,10 @@ def get_translator_models(engine: str | None = None) -> dict:
 
 @router.post("/set_options/")
 def set_options(req: SetOptionsRequest) -> dict:
-    """Persist per-engine option overrides. Engine must exist in some role."""
-    require_known_engine(req.engine)
-    state.set_options(req.engine, req.options)
-    return {"status": "success", "options": dict(state.selection.options.get(req.engine, {}))}
+    """Persist per-(role, engine) option overrides. Engine must serve that role."""
+    require_role_engine(req.role, req.engine)
+    state.set_options(req.role, req.engine, req.options)
+    return {"status": "success", "options": dict(state.selection.options.get(opt_key(req.role, req.engine), {}))}
 
 
 @router.post("/save_prompt/")

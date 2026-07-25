@@ -275,7 +275,7 @@ function optBlock(role, e) {
   // The selection can resolve to a catalog-only entry (its package was uninstalled):
   // that carries an empty schema, so don't imply "no options" — say it's not installed.
   if (e.installed_package === false) {
-    return `<div class="opt-block" data-engine="${e.name}">
+    return `<div class="opt-block" data-role="${role}" data-engine="${e.name}">
       <span class="role">${t("role." + role)}</span>
       <h3>${e.display_name}</h3>
       <p class="opt-empty">${t("options.notInstalled")}</p>
@@ -292,7 +292,7 @@ function optBlock(role, e) {
     : (dev || conc || gconc ? "" : `<p class="opt-empty">${t("options.none")}</p>`);
   const saveBtn = (keys.length || dev || conc || gconc)
     ? `<button class="btn primary sm" data-save-engine="${e.name}">${t("btn.save")}</button>` : "";
-  return `<div class="opt-block" data-engine="${e.name}">
+  return `<div class="opt-block" data-role="${role}" data-engine="${e.name}">
       <span class="role">${t("role." + role)}</span>
       <h3>${e.display_name}</h3>
       ${dev}${conc}${gconc}${fieldsHtml}${saveBtn}
@@ -317,7 +317,10 @@ function renderEngineOptions() {
 // a tag can still be typed.
 async function setupModelPicker() {
   const engine = DATA.selection.translator;
-  const block = document.querySelector(`.opt-block[data-engine="${engine}"]`);
+  // by role, not by engine name: the same name can also be the selected recognizer,
+  // and that block renders first — matching on the name alone would rewrite ITS
+  // model field with the translator's model list.
+  const block = document.querySelector('.opt-block[data-role="translator"]');
   const input = block && block.querySelector('input[data-opt="model"]');
   if (!input) return;  // dummy translator has no model option
   let models = [];
@@ -470,7 +473,7 @@ async function deletePrompt() {
 
 async function saveEngineOptions(engine, blockEl) {
   try {
-    await postJSON("/set_options/", { engine, options: collectOptions(blockEl) });
+    await postJSON("/set_options/", { role: blockEl.dataset.role, engine, options: collectOptions(blockEl) });
     const kindSel = blockEl.querySelector("[data-device-kind]");
     if (kindSel) {
       const gpuSel = blockEl.querySelector("[data-device-gpu]");

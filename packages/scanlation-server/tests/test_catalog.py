@@ -18,11 +18,15 @@ from app.registry import registry
 
 
 def _engine_class(entry):
-    """The discovered engine class for a catalog entry, or None if not installed."""
-    for role in entry.roles:
-        if registry.has(role, entry.name):
-            return registry.get_class(role, entry.name)
-    return None
+    """The engine class for a catalog entry, or None if there is nothing to compare
+    against. A plugin serving SEVERAL roles ships one engine class per role, so its
+    catalog string describes the PLUGIN while each class describes its own ENGINE —
+    two different texts by design, not drift. Skipped by roles rather than by what
+    is discovered, so the check doesn't change with which entry points are installed."""
+    if len(entry.roles) != 1:
+        return None
+    role = entry.roles[0]
+    return registry.get_class(role, entry.name) if registry.has(role, entry.name) else None
 
 
 def test_catalog_description_matches_installed_plugin():

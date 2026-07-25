@@ -12,3 +12,11 @@ def require_known_engine(name: str) -> None:
     be saved into the selection/state."""
     if not any(registry.has(role, name) for role in ROLE_NAMES):
         raise HTTPException(status_code=400, detail=f"unknown engine: {name}")
+
+
+def require_role_engine(role: str, name: str) -> None:
+    """400 unless ``name`` is an installed engine IN THAT ROLE. Option routes gate
+    on this so a role-scoped override can't be stored under a role the engine
+    doesn't serve."""
+    if role not in ROLE_NAMES or not registry.has(role, name):
+        raise HTTPException(status_code=400, detail=f"unknown {role}: {name}")

@@ -29,7 +29,7 @@ def test_state_json_roundtrip():
         st.set_engine_device("rec-x", "cuda")
         st.set_recognize_concurrency("rec-x", 4)
         st.set_gpu_concurrency("rec-x", 3)
-        st.set_options("x", {"a": 1})
+        st.set_options("detector", "x", {"a": 1})
         st.save_prompt("mine", "PROMPT")
         old_sem = st.translate_sem
         st.set_client_config(min_image_dim=123, verbose_log=True, translate_concurrency=8,
@@ -76,6 +76,28 @@ def test_engine_device_override():
         st.set_engine_device("comic-text-and-bubble-detector", "")              # blank removes it
         assert st.resolve_device_for("comic-text-and-bubble-detector") is None
         assert "comic-text-and-bubble-detector" not in st.selection.devices
+    finally:
+        context.base_dir = saved_base
+
+
+def test_options_are_scoped_per_role():
+    """One engine name can serve several roles with different schemas (llama.cpp is
+    both translator and recognizer), so each role keeps its own option set."""
+    saved_base = context.base_dir
+    try:
+        context.base_dir = Path(tempfile.mkdtemp())
+        st = AppState()
+        st.set_options("translator", "llama.cpp", {"model": "some-gguf"})
+        st.set_options("recognizer", "llama.cpp", {"max_pixels": 200000})
+        assert st.options_for("translator", "llama.cpp", None) == {"model": "some-gguf"}
+        assert st.options_for("recognizer", "llama.cpp", None) == {"max_pixels": 200000}
+        # clearing one role leaves the other intact
+        st.set_options("recognizer", "llama.cpp", {"max_pixels": ""})
+        assert st.options_for("recognizer", "llama.cpp", None) == {}
+        assert st.options_for("translator", "llama.cpp", None) == {"model": "some-gguf"}
+        # request options still key by engine name and win over the persisted ones
+        assert st.options_for("translator", "llama.cpp",
+                              {"llama.cpp": {"model": "other"}}) == {"model": "other"}
     finally:
         context.base_dir = saved_base
 
@@ -188,6 +210,7 @@ TESTS = [
     test_state_json_roundtrip,
     test_state_load_falls_back_on_bad_json,
     test_engine_device_override,
+    test_options_are_scoped_per_role,
     test_recognize_concurrency_override,
     test_gpu_concurrency_override_and_gate_rebuild,
     test_config_env_seeds_settings_and_selection,

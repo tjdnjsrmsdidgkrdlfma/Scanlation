@@ -65,6 +65,7 @@ class InstallPluginStreamRequest(BaseModel):
 
 # --- admin: /set_options/ --------------------------------------------------
 class SetOptionsRequest(BaseModel):
+    role: str                            # detector/recognizer/translator — one engine name can serve several
     engine: str
     options: dict[str, Any]              # {opt: val}; null/"" removes the override
 

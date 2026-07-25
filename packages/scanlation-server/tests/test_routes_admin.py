@@ -47,16 +47,30 @@ def test_get_translator_models_shape():
 
 def test_set_options_persists_and_clears():
     c = client()
-    r = c.post("/set_options/", json={"engine": "dummy", "options": {"num_boxes": 1}})
+    r = c.post("/set_options/", json={"role": "detector", "engine": "dummy", "options": {"num_boxes": 1}})
     assert r.status_code == 200
     det = {e["name"]: e for e in c.get("/get_settings/").json()["engines"]["detector"]}
     assert det["dummy"]["options"]["num_boxes"] == 1
     # blank value removes that override (reverts to the schema default)
-    c.post("/set_options/", json={"engine": "dummy", "options": {"num_boxes": ""}})
+    c.post("/set_options/", json={"role": "detector", "engine": "dummy", "options": {"num_boxes": ""}})
     det = {e["name"]: e for e in c.get("/get_settings/").json()["engines"]["detector"]}
     assert "num_boxes" not in det["dummy"]["options"]
     # unknown engine -> 400
-    assert c.post("/set_options/", json={"engine": "nope", "options": {}}).status_code == 400
+    assert c.post("/set_options/", json={"role": "detector", "engine": "nope", "options": {}}).status_code == 400
+    # the same engine name in another role keeps its own set — no bleed-through
+    # (the fake "dummy" is registered in all three roles, like llama.cpp is in two)
+    c.post("/set_options/", json={"role": "detector", "engine": "dummy", "options": {"num_boxes": 1}})
+    c.post("/set_options/", json={"role": "translator", "engine": "dummy", "options": {"model": "m"}})
+    eng = c.get("/get_settings/").json()["engines"]
+    det = {e["name"]: e for e in eng["detector"]}
+    tr = {e["name"]: e for e in eng["translator"]}
+    assert det["dummy"]["options"] == {"num_boxes": 1}
+    assert tr["dummy"]["options"] == {"model": "m"}
+    # unknown role -> 400
+    assert c.post("/set_options/", json={"role": "nope", "engine": "dummy", "options": {}}).status_code == 400
+    # leave the shared state clean — these overrides drive the pipeline tests' output
+    c.post("/set_options/", json={"role": "detector", "engine": "dummy", "options": {"num_boxes": ""}})
+    c.post("/set_options/", json={"role": "translator", "engine": "dummy", "options": {"model": ""}})
 
 
 def test_prompt_select_save_delete():

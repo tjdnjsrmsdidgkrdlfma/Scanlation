@@ -57,8 +57,8 @@ def make_plan(request_options: dict | None) -> RunPlan:
     a RunPlan (request options win over the persisted per-engine overrides)."""
     sel = state.selection
     det, rec, tr = sel.detector, sel.recognizer, sel.translator
-    opt_detect = state.options_for(det, request_options)
-    opt_recognize = state.options_for(rec, request_options)
+    opt_detect = state.options_for("detector", det, request_options)
+    opt_recognize = state.options_for("recognizer", rec, request_options)
     opt_translate = state.translator_options(tr, request_options)
     return RunPlan(
         detector=det, recognizer=rec, translator=tr,
