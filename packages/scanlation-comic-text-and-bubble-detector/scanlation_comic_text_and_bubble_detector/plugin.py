@@ -79,12 +79,19 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
 
         d = self._model_dir()
         self._proc = AutoImageProcessor.from_pretrained(str(d), local_files_only=True)
+        # Pin eager attention instead of letting transformers pick sdpa: the sdpa
+        # check (_sdpa_can_dispatch -> torch.cuda.device_count()) enumerates every
+        # physical GPU on ROCm — opening /dev/kfd + every render node — even for a
+        # CPU model. This engine loads IN the long-lived server process, so that
+        # context pins the cards at D0 for the process lifetime and blocks the
+        # recognizer GPU's idle runtime-suspend (~0W). eager costs nothing on CPU.
+        kw = {"local_files_only": True, "attn_implementation": "eager"}
         try:  # Auto covers most detection models
             from transformers import AutoModelForObjectDetection
-            model = AutoModelForObjectDetection.from_pretrained(str(d), local_files_only=True)
+            model = AutoModelForObjectDetection.from_pretrained(str(d), **kw)
         except (ValueError, KeyError):  # rt_detr_v2 on older transformers: name the class
             from transformers import RTDetrV2ForObjectDetection
-            model = RTDetrV2ForObjectDetection.from_pretrained(str(d), local_files_only=True)
+            model = RTDetrV2ForObjectDetection.from_pretrained(str(d), **kw)
         # detect() reads self._device (set by LocalModelEngineBase.load after this returns);
         # inside _load the resolved device is the `device` arg.
         self._model = model.to(device).eval()
