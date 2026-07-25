@@ -2,7 +2,7 @@
 
 Serves the same VLM recognizer as the in-process engine, but from llama.cpp's
 `llama-server` instead of transformers in this process. Measured on this project's
-own crops (``tools/recognize-decode-bound.md``): **~2.2x the per-crop throughput at
+own crops (``tools/recognize-decode-bound.md``): **~10x the per-crop throughput at
 ~1/4 the VRAM**, with the text effectively unchanged (35/42 identical-or-cosmetic,
 3 fixes, 4 regressions).
 
@@ -12,9 +12,13 @@ overhead of the eager transformers loop, which llama.cpp has no Python/torch
 dispatch layer to pay. It also holds ONE model copy server-side for all callers,
 where the worker pool holds one per worker.
 
-Do NOT reach for concurrency here: with the host overhead gone the GPU is already
-saturated, so extra in-flight requests bought 1.06x while tripling per-crop latency
-(same doc). Leave this engine's worker count at 1.
+The 10x needs the server pinned to its GPU by ``GGML_VK_VISIBLE_DEVICES``, not by
+``--device``: the latter constrains only the LM layers and lets the vision encoder
+pick another card. See the doc's §6 and the unit examples under ``deploy/``.
+
+Leave this engine's worker count at 1 unless it has been re-measured — concurrency
+was only ever timed on a mis-pinned server, so the old "c>1 buys nothing" number
+does not describe this configuration.
 
 Model-agnostic by design: it sends an image + prompt to /v1/chat/completions, so
 any OpenAI-compatible vision server works (llama.cpp, vLLM, SGLang…). WHICH model
@@ -66,12 +70,16 @@ class LlamaCppRecognizer(HttpEngineBase):
                        "description": "Max output tokens per crop; lower to cap runaway generation."},
         "temperature": {"type": float, "default": 0.0,
                         "description": "0 = greedy/deterministic, which is what OCR wants."},
+        # 300k/box, not the in-process engine's 150k/pow2: pow2 only halves, so a crop
+        # just over the cap drops to a QUARTER of it — a 302k crop read at 75k lost 3 of
+        # its 4 lines. box lands on the cap exactly, and the cap stays as the guard rail
+        # that keeps a huge crop from blowing up the tail (doc §7).
         "max_pixels": {"type": int,
-                       "default": int(os.environ.get("SCANLATION_RECOGNIZE_MAX_PIXELS", "150000")),
-                       "description": "Downscale crops above this many pixels before OCR to cut vision tokens (~1.66x). 0 = off."},
+                       "default": int(os.environ.get("SCANLATION_RECOGNIZE_MAX_PIXELS", "300000")),
+                       "description": "Downscale crops above this many pixels before OCR to cut vision tokens. 0 = off."},
         "downscale_mode": {"type": str,
-                           "default": os.environ.get("SCANLATION_RECOGNIZE_DOWNSCALE_MODE", "pow2"),
-                           "description": f"How to downscale when max_pixels applies: {' / '.join(DOWNSCALE_MODES)} (pow2 recommended)."},
+                           "default": os.environ.get("SCANLATION_RECOGNIZE_DOWNSCALE_MODE", "box"),
+                           "description": f"How to downscale when max_pixels applies: {' / '.join(DOWNSCALE_MODES)} (box recommended — pow2 overshoots)."},
     }
     SUPPORTED_SRC = ["ja", "en", "zh", "ko"]
 

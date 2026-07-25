@@ -70,10 +70,13 @@ def test_cap_downscales_before_upload():
     """The pixel cap is applied to the crop that is UPLOADED (it shrinks the wire
     payload too), and a crop already under the cap is sent untouched."""
     rec = _rec()
-    big = _crop(1000, 1000)  # 1,000,000 px -> over the 150k default
+    cap = LlamaCppRecognizer.OPTION_SCHEMA["max_pixels"]["default"]
+    big = _crop(1000, 1000)  # 1,000,000 px -> well over any sane cap
     rec.recognize(big, Region.from_bbox(0, 0, 1000, 1000), {})
     sent = _uploaded(rec._captured)
-    assert sent.width * sent.height <= 150_000
+    # `box` lands ON the cap rather than overshooting to a power-of-two fraction of
+    # it, so the upload should fill most of the budget — not a quarter of it.
+    assert 0.9 * cap <= sent.width * sent.height <= cap
 
     rec.recognize(_crop(100, 100), Region.from_bbox(0, 0, 100, 100), {})
     small = _uploaded(rec._captured)
