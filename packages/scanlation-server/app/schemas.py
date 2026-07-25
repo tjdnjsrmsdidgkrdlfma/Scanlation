@@ -56,11 +56,13 @@ class SetGpuConcurrencyRequest(BaseModel):
 # --- /install_plugins/ ------------------------------------------------------
 class InstallPluginsRequest(BaseModel):
     plugins: dict[str, bool]
+    force: bool = False                  # pip even if the engine already imports (refresh stale code)
 
 
 # --- /install_plugin_stream/ (one plugin, live NDJSON progress) -------------
 class InstallPluginStreamRequest(BaseModel):
     name: str
+    force: bool = False
 
 
 # --- admin: /set_options/ --------------------------------------------------

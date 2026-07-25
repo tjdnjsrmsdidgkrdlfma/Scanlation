@@ -209,7 +209,7 @@ def find_class(name: str):
     return None
 
 
-def _run_install(name: str, put: Callable[[tuple], None] | None) -> dict:
+def _run_install(name: str, put: Callable[[tuple], None] | None, force: bool = False) -> dict:
     """The install algorithm, run by both the blocking and the streaming entry point.
 
     Two layers: pip the **package** if the engine isn't discoverable yet (then
@@ -217,9 +217,14 @@ def _run_install(name: str, put: Callable[[tuple], None] | None) -> dict:
     ``put`` is the streaming sink: when given, phase events are emitted and pip's
     output + the weights-download bars are forwarded to it line by line; when None
     the same steps run silently and pip's stderr tail only surfaces on failure.
-    ``name`` is the engine/registry name. Raises ValueError/RuntimeError."""
-    cls = find_class(name)
-    if cls is None:  # package not installed yet -> pip install from the catalog
+    ``name`` is the engine/registry name. Raises ValueError/RuntimeError.
+
+    ``force`` pips even when the engine is already discoverable. The discovery
+    check answers "can I import it", not "is it current" — so a plugin whose code
+    moved on (a new engine, a changed OPTION_SCHEMA) can otherwise only be
+    refreshed by deleting it from the plugins volume by hand."""
+    cls = None if force else find_class(name)
+    if cls is None:  # not installed yet, or a forced refresh -> pip from the catalog
         entry = catalog().get(name)
         if entry is None:
             raise ValueError(f"unknown engine: {name}")
@@ -232,7 +237,7 @@ def _run_install(name: str, put: Callable[[tuple], None] | None) -> dict:
         cls = find_class(name)
         if cls is None:
             raise RuntimeError(f"{name} installed but not discovered (check entry_points)")
-        package = "installed"
+        package = "reinstalled" if force else "installed"
     else:
         package = "present"
 
@@ -249,10 +254,10 @@ def _run_install(name: str, put: Callable[[tuple], None] | None) -> dict:
     return {"package": package, "weights": "installed" if inst.is_installed() else "n/a"}
 
 
-def install_plugin(name: str) -> dict:
+def install_plugin(name: str, force: bool = False) -> dict:
     """Install a plugin end-to-end, blocking and silent (tools/install.py, POST
     /install_plugins/). Returns a small status dict; raises on failure."""
-    return _run_install(name, None)
+    return _run_install(name, None, force)
 
 
 # --- in-progress tracking --------------------------------------------------
@@ -288,7 +293,7 @@ _EVENT: dict[str, Callable[[object], dict]] = {  # (kind, payload) -> NDJSON obj
 }
 
 
-def install_plugin_events(name: str) -> Iterator[dict]:
+def install_plugin_events(name: str, force: bool = False) -> Iterator[dict]:
     """Streaming variant of :func:`install_plugin`: yields progress events for the
     /admin live-log view. Event shapes (each a JSON object, one per line):
 
@@ -309,7 +314,7 @@ def install_plugin_events(name: str) -> Iterator[dict]:
 
     def worker() -> None:
         try:
-            q.put(("done", _run_install(name, q.put)))
+            q.put(("done", _run_install(name, q.put, force)))
         except Exception as exc:  # noqa: BLE001
             q.put(("error", str(exc)))
         finally:

@@ -383,8 +383,12 @@ function renderPlugins() {
     // downloads the weights in a single action; the live log shows both phases as
     // they run. `installed` (weights present, which implies the package) is the
     // only "fully done" state, so it's just Install ↔ Installed — same footprint.
+    // "installed" is about the weights, not about the CODE being current: a plugin
+    // whose package moved on (new engine, changed options) still reads as done, and
+    // a plain install skips pip for it. Reinstall is the way to pull that code in.
     const action = e.installed
       ? `<span class="pa pa-done"><span class="pa-ico">✓</span>${t("plugins.installed")}</span>`
+        + `<button class="preinstall" data-reinstall="${e.name}">${t("plugins.reinstall")}</button>`
       : serverInstalling.has(e.name)
       ? `<span class="pa pa-busy"><span class="spin"></span>${t("plugins.installing")}</span>`
       : `<button class="pa pa-install" data-install="${e.name}">${t("plugins.install")}</button>`;
@@ -514,10 +518,12 @@ async function saveEngineOptions(engine, blockEl) {
 // design — concurrent pip into the same --target, and the process-global stdout
 // capture, can't safely overlap). The queue drains, then one load() syncs the list.
 const installQueue = [];   // names waiting to install, in click order
+const forceInstall = new Set();  // of those, the ones asked to pip even if importable
 let currentInstall = null; // the name currently installing (or null when idle)
 
-function enqueueInstall(name) {
+function enqueueInstall(name, force) {
   if (name === currentInstall || installQueue.includes(name)) return;  // already going/queued
+  if (force) forceInstall.add(name);
   installQueue.push(name);
   if (currentInstall) setAction(name, queuedChip());  // something's running -> show as waiting
   pumpQueue();
@@ -537,12 +543,13 @@ async function pumpQueue() {
 // show "설치됨" in place (the final load() reconciles); failure -> keep the log open
 // (error visible) and restore the Install button so it can be retried.
 async function runInstall(name) {
+  const force = forceInstall.delete(name);
   setAction(name, busyChip());
   const row = document.querySelector(`.plugin[data-name="${name}"]`);
   const log = openPluginLog(row);
   let ok = false;
   try {
-    await streamInstall(name, (ev) => log.handle(ev));
+    await streamInstall(name, (ev) => log.handle(ev), force);
     ok = true;
   } catch (e) {
     log.fail(e.message);
@@ -600,12 +607,12 @@ function hidePluginLog(name) {
 // POST the install and read the NDJSON event stream line by line (fetch + reader,
 // so the X-Auth-Token header still applies — EventSource can't send headers). Each
 // line is one JSON event; an `error` event makes this throw after the stream ends.
-async function streamInstall(name, onEvent) {
+async function streamInstall(name, onEvent, force) {
   const tok = getToken();
   const res = await fetch("/install_plugin_stream/", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(tok ? { "X-Auth-Token": tok } : {}) },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, force: !!force }),
   });
   if (!res.ok || !res.body) {
     let detail = `HTTP ${res.status}`;
@@ -816,7 +823,9 @@ $("engine-options").addEventListener("change", (ev) => {
 });
 $("plugins").addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-install]");
-  if (btn) enqueueInstall(btn.dataset.install);
+  if (btn) { enqueueInstall(btn.dataset.install); return; }
+  const re = ev.target.closest("[data-reinstall]");
+  if (re) enqueueInstall(re.dataset.reinstall, true);
 });
 $("clear-cache").addEventListener("click", clearCache);
 $("clear-stats").addEventListener("click", clearStats);

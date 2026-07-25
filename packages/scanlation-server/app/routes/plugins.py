@@ -22,12 +22,14 @@ router = APIRouter()
 def install_plugins(req: InstallPluginsRequest) -> dict:
     """Install plugins — the explicit one-click action backing the admin plugin
     tab. ``{plugins: {name: true}}`` pip-installs the package (if not already) and
-    downloads its weights; ``false`` is a no-op (uninstall not in scope)."""
+    downloads its weights; ``false`` is a no-op (uninstall not in scope).
+    ``force: true`` pips even when the package is already importable, which is how
+    a plugin whose code changed gets refreshed without wiping the plugins volume."""
     try:
         for name, want in req.plugins.items():
             if not want:
                 continue
-            install_plugin(name)
+            install_plugin(name, req.force)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)[:200])
     return {"status": "success"}
@@ -41,7 +43,7 @@ def install_plugin_stream(req: InstallPluginStreamRequest) -> StreamingResponse:
     the stream (the response itself is 200 once streaming starts)."""
     def gen():
         try:
-            for ev in install_plugin_events(req.name):
+            for ev in install_plugin_events(req.name, req.force):
                 yield json.dumps(ev, ensure_ascii=False) + "\n"
         except Exception as exc:  # noqa: BLE001 - last-resort guard; worker already traps most
             yield json.dumps({"event": "error", "message": str(exc)[:200]}) + "\n"
