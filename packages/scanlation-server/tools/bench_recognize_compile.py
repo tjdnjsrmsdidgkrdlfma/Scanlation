@@ -73,9 +73,14 @@ def main() -> int:
     ap.add_argument("--detect", action="store_true", help="treat the folder as pages: detect + deskew crops")
     ap.add_argument("--items", type=int, default=8, help="crops to compile+time (first N; each is a distinct compile)")
     ap.add_argument("--probe-cap", type=int, default=64, help="max_new_tokens per recognize")
+    ap.add_argument("--backend", default="cudagraphs",
+                    choices=["cudagraphs", "inductor", "eager", "aot_eager"],
+                    help="torch.compile backend. cudagraphs = HIP-graph capture, NO Triton needed, elides the "
+                         "launch overhead directly (best fit for our bottleneck). inductor needs "
+                         "pytorch-triton-rocm (kernel fusion). eager/aot_eager = no graph (sanity check).")
     ap.add_argument("--mode", default="reduce-overhead",
                     choices=["reduce-overhead", "default", "max-autotune"],
-                    help="torch.compile mode (reduce-overhead = HIP graphs, targets the launch overhead)")
+                    help="inductor-only: torch.compile mode (reduce-overhead = HIP graphs on top of inductor)")
     ap.add_argument("--dynamic", action="store_true",
                     help="torch.compile(dynamic=True): one graph for varying shapes (no HIP graphs, but no recompile)")
     args = ap.parse_args()
@@ -95,14 +100,18 @@ def main() -> int:
     rec = load_paddle(device, None)
     base_rate, base_ms, base_txt, _ = _pass(rec, crops, opts, "baseline")
 
-    print(f"\n== compiled (static cache + torch.compile mode={args.mode} dynamic={args.dynamic}) ==")
-    print("   (inductor compile is slow -- several minutes for N distinct shapes is normal)")
+    label = f"backend={args.backend}" + (f" mode={args.mode}" if args.backend == "inductor" else "")
+    print(f"\n== compiled (static cache + torch.compile {label} dynamic={args.dynamic}) ==")
+    print("   (graph capture / compile is slow -- a first hit per distinct shape is normal)")
     try:
         import torch
 
         rec._model.generation_config.cache_implementation = "static"  # fixed-shape decode -> reusable graph
-        rec._model.forward = torch.compile(
-            rec._model.forward, mode=args.mode, fullgraph=False, dynamic=(True if args.dynamic else None))
+        dynamic = True if args.dynamic else None
+        if args.backend == "inductor":
+            rec._model.forward = torch.compile(rec._model.forward, mode=args.mode, fullgraph=False, dynamic=dynamic)
+        else:
+            rec._model.forward = torch.compile(rec._model.forward, backend=args.backend, fullgraph=False, dynamic=dynamic)
         comp_rate, comp_ms, comp_txt, warm_s = _pass(rec, crops, opts, "compiled", warm_progress=True)
     except Exception:  # noqa: BLE001 - a compile/runtime failure IS the finding, not an error to hide
         import traceback
