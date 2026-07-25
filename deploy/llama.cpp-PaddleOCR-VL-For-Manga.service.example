@@ -3,8 +3,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# Index is from `llama-server --list-devices` run WITHOUT this env. Pin only this
+# way: --device leaves the vision encoder (mtmd) free to pick another card, and
+# anything that hides a render node (InaccessiblePaths=) renumbers the survivors.
 Environment="GGML_VK_VISIBLE_DEVICES=2"
-InaccessiblePaths=/dev/dri/renderD128
 ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -m /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-BF16.gguf --mmproj /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-mmproj-BF16.gguf -ngl 99 --temp 0 --host 0.0.0.0 --port 8090
 Restart=on-failure
 
