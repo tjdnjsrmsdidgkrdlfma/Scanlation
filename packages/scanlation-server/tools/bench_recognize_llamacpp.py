@@ -94,37 +94,124 @@ def _parse_endpoints(spec: str) -> list[tuple[str, str]]:
     return out
 
 
+def _squash(s: str) -> str:
+    """Text with ALL whitespace removed — the key for "same reading, different wrapping".
+    Line breaks and spaces are the single most common disagreement between these
+    variants and say nothing about who read the glyphs right, so rows that only differ
+    that way must not compete for attention with real misreads."""
+    return "".join(s.split())
+
+
+def _marked(ref: str, s: str, esc) -> str:
+    """``s`` with the runs that differ from ``ref`` wrapped in <mark> — the eye goes
+    straight to the disputed glyphs instead of re-reading the whole line."""
+    out = []
+    for op, _i1, _i2, j1, j2 in difflib.SequenceMatcher(None, ref, s).get_opcodes():
+        if j1 == j2:
+            continue
+        chunk = esc(s[j1:j2])
+        out.append(chunk if op == "equal" else f"<mark>{chunk}</mark>")
+    return "".join(out)
+
+
+# Sibling of tools/compare/html.py's vote page (same .eng/data-eng/data-key +
+# localStorage convention, so the two feel like one family). Kept standalone rather
+# than importing it: that one is built around the compare harness's per-category
+# aggregation, which this bench has no notion of.
+_VOTE_JS = """
+(function(){
+  var K='llamacppsel:', tally={};
+  function refresh(){
+    document.getElementById('tally').innerHTML='선택수 — '+engs.map(function(e){
+      return '<b>'+e+'</b> '+(tally[e]||0);}).join(' &nbsp;·&nbsp; ');
+  }
+  function set(td,on){
+    var e=td.getAttribute('data-eng'), k=K+td.getAttribute('data-key');
+    if(on){td.classList.add('sel');tally[e]=(tally[e]||0)+1;try{localStorage.setItem(k,'1')}catch(x){}}
+    else {td.classList.remove('sel');tally[e]=(tally[e]||0)-1;try{localStorage.removeItem(k)}catch(x){}}
+  }
+  document.addEventListener('click',function(ev){
+    var td=ev.target.closest&&ev.target.closest('.eng'); if(!td) return;
+    set(td,!td.classList.contains('sel')); refresh();
+  });
+  document.querySelectorAll('.eng').forEach(function(td){
+    var on=false; try{on=localStorage.getItem(K+td.getAttribute('data-key'))==='1'}catch(x){}
+    if(on){td.classList.add('sel');var e=td.getAttribute('data-eng');tally[e]=(tally[e]||0)+1;}
+  });
+  document.getElementById('reset').addEventListener('click',function(){
+    document.querySelectorAll('.eng.sel').forEach(function(td){set(td,false)}); refresh();
+  });
+  refresh();
+})();
+"""
+
+_VOTE_CSS = """
+body{font:14px/1.5 system-ui,sans-serif;margin:14px;background:#1e1e1e;color:#d4d4d4}
+.legend{position:sticky;top:0;background:#1e1e1e;padding:8px 0;border-bottom:1px solid #444;z-index:3}
+table{border-collapse:collapse;width:100%}
+td,th{border:1px solid #3a3a3a;padding:.5rem;vertical-align:top;text-align:left}
+img{max-width:340px;height:auto;image-rendering:pixelated;background:#fff}
+pre{margin:0;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace}
+mark{background:#5a2d2d;color:#ffd7d7;border-radius:2px}
+.eng{cursor:pointer}
+.eng:hover{outline:1px solid #666}
+.eng.sel{background:#1f3d1f;outline:2px solid #4caf50}
+tr.ws td{background:#20262e}
+tr.same{opacity:.4}
+button{background:#333;color:#ddd;border:1px solid #555;border-radius:4px;padding:4px 10px;cursor:pointer}
+"""
+
+
 def _write_html(path: str, crops, ref_text, variants, src: str) -> None:
-    """A crop-by-crop page: the IMAGE the models were given, then every variant's text.
-    This exists because char-sim can only say outputs differ — deciding which is RIGHT
-    needs the picture, since the reference is another model's guess. Rows where the
-    variants disagree with the reference are flagged; identical rows are dimmed."""
+    """A crop-by-crop scoring page: the IMAGE the models were given, then every variant's
+    text, each cell clickable to tally "this one read it right" (persisted in
+    localStorage, like the compare harness's vote pages).
+
+    This exists because char-sim can only say outputs DIFFER — deciding which is RIGHT
+    needs the picture, since the reference is itself a model's guess. Rows are ordered
+    by how much they deserve a human's attention: real disagreements first, then ones
+    that differ only in whitespace/line breaks, then identical ones."""
     esc = html.escape
-    parts = [f"<!doctype html><meta charset='utf-8'><title>recognize compare</title>",
-             "<style>body{font:14px/1.5 system-ui;margin:2rem;max-width:1400px}"
-             "table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:.5rem;"
-             "vertical-align:top;text-align:left}img{max-width:320px;height:auto;image-rendering:pixelated}"
-             "pre{margin:0;white-space:pre-wrap;font:13px/1.45 ui-monospace,monospace}"
-             "tr.same{opacity:.45}tr.diff td{background:#fff8e1}"
-             "@media(prefers-color-scheme:dark){body{background:#111;color:#eee}td,th{border-color:#444}"
-             "tr.diff td{background:#2a2410}}</style>",
-             f"<h1>recognize compare</h1><p>{esc(src)} — {len(crops)} crops, cap {CAP_PIXELS}/{CAP_MODE}. "
-             "Rows highlighted where a variant disagrees with the reference; the reference is itself a "
-             "model output, so a disagreement is not automatically an error.</p>",
-             "<table><tr><th>#</th><th>crop (as sent)</th><th>transformers (reference)</th>"
-             + "".join(f"<th>{esc(l)}</th>" for l, _, _ in variants) + "</tr>"]
+    labels = ["transformers"] + [l for l, _, _ in variants]
+
+    rank = {"diff": 0, "ws": 1, "same": 2}
+    graded = []
     for i, crop in enumerate(crops):
-        texts = [v[1][i] for v in variants]
-        ref = ref_text[i] if ref_text else ""
-        cls = "diff" if ref_text and any(t != ref for t in texts) else "same"
-        parts.append(f"<tr class='{cls}'><td>{i}</td>"
-                     f"<td><img src='data:image/png;base64,{_png_b64(crop)}'><br>"
-                     f"<small>{crop.width}×{crop.height} = {crop.width * crop.height // 1000}k px</small></td>"
-                     f"<td><pre>{esc(ref)}</pre></td>"
-                     + "".join(f"<td><pre>{esc(t)}</pre></td>" for t in texts) + "</tr>")
-    parts.append("</table>")
+        texts = [ref_text[i] if ref_text else ""] + [v[1][i] for v in variants]
+        if not ref_text or all(t == texts[0] for t in texts):
+            cls = "same"
+        elif all(_squash(t) == _squash(texts[0]) for t in texts):
+            cls = "ws"      # same reading, different wrapping/spacing -> not a misread
+        else:
+            cls = "diff"
+        graded.append((rank[cls], i, cls, crop, texts))
+    graded.sort(key=lambda g: (g[0], g[1]))
+    n = {c: sum(1 for g in graded if g[2] == c) for c in ("diff", "ws", "same")}
+
+    P = ["<!doctype html><html lang='ja'><head><meta charset='utf-8'>",
+         "<title>recognize compare</title>", f"<style>{_VOTE_CSS}</style></head><body>",
+         "<div class='legend'><div id='tally'></div>",
+         f"<div>{esc(src)} — {len(crops)} crops, cap {CAP_PIXELS}/{CAP_MODE} &nbsp;·&nbsp; "
+         f"<b>{n['diff']}</b> 실제 불일치 &nbsp;·&nbsp; <b>{n['ws']}</b> 공백/줄바꿈만 다름 &nbsp;·&nbsp; "
+         f"<b>{n['same']}</b> 동일 &nbsp;·&nbsp; <button id='reset'>선택 초기화</button></div>",
+         "<div><small>맞게 읽은 칸을 클릭해 채점(다시 클릭하면 해제, 여러 칸 선택 가능). "
+         "레퍼런스도 모델 출력이라 틀릴 수 있으니 그림을 보고 판단. "
+         "빨간 표시는 레퍼런스와 다른 구간.</small></div></div>",
+         "<table><tr><th>#</th><th>crop (as sent)</th>"
+         + "".join(f"<th>{esc(l)}</th>" for l in labels) + "</tr>"]
+    for _r, i, cls, crop, texts in graded:
+        P.append(f"<tr class='{cls}'><td>{i}</td>"
+                 f"<td><img src='data:image/png;base64,{_png_b64(crop)}'><br>"
+                 f"<small>{crop.width}×{crop.height} = {crop.width * crop.height // 1000}k px</small></td>")
+        for label, t in zip(labels, texts):
+            body = esc(t) if label == labels[0] else _marked(texts[0], t, esc)
+            P.append(f"<td class='eng' data-eng='{esc(label)}' data-key='{i}|{esc(label)}'>"
+                     f"<pre>{body}</pre></td>")
+        P.append("</tr>")
+    P.append("</table>")
+    P.append(f"<script>var engs={json.dumps(labels)};{_VOTE_JS}</script></body></html>")
     with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(parts))
+        f.write("".join(P))
 
 
 def _report_pass(label: str, ms: list[float], rows: list) -> float:
