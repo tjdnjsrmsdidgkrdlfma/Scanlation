@@ -1,3 +1,7 @@
+# --device pins this to the MI50 (list them: llama-server --list-devices). Be
+# explicit once a second instance exists (deploy/llama.cpp-recognize.service.example
+# serves the vision model on the other GPU) — otherwise llama.cpp picks for itself
+# and can take the card the recognizer wants.
 [Unit]
 Description=llama.cpp translate server (MI50, Vulkan, gemma-4)
 After=network-online.target
@@ -5,7 +9,7 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/bin/rocm-smi -d 0 --setpoweroverdrive 150
-ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -hf unsloth/gemma-4-26B-A4B-it-qat-GGUF -ngl 99 -c 16384 --parallel 4 --n-predict 1024 --host 0.0.0.0 --port 8080
+ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -hf unsloth/gemma-4-26B-A4B-it-qat-GGUF --device Vulkan1 -ngl 99 -c 16384 --parallel 4 --n-predict 1024 --host 0.0.0.0 --port 8080
 Restart=on-failure
 
 [Install]

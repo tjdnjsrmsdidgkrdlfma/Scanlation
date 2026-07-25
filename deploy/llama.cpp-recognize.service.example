@@ -1,0 +1,29 @@
+# llama.cpp RECOGNIZE server — the vision half, a SECOND instance next to the
+# translate one (deploy/llama.cpp.service.example). Two instances because
+# llama-server holds one model: an LLM there, a vision model (+ its mmproj) here.
+#
+# Pin each to its own GPU with --device (list them: llama-server --list-devices):
+# translate on the MI50, recognize on the 9060 XT. Without --device llama.cpp picks
+# for itself and can take the card the other one wants.
+#
+# Weights: the GGUF pair (model + mmproj) of the manga fine-tune —
+#   huggingface.co/adambarbato/PaddleOCR-VL-For-Manga-GGUF
+# Needs llama.cpp build b8110+ (PaddleOCR-VL support, ggml-org/llama.cpp#18825).
+#
+# Then point the server at it: LLAMACPP_RECOGNIZE_ENDPOINT (docker-compose.yml
+# already sets host.docker.internal:8090) and pick `llama.cpp` as the recognizer
+# in /admin. Measurements: packages/scanlation-server/tools/recognize-decode-bound.md
+[Unit]
+Description=llama.cpp recognize server (9060 XT, Vulkan, PaddleOCR-VL manga)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server \
+  -m /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-BF16.gguf \
+  --mmproj /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-mmproj-BF16.gguf \
+  --device Vulkan2 -ngl 99 --temp 0 --host 0.0.0.0 --port 8090
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

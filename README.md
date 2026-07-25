@@ -223,6 +223,15 @@ cd packages/scanlation-server
 둘 다 사용자 튜닝 시스템 프롬프트 + 템플릿([scanlation_sdk/prompt.py](packages/scanlation-sdk/scanlation_sdk/prompt.py))
 공유: 번역만, OCR 오류 감안, 추론 한 문장.
 
+### 인식 백엔드 — 인프로세스 vs llama.cpp
+
+recognizer는 두 방식 중 고른다(`/admin` 인식기 목록).
+
+- **`PaddleOCR-VL-For-Manga`** — 가중치(1.8GB)를 받아 **이 프로세스의 torch**로 돌린다. GPU 없이도(느리게) 동작하고, 설치가 `/admin` 안에서 끝난다.
+- **`llama.cpp`** — 같은 모델을 **별도 `llama-server`**(GGUF + mmproj)가 서빙하고 이미지+프롬프트를 `POST /v1/chat/completions`로 보낸다. env `LLAMACPP_RECOGNIZE_ENDPOINT`(`http://127.0.0.1:8090`) — **번역용과 다른 인스턴스**다(llama-server는 모델을 하나만 문다).
+
+llama.cpp 쪽이 **per-crop ~2.2x 빠르고 VRAM은 ~1/4**이다(모델 사본이 워커마다가 아니라 서버에 하나). 병목이 GPU가 아니라 eager decode 루프의 **호스트 측 오버헤드**였기 때문 — 실측·판정 근거는 [recognize-decode-bound.md](packages/scanlation-server/tools/recognize-decode-bound.md). 대신 **모델 배포가 서버 관리자 몫**이 된다(GGUF 교체·GPU 선택 = `llama-server` 커맨드라인, 유닛 예시 [deploy/llama.cpp-recognize.service.example](deploy/llama.cpp-recognize.service.example)). 동시성은 올리지 말 것 — 호스트 오버헤드가 사라져 GPU가 이미 포화라 처리량은 1.06x인데 per-crop 지연만 3배가 된다.
+
 ---
 
 ## 설정 (env)
@@ -244,7 +253,9 @@ cd packages/scanlation-server
 | `HF_HOME` | HF 기본 | manga-ocr 가중치 캐시(Docker: `/data/hf`, 볼륨 영속) |
 | `SCANLATION_COMIC_TEXT_AND_BUBBLE_DETECTOR_MODEL` | — | RT-DETR transformers 스냅샷 **디렉터리** 명시 경로(미설정 시 `models/comic-text-and-bubble-detector/`, `install()`이 HF 레포에서 다운로드) |
 | `OLLAMA_ENDPOINT` | `…:11434/api` | ollama 백엔드 주소 (모델은 `/admin`) |
-| `LLAMACPP_ENDPOINT` | `…:8080` | llama.cpp/OpenAI 백엔드 주소 (모델은 `/admin`) |
+| `LLAMACPP_ENDPOINT` | `…:8080` | llama.cpp/OpenAI **번역** 백엔드 주소 (모델은 `/admin`) |
+| `LLAMACPP_RECOGNIZE_ENDPOINT` | `…:8090` | llama.cpp/OpenAI **인식**(vision) 백엔드 주소 — 번역용과 별도 인스턴스 |
+| `SCANLATION_RECOGNIZE_HTTP_TIMEOUT` | `120` | 위 인식 백엔드의 crop당 HTTP 타임아웃(초). 번역용 `SCANLATION_HTTP_TIMEOUT`(10)보다 훨씬 길다 — 첫 호출이 서버의 모델 로드까지 흡수 |
 
 > 모델 태그는 이제 env가 아니라 **`/admin` 엔진 옵션의 드롭다운**에서만 정합니다(백엔드에 설치된 모델을 조회). `state.json`에 영속.
 
