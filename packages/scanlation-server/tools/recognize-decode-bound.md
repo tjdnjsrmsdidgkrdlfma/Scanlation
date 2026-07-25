@@ -1,16 +1,23 @@
-# recognize가 왜 느린가 — decode는 "런치 오버헤드" 바운드 (그리고 MI50는 torch recognize 불가)
+# recognize가 왜 느린가 — decode는 호스트 오버헤드 바운드, 답은 런타임 교체(llama.cpp)
 
-작성 2026-07-25. 측정 도구: [bench_recognize_gpu_concurrency.py](bench_recognize_gpu_concurrency.py) `--profile-decode`. flash·cap·멀티워커를 다 짜낸([recognize-gpu-speed.md](recognize-gpu-speed.md)) 뒤 "그래도 recognize가 느리다 / per-crop을 더 내릴 레버가 뭐냐"를 끝까지 판 기록. **두 개의 확정 결론**: (1) MI50(gfx906)은 torch recognize에 못 쓴다, (2) cap을 켠 프로덕션 스택에서 recognize decode는 대역폭도 연산도 아니라 **커널 런치 오버헤드 바운드**다 — 이게 양자화·MI50 아이디어를 둘 다 죽이고, 남은 레버를 `torch.compile`/static cache로 좁힌다.
+작성 2026-07-25. 측정 도구: [bench_recognize_gpu_concurrency.py](bench_recognize_gpu_concurrency.py) `--profile-decode`, [bench_recognize_llamacpp.py](bench_recognize_llamacpp.py). flash·cap·멀티워커를 다 짜낸([recognize-gpu-speed.md](recognize-gpu-speed.md)) 뒤 "그래도 recognize가 느리다 / per-crop을 더 내릴 레버가 뭐냐"를 끝까지 판 기록.
+
+**결론 세 줄:**
+1. cap을 켠 스택에서 per-crop은 **~95%가 decode**이고, 그 decode는 대역폭도 연산도 아닌 **호스트 측 오버헤드**다(steady/token이 crop 크기와 무관하게 flat ~64ms, weight read 9% + compute <1%).
+2. 그래서 **torch 안의 레버는 전부 죽는다** — 양자화도, MI50도, `torch.compile`도(§1·§4).
+3. 답은 튜닝이 아니라 **런타임 교체**였다. 같은 모델을 llama.cpp가 서빙하면 **per-crop 2.2x·VRAM 1/4**이고, 그게 진단(호스트 오버헤드)의 경험적 확증이다(§5).
 
 ## 결론 먼저
 
 | 레버 | 판정 | 근거 |
 |---|---|---|
-| **양자화 (weight-only INT8/INT4)** | ❌ 폐기 | decode의 weight read가 토큰당 ~5.6ms로 **전체의 ~9%**뿐. 작은 모델(0.9B)이라 줄일 여지 자체가 작다 |
-| **MI50로 recognize** | ❌ 폐기 | torch rocm7.0 rocBLAS에 **gfx906 Tensile 라이브러리가 없음** — 로드는 되지만 첫 matmul에서 죽는다 |
-| **동시성 W4·K2** | ✅ 채택(무료 1.5x) | 오버헤드 바운드 decode는 런치 사이 GPU가 놀아, 워커가 그 유휴를 채우는 게 정확히 이 상황 ([recognize-gpu-speed.md](recognize-gpu-speed.md) §동시성) |
+| **llama.cpp로 서빙** | ✅ **채택 — 2.2x, VRAM 1/4** (§5) | Python/torch 디스패치 계층이 없어 오버헤드를 애초에 안 문다. 정확도는 실질 동등 |
+| **동시성 W4·K2** | ✅ 채택(무료 1.5x) — **단 transformers 한정** | 오버헤드로 GPU가 놀 때만 유효. llama.cpp에선 GPU가 포화라 **1.06x뿐이니 c=1로 둘 것**(§5) |
+| **양자화 (weight-only INT8/INT4)** | ❌ 폐기(transformers 기준) | decode의 weight read가 토큰당 ~5.6ms로 **전체의 ~9%**뿐. 작은 모델(0.9B)이라 줄일 여지 자체가 작다 |
+| **MI50로 recognize** | ❌ 폐기 | torch rocm7.0 rocBLAS에 **gfx906 Tensile 라이브러리가 없음** — 로드는 되지만 첫 matmul에서 죽는다. (llama.cpp는 gfx906에서 도니 **이 판정은 torch 한정**이다) |
 | **decode 오버헤드 제거** (`torch.compile` / HIP graph) | ❌ **실측 폐기(이 스택)** — §4 | 벽 다 넘어도 inductor+dynamic는 **1.11x뿐** + **출력 2/8 오독**(っ→コ·♥→✓) + ~11s/shape라 dynamic-res서 상각 불가. 큰 이득(그래프 캡처)은 동적 shape과 원천 충돌 |
-| **manga-ocr로 전환/하이브리드** | 🔸 정확도 트레이드 대안 | 더 가벼운 recognizer. 단 오버헤드 바운드면 이득 메커니즘이 달라 자체 벤치 필요 |
+| vLLM / SGLang / FastDeploy / ONNX / OpenVINO | ❌ 조사 단계에서 배제 | RDNA4에서 vLLM은 Docker 기동 버그 미해결 + 최적화 커널 부재(커뮤니티 실측: **llama.cpp Vulkan이 vLLM ROCm보다 29% 빠름**), FastDeploy는 AMD 미지원, ONNX는 export 경로 자체가 없음(optimum "not planned"), OpenVINO는 Intel 전용 |
+| **manga-ocr로 전환/하이브리드** | 🔸 보류 | 정확도 트레이드 대안. llama.cpp가 정확도 손실 없이 2.2x를 줬으므로 **당장은 불필요** |
 
 ## 측정 셋업
 
@@ -63,7 +70,7 @@ torch rocm7.0의 rocBLAS가 **gfx906 Tensile 라이브러리를 안 담고** 있
 2. **decode가 압도적으로 지배** — per-crop ≈ prefill + tokens × ~64ms. 18토큰 crop ≈ 1.2s, 34토큰 ≈ 2.3s로 프로덕션 로그의 per-crop과 일치.
 3. **steady/token이 크롭 크기(32k~148k)와 무관하게 ~64ms로 완전히 FLAT.**
 
-## 3. decode는 대역폭도 연산도 아니라 "런치 오버헤드" 바운드
+## 3. decode는 대역폭도 연산도 아니라 호스트 오버헤드 바운드
 
 steady/token이 크롭 크기에 **안 늘어난다**는 건 vision-attention(KV 캐시 읽기)이 병목이 아니라는 결정적 증거다(그랬다면 큰 crop = 더 많은 vision 토큰 = 토큰당 느려야 함). 그럼 ~64ms의 정체를 분해하면:
 
@@ -71,9 +78,11 @@ steady/token이 크롭 크기에 **안 늘어난다**는 건 vision-attention(KV
 |---|---|---|
 | weight read (1.8GB ÷ ~320 GB/s) | ~5.6ms | ~9% |
 | compute (2×0.9B FLOP ÷ 수십 TFLOPS) | ~0.2ms | <1% |
-| **커널 런치 / 디스패치 오버헤드** | **~58ms** | **~90%** |
+| **잔차 = 호스트 측 오버헤드** | **~58ms** | **~90%** |
 
-0.9B 모델이 **~15.6 tok/s**면 이 하드웨어 능력 대비 비정상적으로 느리다 — B=1 eager decode가 스텝마다 수많은 작은 커널을 launch하고 그 런치 레이턴시·파이썬 루프가 지배하는 전형적 그림이다. **대역폭 바운드(내가 처음 말한 것)도, 연산 바운드도 아니고, 레이턴시/런치 오버헤드 바운드가 정답.**
+0.9B 모델이 **~15.6 tok/s**면 이 하드웨어 능력 대비 비정상적으로 느리다 — GPU가 바빠서가 아니라 **놀아서** 느린 것이고, B=1 eager decode가 스텝마다 작은 커널 수백 개를 던지는 전형적 그림이다.
+
+> **잔차의 내부 구성은 증명하지 않았다.** 문서화된 커널 런치 비용은 토큰당 50~100µs 규모라 58ms와 세 자릿수 차이다 — 즉 순수 런치뿐 아니라 per-token CPU↔GPU 동기화, HF `generate` 루프의 파이썬 오버헤드 등이 섞여 있다. **확실한 건 "대역폭도 연산도 아닌 호스트 측"이라는 것**이고, 그거면 레버를 고르는 데 충분하다(원인이 런치든 sync든 파이썬이든 처방이 같다 — 그 계층을 없애는 것). §5의 llama.cpp 2.2x가 이 진단의 경험적 확증이다.
 
 이게 레버 랭킹을 바꾼다:
 - **양자화**는 그 ~9% weight read만 줄인다 → 잘해야 5~7%. 작은 모델이라 상한 자체가 낮다. **폐기.**
@@ -105,12 +114,35 @@ decode가 런치 오버헤드 바운드니 `torch.compile`(런치 제거)이 이
 
 → **이 스택에서 `torch.compile`은 실측으로 폐기.** 프로브 스크립트는 남겨둔다(스택/모델이 바뀌면 재실행).
 
+## 5. 답은 런타임 교체 — llama.cpp (채택)
+
+torch 안의 레버가 다 막힌 뒤 "공식/커뮤니티에 우리가 안 본 게 있나"를 웹 조사해 나온 결론: **llama.cpp가 PaddleOCR-VL을 지원**하고([ggml-org/llama.cpp#18825](https://github.com/ggml-org/llama.cpp/pull/18825), build **b8110+**), **우리가 쓰는 fine-tune의 GGUF가 이미 공개**돼 있다([adambarbato/PaddleOCR-VL-For-Manga-GGUF](https://huggingface.co/adambarbato/PaddleOCR-VL-For-Manga-GGUF)). 이게 정확히 §3 진단의 처방이다 — llama.cpp엔 Python/torch 디스패치 계층이 아예 없어 그 오버헤드를 안 문다. 게다가 translate가 이미 llama.cpp라 인프라·플러그인 패턴이 이미 있었다.
+
+**실측** ([bench_recognize_llamacpp.py](bench_recognize_llamacpp.py), 같은 42 crop·같은 cap, 9060 XT / Vulkan 빌드 `--device Vulkan2`):
+
+| 구성 | crops/sec | per-crop med | per-crop max | VRAM |
+|---|---|---|---|---|
+| transformers 순차 | 0.558 | 1742ms | 5014ms | ~1.9GB |
+| transformers 프로덕션(W4·K2) | ~0.77 | 4369ms | — | **7.7GB** |
+| **llama.cpp c=1** | **1.242 (2.2x)** | ~800ms | — | **1.8GB** |
+| llama.cpp c=4 | 1.326 | 2646ms | 6712ms | 1.8GB |
+
+- **per-crop 2.2x, 프로덕션 대비 ~1.6x, VRAM 4.3배 절감**(모델 사본이 워커마다가 아니라 서버에 하나), **꼬리 지연 5x**(max 5014→1011ms, 편차 19배→1.4배).
+- **동시성은 쓰지 않는다.** c=4는 처리량 1.06x인데 per-crop이 3.3배 느려진다 — 호스트 오버헤드가 사라져 **GPU가 이미 포화**라 채울 유휴가 없다. transformers에서 W=4가 1.38x를 벌던 것과 정반대이고, 이 대비 자체가 §3 진단의 확증이다.
+- **정확도는 실질 동등.** 42개 중 24 동일 + 11 표기차(`...`↔`・・・`, ♥ 개수/♥↔♡, 줄바꿈, `?`↔`？`) = **35/42**. 나머지는 **개선 3**(`ばつかり`→`ばっかり`, `::`→`・・・` 2건 — transformers의 기존 결함을 고침) 대 **악화 4**(#4 truncation 4줄→1줄이 유일한 실손실, #6·#26 오독, #20 소소). c=4의 diff 목록이 c=1과 완전히 동일 → 동시성이 correctness를 안 건드리고 결정적이다.
+
+**대가**: 모델 배포가 서버 관리자 몫이 된다(GGUF 교체·GPU 선택 = `llama-server` 커맨드라인). 그리고 **유휴 언로드가 사라진다** — llama-server는 프로세스 수명 동안 모델을 붙들어 9060 XT가 D3hot(~0W)로 못 내려가고 **상시 ~15W**를 먹는다([idle_unload](../app/idle_unload.py)는 이 engine에 대해 HTTP 클라이언트만 닫는 no-op이 된다). 회수하려면 llama-swap 류의 TTL 프록시가 필요하다(콜드스타트는 로그상 **~1.9초**라 싸다).
+
+**구현**: `scanlation-llama-cpp` 플러그인에 engine 추가([recognizer.py](../../scanlation-llama-cpp/scanlation_llama_cpp/recognizer.py)) — translator는 무수정, transformers 경로도 `/admin`에 그대로 남아 폴백 가능. env `LLAMACPP_RECOGNIZE_ENDPOINT`(기본 `:8090`), 유닛 예시 [deploy/llama.cpp-PaddleOCR-VL-For-Manga.service.example](../../../deploy/llama.cpp-PaddleOCR-VL-For-Manga.service.example).
+
 ## 남은 일
 
-per-crop 레버(양자화·MI50·`torch.compile`)가 전부 이 스택에서 막혔다. per-crop은 현재 바닥(~1.34s med, flash+cap 적용)이고, "여러 장 동시"의 급성 문제는 동시성(W4·K2)으로 이미 풀렸다. 남은 선택지는 둘:
+**torch 스택의 per-crop 레버는 전부 막혔고**(양자화·MI50·`torch.compile`), 그 벽은 llama.cpp로 우회했다. 이제 남은 튜닝은 **llama.cpp 안쪽**이다 — 토큰당 ~26ms가 대역폭 roofline(~1.9ms)의 13배라 아직 여유가 있다:
 
-- **현상 유지** — 정확도(PaddleOCR-VL 88%, no weak category)를 지키고 per-crop 바닥을 받아들인다.
-- **manga-ocr로 전환/하이브리드** — 훨씬 가벼운 recognizer로 per-crop을 크게 줄이되 정확도를 트레이드. 채택 전 [tools/compare](compare/)로 정확도, 자체 벤치로 속도를 실측.
+- **`-fa`(flash attention)** — 켜져 있는지 미확인. vision prefill에 유효할 수 있다.
+- **양자화 재도전 (Q8_0 → Q4)** — 지금은 **BF16**(936MB)이다. §3에서 양자화를 기각한 건 "weight read가 9%"라는 **transformers 기준**인데, 호스트 오버헤드가 사라진 지금은 병목이 옮겨가 전제가 다르다. `llama-quantize`로 만들어 같은 벤치로 속도·정확도를 재면 된다.
+- **llama-swap** — 위 ~15W(D3hot 상실) 회수.
+- **PaddleOCR-VL 1.5/1.6** — 공식 GGUF가 있으나 **만화 fine-tune을 잃어** 정확도가 눈에 띄게 떨어졌다(별도 확인). 제외.
 
 ## 관련
 
