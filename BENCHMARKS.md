@@ -196,9 +196,9 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 | **2** | 25.2s | **0.832 p/s (×1.68)** | 1367ms | 92°C |
 | 4 | 20.0s | 1.05 p/s (×2.13) | 1694ms | **100°C(crit)** |
 
-**동시성 4는 20초 만에 junction crit에 닿는다** — 현 냉각으론 지속 운용 부적합. 냉각 보강 후 재평가한다.
+**동시성 4는 구냉각에서 20초 만에 junction crit에 닿았다.** 냉각 1차 보강(ARCTIC 맨팬 1개) 후 포화 P4가 78°C로 완주한다 — 파이프라인 동시성 4 재평가(지속 부하)가 열렸고, 운영값은 아직 2다.
 
-**공급을 포화시킨 격리 측정**(백로그 무한 공급 가정, [bench_translate_concurrency.py](packages/scanlation-server/tools/bench_translate_concurrency.py))에서는 P4가 P2 대비 **+22%**가 실재한다(1.23 → 1.49 req/s). 수확체감의 절반은 요청당 유니크 프롬프트의 **prefill 고정비**라 슬롯을 늘려도 안 줄어든다.
+**공급을 포화시킨 격리 측정**(백로그 무한 공급 가정, [bench_translate_concurrency.py](packages/scanlation-server/tools/bench_translate_concurrency.py))에서는 P4가 P2 대비 **+22%**가 실재한다(1.23 → 1.49 req/s). 수확체감의 절반은 요청당 유니크 프롬프트의 **prefill 고정비**라 슬롯을 늘려도 안 줄어든다. 냉각 1차 보강 후 재실측(2026-07-26, 맨팬 ~6,500rpm)은 **스로틀 없이 P1/P2/P4 완주 — 1.03/1.39/1.64 req/s(피크 81/89/78°C)**. 구 수치는 부분 스로틀 속의 값이었고, 천장은 **1.64 req/s**다.
 
 **서버 설정 비용** — `-c`도 `--parallel`도 필요 최소로 둔다.
 
@@ -219,11 +219,11 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 
 MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지속 부하가 과열 → PCIe 버스 이탈 → amdgpu hang으로 이어진 실측이 있고, 포화 벤치 연타 뒤엔 **성능 latch**도 관측됐다 — 클럭·PCIe·전력 캡이 전부 정상인데 단일요청 decode가 89~95 → **62~64 t/s로 잠기고 idle로는 안 풀린다**(재부팅으로 즉시 복구). 판별기는 [diag_runaway.py](packages/scanlation-server/tools/diag_runaway.py) 1발이고, 판독은 `--parallel 4` 기준 3단계다: **~90 = 건강 / ~80~85 = 건강+열**(고온 누설전류가 클럭을 깎는 가역 효과) **/ ~62~64 = latch → 재부팅.**
 
-**단, 판독 전에 슬롯 수부터 본다.** 오래 미해결로 남아 벤치를 중단시켰던 "상한 ~74"는 카드가 아니라 **유닛이 `--parallel 8`로 드리프트한 것**이었다 — 콜드 부팅으로도 안 풀렸고 열·클럭·캡·PCIe가 전부 정상이었으며, 슬롯을 4로 되돌리자 89.3으로 복귀했다. 서멀 인터페이스 열화 가설은 기각됐고 벤치는 재개 가능하다.
+**단, 판독 전에 슬롯 수부터 본다.** 오래 미해결로 남아 벤치를 중단시켰던 "상한 ~74"는 카드가 아니라 **유닛이 `--parallel 8`로 드리프트한 것**이었다 — 콜드 부팅으로도 안 풀렸고 열·클럭·캡·PCIe가 전부 정상이었으며, 슬롯을 4로 되돌리자 89.3으로 복귀했다. 서멀 인터페이스 열화 가설은 기각됐고 벤치는 재개 가능하다. 이 드리프트는 재발한다 — 2026-07-26에도 프로덕션 유닛이 8인 채 돌던 걸 열 벤치의 73.6 t/s가 다시 잡아 유닛과 deploy 예시를 4로 고정했다(89.7 복귀).
 
 - **보드는 GPU 온도를 모른다** — SYS_FAN 헤더는 CPU/보드 온도로 돈다. BIOS 팬커브로는 해결 불가, `fancontrol`로 `amdgpu` 온도에 매핑해야 한다.
 - **판단 기준은 `junction`(temp2)과 `mem`(temp3)** — `edge`는 느긋하다. Vega20는 HBM2가 먼저 병목되는 경우가 많다.
-- 확정 하드웨어: ARCTIC S4028-15K + 3D 프린팅 쉬라우드, **소음 상한 8,000~9,000 rpm**(냉각 설계의 하드 제약). 2팬 vs 3팬은 실물 A/B로 결정 — **팬·쉬라우드 도착 대기 중**이라 실측 태스크가 하드웨어 게이트다.
+- 확정 하드웨어: ARCTIC S4028-15K + 3D 프린팅 쉬라우드, **소음 상한 8,000~9,000 rpm**(냉각 설계의 하드 제약). 현재 **1팬 맨팬 가동**(SYS_FAN2, `nct6687` 아웃오브트리 드라이버로 OS 제어) — 이 상태로 포화 P1/P2/P4가 완주한다. 남은 게이트: 쉬라우드 2팬 vs 3팬 A/B와 `fancontrol` 영구화([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md) Task 2~5).
 
 ## ROCm 재도전 — 실험 완료: 된다, 그러나 빠르지는 않다
 
@@ -231,14 +231,14 @@ MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지
 
 - **된다. 패치도 되공급도 필요 없었다** — `-DGGML_HIP=ON -DGPU_TARGETS=gfx906` 빌드로 warmup이 그냥 통과했다. 이 문서가 유력하게 봤던 **`SOLVE_TRI` 오컴파일 가설은 불필요**했고, 과거 "HIP는 segfault"의 원인은 **빌드 타깃이 `gfx1200`이었던 것**으로 보인다(MI50용 코드가 없는 바이너리로 시험한 셈).
 - **성능은 동률** — decode 88.1 vs Vulkan 89.3, prefill 412.5 vs 410.3. 기대했던 **prefill 우위는 1.13x에 그쳐** 채택 기준(1.3x) 미달이다.
-- **배칭 스케일은 측정 불가** — P2·P4 포화는 62~65°C에서 시작해도 각각 94·96°C에 닿아 중단된다. **현 냉각으로 완주 가능한 건 P1뿐**이고, 그마저 43초 연속 부하로 101°C까지 간다. 냉각 보강이 선행 조건.
+- **배칭 스케일은 당시 측정 불가였다** — P2·P4 포화가 62~65°C에서 시작해도 각각 94·96°C에 닿아 중단됐고, 완주 가능한 건 P1뿐(그마저 43초 연속 부하로 101°C). 냉각 1차 보강 후 완주 실측은 §번역 GPU의 포화 절 참조.
 - **그래서 백엔드는 Vulkan을 유지한다.** ROCm이 열어준 선택지(ollama)도 시도했지만 옆 카드의 recognize를 죽여 기각했다([translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md)).
 
 ## 남은 일
 
 - **다음 레버가 여기다**(파이프라인의 62%). 2026-07-16 스윕의 열 상한은 그대로지만 **공급이 바뀌었다** — 그때는 "다음 병목은 CPU recognize 직렬화"로 끝났는데 지금은 lockwait이 0이라 translate 슬롯이 처음으로 제대로 채워진다. 같은 동시성에서 더 나올 여지가 있다.
 - **translate에 idle 언로드는 두지 않는다** — MI50가 D3에 못 가서 VRAM 회수의 절전 이득이 0이고, 첫 요청 재로드(~5초)만 붙는다. 카드가 바뀌면(D3 되는 GPU) 다시 볼 항목이다.
-- 냉각 보강 → 동시성 4 재평가(+22% 회수). **P2조차 포화에서 94°C**라 현 냉각으로 측정 가능한 건 P1뿐이다.
+- ~~냉각 보강 → 포화 동시성 재평가~~ **완료 (2026-07-26)** — 맨팬 1개(~6,500rpm)로 P1/P2/P4 완주, 천장 1.49 → **1.64 req/s**(+22% 회수 확인). 남은 것: **파이프라인 레벨 동시성 4 재평가**(지속 부하, 운영값은 아직 2), 쉬라우드 A/B·`fancontrol`([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md) Task 2~5).
 - ~~**recognize를 온디맨드로**~~ **완료** — systemd socket activation(socket + `systemd-socket-proxyd --exit-idle-time=5min` + `StopWhenUnneeded`)으로 8090을 온디맨드화했다. 유휴 시 3.74GB → 0.06GB, 콜드 스타트 2.0초. 공개 포트가 그대로라 플러그인 설정은 안 바뀐다. ※ **recognize를 ollama로 옮기는 건 불가** — ollama 변환기가 `PaddleOCRVLForConditionalGeneration`을 지원하지 않고, 이미 있는 mmproj GGUF를 붙일 Modelfile 지시자도 없다(bare GGUF는 `model does not support multimodal requests`).
 
 ---

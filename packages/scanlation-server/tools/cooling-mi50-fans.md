@@ -2,7 +2,7 @@
 
 작성 2026-07-20. MI50(패시브 서버 카드)를 데스크톱 섀시에서 능동 공랭하기 위한 팬/쉬라우드/`fancontrol` 설정 계획 + 실행 런북. 배경과 기존 쿨링 관측(무냉각 크래시·전력 캡·온도 임계값)은 [translate-gpu-mi50.md §MI50 쿨링](translate-gpu-mi50.md#mi50-쿨링--능동-냉각-필수)에 있고, 여기서 반복하지 않는다.
 
-> **상태 (2026-07-20):** 새 팬(**ARCTIC S4028-15K**)과 쉬라우드 **2종(2팬용·3팬용)** 실물 **도착 대기 중**. 도착 전엔 **Task 1(센서 확정)·Task 5(온도 알람)** 만 서버에서 실행 가능하고, **실측 Task 2/3/4는 하드웨어 게이트**(새 팬 없이 PWM 커브 측정·쉬라우드 A/B는 무의미). 현재 달린 냉각은 NF-A4x10 40mm 직결 송풍(idle 68→48°C).
+> **상태 (2026-07-26):** 팬·쉬라우드 실물 도착. **ARCTIC 1개를 맨팬으로 가동 중**(SYS_FAN2 헤더, 수동 35% ≈ 6,500rpm) — 이 상태로 포화 P1/P2/P4가 완주했다(피크 81/89/78°C, [translate-gpu-mi50.md §신냉각 1차 실측](translate-gpu-mi50.md)). **Task 1 완료**(결과 아래), 남은 것은 쉬라우드 장착 후 **Task 2(매핑)·3(2팬 vs 3팬 A/B)·4(fancontrol)·5(알람)**.
 
 ## 하드웨어 확정 사항 (조사·실측 완료, 재논의 불필요)
 
@@ -36,6 +36,16 @@
 - `sensors` 출력에서 `amdgpu` hwmon을 찾고, temp1/temp2/temp3이 각각 edge/junction/mem 중 무엇인지 매핑 확정 후 보고(라벨은 드라이버 버전마다 다를 수 있으니 추측 금지, 실제 출력으로 확인).
 - 보드 팬 제어 칩(`nct6775` 등) hwmon과 `pwmX` 경로도 확인.
 - 참고: 기존 관측상 `rocm-smi --showtemp`가 edge·junction·mem 셋 다 노출하고, amdgpu crit은 junction 100/emerg 105, mem crit 94/emerg 99 — Task 1은 hwmon `tempN` 라벨을 이 값에 대응시켜 최종 확정만 하면 됨.
+
+**결과 (2026-07-26) — 완료.**
+
+- **MI50** = PCI `0000:03:00.0`, amdgpu hwmon의 `temp1/2/3` 라벨 = **edge/junction/mem** (라벨 실측 확인).
+- **보드 팬 칩 = NCT6687D**(MSI PRO B850M-A WIFI). EL10 커널엔 드라이버가 없어(`nct6683` 모듈 미탑재) [Fred78290/nct6687d](https://github.com/Fred78290/nct6687d)를 빌드해 `/lib/modules/$(uname -r)/extra/` + `modules-load.d`로 영구 로드했다. **Secure Boot는 무서명 모듈을 거부하므로 꺼야 한다**(BIOS에서 Disabled 처리됨). **커널 업데이트 시 재빌드 필요.**
+- **ARCTIC 팬 채널 = `nct6687` hwmon의 ch4**(라벨 "System Fan #2"). 수동 제어: `pwm4_enable`에 1 → `pwm4`에 0~255.
+- **EC 특성 (Task 2/4에서 반드시 감안):**
+  - **duty 바닥 강제** — pwm 0을 써도 ~4,360rpm 아래로 안 내려간다.
+  - **맨팬 duty↔rpm 실측**: 0/5/10/20/30/35/40% → 4,360/4,437/5,033/5,681/6,097/6,465/6,976rpm. §하드웨어의 "50% = 8,000rpm 선형"보다 훨씬 평평하다 — 상단 구간과 8,500rpm duty 확정은 Task 2에서(쉬라우드 장착 후).
+  - **쓴 값을 EC가 서서히 수렴**시킨다(직후 readback이 목표값과 다름, rpm 반영도 수십 초 지연 가능). dmesg의 `MSI fan brute force mode: disabled` — fancontrol 배포 시 nct6687d의 brute-force 모듈 파라미터 활성화를 검토할 것.
 
 ## Task 2 — PWM↔rpm 매핑 측정 (새 ARCTIC 팬 장착 후)
 
