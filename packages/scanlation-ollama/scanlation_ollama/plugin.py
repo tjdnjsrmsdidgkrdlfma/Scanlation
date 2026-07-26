@@ -11,6 +11,9 @@ the user's own tuned setup (clean-room, not the GPLv3 Crivella plugin). Key tuni
                     string never closes -> parse fail -> per-text fallback. repeat_penalty
                     is flat (often can't break a confident loop); frequency_penalty
                     escalates with the repeat count and does. Both default to neutral.
+  * num_predict=1024 -> last-resort cap on a runaway's GPU time when the penalties
+                    miss, since ollama has no daemon-level equivalent of
+                    llama-server's `--n-predict`.
 
 ollama runs as a separate service (env OLLAMA_ENDPOINT, default
 http://127.0.0.1:11434/api). The client lifecycle + guardrails live in
@@ -33,6 +36,7 @@ class OllamaTranslator(HttpTranslatorBase):
     OPTION_SCHEMA = {
         "model": {"type": str, "default": "", "description": "ollama model tag (e.g. gemma4:31b). Required — pick it in /admin."},
         "num_ctx": {"type": int, "default": 2048, "description": "KV-cache context window (holds a whole image's batch + its translations)."},
+        "num_predict": {"type": int, "default": 1024, "description": "Hard cap on generated tokens per request — the backstop that bounds a runaway loop's GPU time even if the penalties above fail. Must stay below num_ctx to bite. -1 = unlimited (not recommended)."},
         "num_gpu": {"type": int, "default": 31, "description": "Layers to offload to GPU."},
         **COMMON_LLM_OPTIONS,  # temperature, seed, top_p
         "repeat_penalty": {"type": float, "default": 1.1, "description": "Flat repetition penalty (ollama default 1.1 = neutral). Divides a repeated token's score once — often can't break a confident SFX loop. Prefer frequency_penalty for that."},
@@ -59,6 +63,7 @@ class OllamaTranslator(HttpTranslatorBase):
             "frequency_penalty": options["frequency_penalty"],
             "num_gpu": options["num_gpu"],
             "num_ctx": options["num_ctx"],
+            "num_predict": options["num_predict"],
         }
 
     def _body(self, model: str, system: str, prompt: str, options: dict) -> dict:

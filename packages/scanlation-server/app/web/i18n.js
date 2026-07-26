@@ -50,6 +50,7 @@ const I18N = {
     "opt.comic-text-and-bubble-detector.contain_thresh": "작은 박스가 큰 박스에 이 비율↑ 포함되면 제거 (IoS; 1.0 = 끔)",
     "opt.Ollama.model": "ollama 모델 태그 (예: gemma4:31b). 필수 — /admin에서 선택",
     "opt.Ollama.num_ctx": "KV 캐시 컨텍스트 창 (번역 입력은 짧음)",
+    "opt.Ollama.num_predict": "요청당 생성 토큰 상한 — 위 penalty가 실패해도 폭주의 GPU 시간을 끊는 마지막 방어선. num_ctx보다 낮아야 작동. -1 = 무제한(비권장)",
     "opt.Ollama.num_gpu": "GPU로 오프로드할 레이어 수",
     "opt.Ollama.repeat_penalty": "반복 억제 (flat, ollama 기본 1.1). 점수를 한 번만 나눠서 강한 SFX 루프는 못 끊는 경우가 많음 — 그건 frequency_penalty로.",
     "opt.Ollama.frequency_penalty": "반복 횟수에 비례해 점수를 깎음(escalating). repeat_penalty로 안 잡히는 SFX·의성어 무한반복(으으으…)을 끊음. ~1.0~2.0 권장, 0 = 끔.",
