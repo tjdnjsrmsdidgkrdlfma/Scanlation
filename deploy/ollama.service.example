@@ -1,3 +1,11 @@
+#  NOT DEPLOYED -- kept for reference only.
+#  ollama was tried as the translate backend and rejected: with the pipeline running,
+#  it wedges the OTHER GPU (the recognize card) into a compute-ring reset, and no
+#  device-pinning env stops it. See
+#  packages/scanlation-server/tools/translate-ollama-gfx906.md. translate runs on
+#  llama.cpp/Vulkan -- see llama.cpp-gemma-4-26B-A4B.service.example.
+#  If you retry ollama, isolate the device at the container level rather than by env.
+
 [Unit]
 Description=ollama (self-built for gfx906: vulkan + rocm_v7_2)
 After=network-online.target

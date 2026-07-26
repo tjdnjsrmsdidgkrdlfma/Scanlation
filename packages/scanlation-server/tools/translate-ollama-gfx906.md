@@ -1,8 +1,10 @@
-# translate 백엔드 — llama.cpp에서 ollama로 (gfx906 커스텀 빌드)
+# translate 백엔드 — ollama를 gfx906에 올려보고 되돌린 기록
 
-작성 2026-07-26. translate를 llama-server에서 **직접 빌드한 ollama**로 옮긴 기록. 왜 옮겼는지·어떻게 빌드했는지·무엇을 잃고 무엇을 얻었는지, 그리고 그 과정에서 드러난 함정 둘. ROCm이 gfx906에서 되는지에 대한 규명은 [translate-gpu-mi50-rocm.md](translate-gpu-mi50-rocm.md), MI50 도입·폭주·냉각 전반은 [translate-gpu-mi50.md](translate-gpu-mi50.md).
+작성 2026-07-26. **결론: 기각. translate는 llama.cpp Vulkan을 유지한다.** ollama는 gfx906에서 빌드해 돌리는 것까지 성공했지만, **두 번째 GPU에서 도는 recognize를 죽인다** — 파이프라인이 양쪽 카드를 동시에 쓰면 9060 XT가 `vk::DeviceLostError`로 넘어간다(§기각 사유). ROCm이 gfx906에서 되는지에 대한 규명은 [translate-gpu-mi50-rocm.md](translate-gpu-mi50-rocm.md), MI50 도입·폭주·냉각 전반은 [translate-gpu-mi50.md](translate-gpu-mi50.md).
 
-## 왜 옮겼나 — 성능이 아니라 운영 기능
+이 문서를 남기는 이유: **ollama를 gfx906에서 빌드·구동하는 방법은 유효한 자산**이고(공식 이미지는 여전히 안 된다), 재시도할 사람이 같은 벽을 다시 만나지 않게 하기 위해서다.
+
+## 왜 옮기려 했나 — 성능이 아니라 운영 기능
 
 성능만 보면 옮길 이유가 없었다. 같은 모델·같은 조건에서:
 
@@ -14,8 +16,34 @@
 
 옮긴 이유는 **llama-server가 구조적으로 못 주는 것** 둘이다.
 
-- **idle 언로드.** translator는 서버 프로세스 밖의 HTTP 백엔드라 [registry.py](../app/registry.py)의 `idle_candidates`가 구조적으로 배제한다(`LOCAL_ROLES = ("detector", "recognizer")`). 즉 `model_idle_unload_minutes`는 torch 엔진 전용이고, translate LLM의 VRAM은 **서버가 회수할 수단이 없다.** systemd로 상주하는 llama-server는 MI50의 ~17GB를 24/7 붙잡았다. ollama는 `OLLAMA_KEEP_ALIVE`로 이 일을 대신한다.
+- **idle 언로드.** translator는 서버 프로세스 밖의 HTTP 백엔드라 [registry.py](../app/registry.py)의 `idle_candidates`가 구조적으로 배제한다(`LOCAL_ROLES = ("detector", "recognizer")`). 즉 `model_idle_unload_minutes`는 torch 엔진 전용이고, translate LLM의 VRAM은 **서버가 회수할 수단이 없다.** systemd로 상주하는 llama-server는 MI50의 ~16GB를 24/7 붙잡는다. ollama는 `OLLAMA_KEEP_ALIVE`로 이 일을 대신한다.
 - **모델 스왑.** llama-server는 런치 시 `-hf`로 한 모델만 올리고 요청의 `model` 필드를 무시한다 — `/admin`의 모델 드롭다운이 사실상 장식이었다. ollama는 `/api/tags`가 설치된 전 모델을 반환하고 요청의 `model`이 실제로 스왑을 일으킨다.
+
+**단, 첫 번째 동기는 사후에 무너졌다** — idle 언로드는 **socket activation으로 llama.cpp에서도 얻을 수 있다**(§recognize에서 실증). 프로세스째 내려가니 오히려 상위집합이다. 그리고 MI50는 카드 특성상 어차피 D3에 못 가므로, translate 쪽에서 얻을 수 있었던 건 VRAM 회수뿐이었고 그 값이 아래 리스크를 정당화하지 못했다.
+
+## 기각 사유 — ollama가 옆 카드의 recognize를 죽인다
+
+증상: 파이프라인을 연속으로 돌리면 **9060 XT가 커널 레벨에서 리셋**되고 recognize llama-server가 죽는다(`Restart=on-failure`로 재기동되지만 그 요청은 실패). 하루에 26회 관측.
+
+```
+amdgpu 0000:09:00.0: ring comp_1.1.0 timeout, signaled seq=2113, emitted seq=2115
+amdgpu: reset compute queue (1:1:0)
+[drm] device wedged, but recovered through reset
+→ llama-server: terminate called after throwing 'vk::DeviceLostError'
+```
+
+변수를 하나씩 갈라 얻은 표. **ollama와 파이프라인이 함께 돌 때만 터진다**:
+
+| 구성 | 결과 |
+|---|---|
+| ollama 실행 + recognize만(`--no-translate`) | ✅ 3/3, DeviceLost 0 |
+| ollama 정지 + 전체 파이프라인 | ✅ recognize 정상(translate만 백엔드 부재로 실패), DeviceLost 0 |
+| **ollama 실행 + 전체 파이프라인** | ❌ DeviceLost |
+| **llama.cpp translate + 전체 파이프라인** | ✅ **5/5, DeviceLost 0, 0.437 p/s** (기준선 0.43 p/s 재현) |
+
+**env 핀으로 막지 못한다.** 두 네임스페이스를 모두 MI50로 묶어도(`ROCR_VISIBLE_DEVICES=<UUID>` + `GGML_VK_VISIBLE_DEVICES=1`) 터졌고, ollama를 **Vulkan 백엔드로 돌려 양쪽 카드를 모두 Vulkan으로 통일해도** 터졌다(`OLLAMA_LLM_LIBRARY=vulkan`). ollama가 모델을 올리는 카드는 로그상 MI50 하나였다(`using device Vulkan0 … 0000:03:00.0`, `offloaded 31/31`) — 그런데도 옆 카드가 죽는다. 주기적 GPU 재탐색처럼 **ollama가 자기 것이 아닌 카드를 계속 건드리는 동작**이 의심되지만, env로 닿는 범위를 넘었다.
+
+**재시도한다면** 컨테이너로 **디바이스 자체를 격리**하는 방향이다 — MI50의 render node만 통과시키면 ollama가 9060 XT를 물리적으로 볼 수 없다. 공식 이미지는 gfx906에서 못 쓰므로 우리 빌드를 담은 이미지를 만들어야 한다.
 
 ## 공식 이미지는 여전히 안 된다 — 직접 빌드해야 했다
 
@@ -101,14 +129,14 @@ ExecStart=/opt/ollama-dist/bin/ollama serve
 
 recognize는 별 네임스페이스(`GGML_VK_VISIBLE_DEVICES`)로 9060 XT에 핀돼 있어 **영향받지 않는다** — 다른 env·다른 포트(8090)·다른 role 키다.
 
-## 얻은 것 — idle 언로드 실측
+## ollama의 idle 언로드는 작동했다 (그러나 대체 가능했다)
 
 ```
 t+280s  loaded_models=1  vram=15.5GB
 t+300s  loaded_models=0  vram=0.01GB    ← KEEP_ALIVE 만료
 ```
 
-카드를 완전히 놓는다. 단 **VRAM만 회수되고 카드는 D0에 머문다** — MI50는 `power/control=on`(런타임 PM 비활성)이라 유휴 전력·발열은 그대로다.
+기능 자체는 실측으로 확인됐다. **다만 systemd socket activation이 같은 일을 더 확실히 한다** — 모델만 내리는 게 아니라 프로세스째 내려가므로 상위집합이고, ollama 없이 llama.cpp에 그대로 걸 수 있다(§아래). 그래서 이 기능은 ollama를 유지할 근거가 되지 못했다.
 
 ## recognize도 유휴에 놓게 한다 — socket activation
 
@@ -148,10 +176,10 @@ ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf -o /dev/null http:/
 
 | | idle 언로드 | PCI D3 |
 |---|---|---|
-| **MI50** (translate/ollama) | ✅ `OLLAMA_KEEP_ALIVE=5m` → 15.5GB → 0.01GB | **안 간다** — `power/control=on`(런타임 PM 비활성)이라 모델을 언로드해도 `D0`에 머물고 유휴 ~20W를 계속 먹는다 |
-| **9060 XT** (recognize/llama.cpp) | ✅ 프록시 유휴 종료 → 3.74GB → 0.06GB | ✅ `ctrl=auto`, **D3cold 실측** |
+| **MI50** (translate) | ❌ **적용 안 함** — llama-server 상주, ~16GB 점유 | **불가** — 카드 특성상 런타임 PM이 안 된다(`power/control=on`), 그래서 VRAM만 회수해도 절전 이득이 없다 |
+| **9060 XT** (recognize) | ✅ 프록시 유휴 종료 → 3.74GB → 0.06GB | ✅ `ctrl=auto`, **D3cold 실측** |
 
-즉 MI50에서 얻을 수 있는 건 **VRAM 회수까지**고, D3는 9060 XT 몫이다. (MI50의 `on`이 카드/드라이버가 런타임 PM을 못 해서인지, 어딘가에서 설정된 값인지는 확인하지 않았다 — 절전 설정을 실험 대상으로 삼지 않았다.)
+**translate에 언로드를 걸지 않는 이유**: MI50가 D3에 못 가므로 VRAM을 놓아도 전력·발열이 그대로다. 유휴 후 첫 요청에 모델 재로드(~5초)만 새로 생긴다 — 얻는 것 없이 비용만 붙는다. 절전이 실이득인 쪽은 **D3가 되는 9060 XT**이고, 그쪽엔 적용했다.
 
 ## 함정 둘 (이번에 밟은 것)
 

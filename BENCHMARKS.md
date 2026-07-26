@@ -13,7 +13,7 @@
 | **recognize** | PaddleOCR-VL-For-Manga (llama.cpp/Vulkan) | 9060 XT | 502.8ms | 23.9% |
 | **translate** | gemma-4-26B-A4B (llama.cpp/Vulkan) | MI50 | 1293.8ms | 61.6% |
 
-> ⚠ 이 표는 translate가 **llama.cpp/Vulkan**이던 시점 값이다. 2026-07-26에 translate를 **ollama(ROCm)로 교체**했고 단일 decode는 89.3 → 83.4 t/s(-6.6%)다 — 페이지 기준 재측정은 아직 하지 않았다.
+> 재확인 (2026-07-26): recognize를 socket activation으로 온디맨드화한 뒤 같은 구성으로 5페이지 serial — **0.437 p/s**(위 0.43과 일치), detect ~295 / recognize 377~682 / translate 958~1392ms. 유휴 후 첫 페이지만 콜드스타트(detect 3072 · recognize 2690ms)를 낸다.
 | 페이지 total | | | **2101.6ms** | serial 0.43 p/s · 동시성 2에서 21장 32.8초 |
 
 lockwait / semwait 모두 0 — 서버 측 직렬화는 남아 있지 않다. **다음 레버는 translate(62%), 그 다음이 detect(14.4%)다.**
@@ -28,7 +28,7 @@ lockwait / semwait 모두 0 — 서버 측 직렬화는 남아 있지 않다. **
 | [recognize-decode-bound.md](packages/scanlation-server/tools/recognize-decode-bound.md) | recognizer | decode 병목 규명 → llama.cpp 교체 | 현행 기준 |
 | [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md) | translator | MI50 도입·폭주·동시성·서버 설정 | 현행 기준 |
 | [translate-gpu-mi50-rocm.md](packages/scanlation-server/tools/translate-gpu-mi50-rocm.md) | translator | gfx906 ROCm 재도전 경로 | 종결(된다·동률) |
-| [translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md) | translator | ollama 커스텀 빌드 + 백엔드 이전 | 현행 기준 |
+| [translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md) | translator | ollama를 gfx906에 올려보고 되돌린 기록 + recognize socket activation | 종결(기각) |
 | [cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md) | translator(인프라) | 팬·쉬라우드·fancontrol | 하드웨어 대기 |
 | `compare_out/`(로컬) | detector · recognizer | 모델 대결 원본 출력 | gitignore, 개발 PC에만 |
 
@@ -165,16 +165,16 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 
 | 항목 | 값 |
 |---|---|
-| 백엔드 | **ollama (직접 빌드, ROCm/gfx906)** — 운영 기능을 사려고 decode -6.6%를 지불한 교체. 공식 이미지는 여전히 불가(gfx906 코드 없음)라 `-DCMAKE_HIP_ARCHITECTURES=gfx906` 빌드가 필수. 기록 [translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md) |
-| 왜 바꿨나 | **idle 언로드**(서버 코드로는 구조적으로 불가 — translator는 `idle_candidates` 배제 대상) + **모델 스왑**(llama-server는 `model` 필드를 무시해 `/admin` 드롭다운이 장식이었다) |
-| 모델 | **`unsloth/gemma-4-26B-A4B-it-qat-GGUF`** — MoE(active 4B)라 26B인데도 빠르고 32GB에 넉넉, QAT quant. 백엔드를 바꾸며 **같은 GGUF를 Modelfile로 이식**했다(옛 ollama quant는 -26%) |
-| 실측 | decode **83.4 t/s** (직전 llama.cpp Vulkan 89.3 · HIP 88.1) |
+| 백엔드 | **llama.cpp + Vulkan(RADV)**. ROCm도 되지만(§ROCm 재도전) 빠르지 않고, **ollama는 시도 후 기각**했다 — 옆 카드의 recognize를 죽인다([translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md)) |
+| 모델 | **`unsloth/gemma-4-26B-A4B-it-qat-GGUF`** — MoE(active 4B)라 26B인데도 빠르고 32GB에 넉넉, QAT quant |
+| 실측 | decode **89.3 t/s**(`--parallel 4` 기준선. 초기 raw 검증 89.88) · 대안 백엔드는 HIP 88.1 / ollama 83.4 |
+| idle 언로드 | **적용 안 함** — MI50는 카드 특성상 D3에 못 가므로 VRAM을 놓아도 전력 이득이 없고, 첫 요청 재로드(~5초)만 붙는다. 절전이 실이득인 recognize(9060 XT)에는 socket activation으로 적용했다 |
 | 파이프라인 효과 | 이전 GPU(ollama) 대비 translate **1.62x**(1509 → 933ms 평균) |
 | thinking | **off가 필수** — 플러그인 `think` 기본 False. 켜면 같은 페이지가 958ms → 26.6초 |
-| 폭주 방어 | 플러그인 **`frequency_penalty`**(반복 횟수 비례, ⚠ 기본 0 = 꺼짐이라 명시 필수) + **`num_predict` 1024**(백스톱). ollama엔 DRY도, 유닛 레벨 `--n-predict`도 없어 둘 다 대체한 것 |
+| 폭주 방어 | 플러그인 `dry_multiplier` 0.8(근본) + 유닛 `--n-predict 1024`(백스톱) |
 | 전력 캡 | **150W** — decode 88.8~95.0 t/s로 225W와 동일, 비용 ≈ 0 |
-| 컨텍스트 | 플러그인 `num_ctx` 2048을 **명시로** 보낸다 — ollama의 기본 자동값은 `n_ctx=262144`로 VRAM을 다 먹는다(속도엔 무영향) |
-| GPU 핀 | ollama는 **`ROCR_VISIBLE_DEVICES=<UUID>`**, llama-server(recognize)는 **`GGML_VK_VISIBLE_DEVICES=<N>`**. 서로 다른 네임스페이스라 간섭하지 않는다. `--device`는 쓰지 않는다 |
+| 서버 설정 | `-c 16384 --parallel 4` — 슬롯 비용은 4→8 사이가 절벽(-17%)이고 1~4는 평평하다 |
+| GPU 핀 | 두 llama-server를 각각 **`Environment=GGML_VK_VISIBLE_DEVICES=<N>`** 로. `--device`는 쓰지 않는다(mtmd 비전 인코더가 다른 카드로 샌다) |
 | 운영 동시성 | **2**(현 냉각 기준) |
 
 **한 줄: gfx906에서 막힌 건 하드웨어가 아니라 런타임 패키징이었다.** ollama·llama.cpp 모두 **그 arch를 타깃으로 직접 빌드하면 ROCm으로 돈다**(`GPU_TARGETS`/`CMAKE_HIP_ARCHITECTURES=gfx906`). 배포 바이너리에 gfx906 코드가 없었을 뿐이고, 시스템 rocBLAS는 EPEL 7.2.0에서도 gfx906 커널 156개를 싣고 있어 되공급도 불필요하다. Vulkan(RADV)은 arch 비의존이라 지금도 유효한 대안이다 — 실제로 recognize는 Vulkan을 쓴다.
@@ -232,12 +232,12 @@ MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지
 - **된다. 패치도 되공급도 필요 없었다** — `-DGGML_HIP=ON -DGPU_TARGETS=gfx906` 빌드로 warmup이 그냥 통과했다. 이 문서가 유력하게 봤던 **`SOLVE_TRI` 오컴파일 가설은 불필요**했고, 과거 "HIP는 segfault"의 원인은 **빌드 타깃이 `gfx1200`이었던 것**으로 보인다(MI50용 코드가 없는 바이너리로 시험한 셈).
 - **성능은 동률** — decode 88.1 vs Vulkan 89.3, prefill 412.5 vs 410.3. 기대했던 **prefill 우위는 1.13x에 그쳐** 채택 기준(1.3x) 미달이다.
 - **배칭 스케일은 측정 불가** — P2·P4 포화는 62~65°C에서 시작해도 각각 94·96°C에 닿아 중단된다. **현 냉각으로 완주 가능한 건 P1뿐**이고, 그마저 43초 연속 부하로 101°C까지 간다. 냉각 보강이 선행 조건.
-- **그래서 속도를 위해 바꾸진 않았다.** 대신 ROCm이 되는 것이 **ollama를 쓸 수 있게** 해줘서, 운영 기능을 사려고 translate를 ollama로 옮겼다(§결론).
+- **그래서 백엔드는 Vulkan을 유지한다.** ROCm이 열어준 선택지(ollama)도 시도했지만 옆 카드의 recognize를 죽여 기각했다([translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md)).
 
 ## 남은 일
 
 - **다음 레버가 여기다**(파이프라인의 62%). 2026-07-16 스윕의 열 상한은 그대로지만 **공급이 바뀌었다** — 그때는 "다음 병목은 CPU recognize 직렬화"로 끝났는데 지금은 lockwait이 0이라 translate 슬롯이 처음으로 제대로 채워진다. 같은 동시성에서 더 나올 여지가 있다.
-- **ollama 교체 후 페이지 기준 재측정** — 단일 decode -6.6%가 페이지 total에 얼마로 나타나는지, 그리고 `OLLAMA_NUM_PARALLEL`이 `--parallel`과 같은 슬롯 고정비를 갖는지 확인.
+- **translate에 idle 언로드는 두지 않는다** — MI50가 D3에 못 가서 VRAM 회수의 절전 이득이 0이고, 첫 요청 재로드(~5초)만 붙는다. 카드가 바뀌면(D3 되는 GPU) 다시 볼 항목이다.
 - 냉각 보강 → 동시성 4 재평가(+22% 회수). **P2조차 포화에서 94°C**라 현 냉각으로 측정 가능한 건 P1뿐이다.
 - ~~**recognize를 온디맨드로**~~ **완료** — systemd socket activation(socket + `systemd-socket-proxyd --exit-idle-time=5min` + `StopWhenUnneeded`)으로 8090을 온디맨드화했다. 유휴 시 3.74GB → 0.06GB, 콜드 스타트 2.0초. 공개 포트가 그대로라 플러그인 설정은 안 바뀐다. ※ **recognize를 ollama로 옮기는 건 불가** — ollama 변환기가 `PaddleOCRVLForConditionalGeneration`을 지원하지 않고, 이미 있는 mmproj GGUF를 붙일 Modelfile 지시자도 없다(bare GGUF는 `model does not support multimodal requests`).
 
