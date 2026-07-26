@@ -2,7 +2,12 @@
 
 조사 2026-07-20. [translate-gpu-mi50.md](translate-gpu-mi50.md)에서 **gfx906(MI50)은 ollama/HIP 모두 막혀 Vulkan 채택**으로 결론냈는데, 이후 웹 리서치로 **커뮤니티가 gfx906+ROCm을 실제로 풀었음**을 확인했다. 이 문서는 그 재도전 경로·근거·리스크·실험 계획을 모아둔 **참고 기록**이다. 배경·측정·복구 런북은 [translate-gpu-mi50.md](translate-gpu-mi50.md), recognize 쪽 GPU 사정은 [recognize-gpu-speed.md](recognize-gpu-speed.md).
 
-> **상태 (2026-07-20): 조사만 완료, 실험 미착수.** 현재 진짜 블로커는 **냉각**(패시브 카드 과열 → amdgpu hang, 백엔드 무관)이라 지금은 ROCm 실험을 하지 않는다. **냉각 보강이 선행 조건.** 아래는 냉각 정리 후 착수할 재도전 런북의 밑그림이다. 확정 사실이 아니라 **웹 근거 + 우리 관측의 대조**이며, 미확인 항목은 그때그때 명시했다.
+> **결론 (2026-07-26): ROCm은 된다. 단 이유는 이 문서가 세운 가설이 아니었고, 성능 이득도 없다.** 실험 완료:
+> 1. **gfx906에서 HIP가 돈다** — `-DGGML_HIP=ON -DGPU_TARGETS=gfx906`으로 빌드하니 warmup이 그냥 통과했다. **SOLVE_TRI 패치도, Tensile 되공급도 필요 없었다**(§2·§1 가설 둘 다 불필요). 과거 "HIP는 warmup segfault"의 원인은 커널 오컴파일이 아니라 **빌드 타깃이 `gfx1200`(9060 XT)이었던 것**으로 보인다 — MI50용 코드가 아예 없는 바이너리로 시험했던 셈이다. 되공급이 불필요한 근거도 확인됐다: EPEL rocBLAS는 7.2.0에서도 gfx906 Tensile 커널 156개를 싣고 있다(커뮤니티 레시피가 넣어주는 바로 그 수량).
+> 2. **성능은 동률** — 같은 모델·같은 `--parallel 4`에서 decode **88.1~88.8 vs Vulkan 89.3~90.1 t/s**, prefill **412.5 vs 410.3 t/s**. §4가 기대했던 prefill 우위는 **관측되지 않았다**(1.13x에 그쳐 판정 기준 1.3x 미달).
+> 3. **그래서 백엔드를 성능 때문에 바꿀 이유는 없다.** 다만 ROCm이 되는 것 자체가 **ollama를 쓸 수 있게 해주고**, 그 운영 기능(idle 언로드·모델 스왑)을 사려고 translate를 ollama로 옮겼다 — 기록은 [translate-ollama-gfx906.md](translate-ollama-gfx906.md).
+>
+> ⚠ **미측정 — 배칭 스케일.** P2·P4 포화 A/B는 열 때문에 결론을 못 냈다: 62~65°C에서 시작해도 P4는 96°C, P2는 94°C에 닿아 가드에 걸린다(P1만 완주 가능하고 그마저 43초 연속 부하로 101°C까지 간다). 현 냉각으로 측정 가능한 건 P1뿐이다. decode·prefill이 둘 다 동률이라 배칭만 뒤집힐 이유는 희박하지만, 확인하려면 **냉각 보강이 선행**이다. HIP 빌드는 `/opt/llama/llama.cpp/build-hip906`에 남아 있다.
 
 ## TL;DR
 
