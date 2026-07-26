@@ -11,6 +11,7 @@
 | `llama.cpp-PaddleOCR-VL-For-Manga-proxy.service.example` | 유휴 종료 프록시 | ✗ (socket이 띄움) |
 | `llama.cpp-PaddleOCR-VL-For-Manga.service.example` | recognize llama-server (:8091) | ✗ (proxy가 띄움) |
 | `GPU-powercap.service.example` | 부팅 시 전력 캡 | ✅ |
+| `MI50-fan-duty.service.example` | 부팅 시 MI50 팬 duty 고정 (fancontrol 전 임시) | ✅ |
 | `ollama.service.example` | **미배포** — 기각 기록용 | ✗ |
 
 **recognize는 온디맨드**다(socket activation): 유휴 5분에 프로세스가 내려가 VRAM을 놓고 카드가 D3까지 간다. 콜드 스타트 ~2초. 세 유닛이 필요한 이유와 함정은 각 파일 주석과 [translate-ollama-gfx906.md](../packages/scanlation-server/tools/translate-ollama-gfx906.md)에 있다.
