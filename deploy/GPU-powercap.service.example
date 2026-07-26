@@ -1,0 +1,14 @@
+[Unit]
+Description=GPU power caps (survives reboot; rocm-smi settings do not)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+# MI50 at 150W: decode is bandwidth-bound, so this costs ~0 t/s while cutting heat
+# on a passive card (vBIOS default is 225W). hwmon* glob: the index moves per boot.
+ExecStart=/bin/sh -c 'echo 150000000 | tee /sys/bus/pci/devices/0000:03:00.0/hwmon/hwmon*/power1_cap > /dev/null'
+# 9060 XT, if it ever needs one:
+# ExecStart=/bin/sh -c 'echo 130000000 | tee /sys/bus/pci/devices/0000:09:00.0/hwmon/hwmon*/power1_cap > /dev/null'
+
+[Install]
+WantedBy=multi-user.target

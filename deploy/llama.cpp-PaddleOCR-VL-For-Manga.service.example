@@ -1,5 +1,5 @@
 [Unit]
-Description=recognize llama-server (PaddleOCR-VL)
+Description=recognize llama-server (PaddleOCR-VL, 9060 XT)
 # Socket-activated: the .socket owns the public port and the proxy starts this on
 # demand, so do NOT enable this unit -- enable the .socket instead. StopWhenUnneeded
 # lets it go when the proxy idles out, which is what frees VRAM and lets the card
