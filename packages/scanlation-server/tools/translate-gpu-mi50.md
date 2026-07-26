@@ -3,7 +3,7 @@
 작성 2026-07-14. LLM translator를 **MI50(AMD Instinct, gfx906/Vega20, 32GB HBM2)** 에서 돌리기까지의 기록 + 재현 레시피 + 남은 일. 배경(GPU 역할 분리)은 [SCANLATION_DESIGN.md](../../../SCANLATION_DESIGN.md), recognize 쪽 GPU 사정은 [recognize-gpu-speed.md](recognize-gpu-speed.md).
 
 > **상태 (2026-07-16):** **폭주 원인 확정·수정 — greedy 반복 루프.** 교성 텍스트(07.jpg `イ．．．くぅぅぅ〜〜〜んっっ`)가 "이... 으으으…"로 슬롯 컨텍스트가 찰 때까지 반복 — EOS도 grammar도 못 막는 유형(경위·로그·처방은 §폭주 원인 확정). 방어 3겹 배치: 플러그인 **`dry_multiplier` 0.8**(근본) + 유닛 **`--n-predict 1024`**(백스톱) + **전력 캡 150W**(decode 89~95 t/s 실측, 비용 ≈ 0). 2차 hang 자체는 콜드 부팅으로 복구(카드 생존) — 인과는 §4(무냉각 지속 부하 → 과열 → PCIe 버스 이탈, SIGKILL은 증상). **재검증 완료(2026-07-16): 챕터 21/21, 07.jpg 608ms에 `"이... 으으으으으응~"`(루프 사망), translate 평균 970.3ms(기존 932.9 대비 +4% = 캡+DRY 비용, 오차 수준). 동시성 스윕도 완료 — 운영 동시성 2 권장**(§3 동시성 스윕: 4는 junction crit 도달, 냉각 보강 후 재평가).
-> **⚠ 벤치 중지 (2026-07-17 저녁):** 포화 벤치 세션 뒤 카드가 **probe 상한 ~74 t/s의 미해결 상태**(§MI50 쿨링 성능 latch — idle 58°C·캡 정상인데 건강 90도 latch 63도 아님). **냉각 보강(GPU 연동 팬 커브/직결 송풍 강화)이 선행 조건** → 콜드 부팅 → probe 재기준선 → 재개봉 측정(서버 설정 비용 표·P8 판정) → 최종 토폴로지(TODO 5) 순서로 재개.
+> **카드 건강 확인 (2026-07-26):** 미해결이던 **probe 상한 ~74**는 카드가 아니라 **유닛의 `--parallel 8`**이었다(§MI50 쿨링 성능 latch 항목). 콜드 부팅으로도 74가 유지됐고 열·클럭·캡·PCIe 전부 정상인데, 슬롯만 4로 낮추자 **89.3 t/s**로 복귀 — 서멀 인터페이스 열화 가설은 기각. 벤치 재개 가능하며 **Vulkan 기준선은 P4 89.3 / P8 73.7 t/s**.
 > **그 외는 작동·검증 완료.** raw 모델 MI50 확인(gemma-4 89 tok/s) → 파이프라인 느림 원인 규명(grammar 아니라 **reasoning 과다 thinking**) → **end-to-end 벤치: 이전 GPU 대비 translate 1.62x**(§3). **reasoning 제어는 Option B** — 서버 `--reasoning-budget 0` 대신 플러그인 `enable_thinking`(기본 off)으로 제어해 /admin 토글이 실제로 작동(§3). systemd 영속화·플러그인 재설치 완료. 상세는 §[파이프라인 통합 시도](#파이프라인-통합-시도-2026-07-14--미완--gpu-hang-사고).
 
 ## 배경 — 왜 MI50인가
@@ -40,7 +40,7 @@ MI50는 **팬이 없는 패시브 서버 카드**(TDP 300W)로, 서버 섀시의
 - **89 → 33 t/s 의문 — 해소 (2026-07-16)**: 둘 다였다. 기본은 **배칭 per-slot 분할**(동시성 1→4에서 per-slot 지연 1002→1694ms로 증가, 총 처리량은 상승 — §3 동시성 스윕), 지속 부하에선 **열 스로틀이 가세**(동시성 4에서 junction crit 도달·전력 193→115W 하강 실측; 2차 사고의 tg=32도 과열 폭주 중 값).
 - **성능 latch (2026-07-17)**: 포화 벤치 연타(crit 이벤트 누적) 후 GPU가 **~30% 저성능 상태에 잠긴다** — 단일요청 decode 89~95 → 62~64 t/s인데 **클럭 표시(sclk·mclk 최고 레벨)·PCIe(16GT/s x16)·전력 캡(150W)·CPU 전부 정상**, idle로 회복 안 됨. 진행성: 같은 부하의 aggregate가 세션 내 84→74→69→66→64로 계단식 하락. **같은 실온에서 재부팅 직후 89.3으로 즉시 복구** = 실온·열이 아니라 SMU/드라이버의 잠긴 상태. **판별기 = [diag_runaway](diag_runaway.py) 1발(1초)**, 판독 3단계: **~90(식은 카드) = 건강 / ~80~85(부하 직후) = 건강+열**(캡 고정에서 고온 누설전류가 클럭을 깎는 가역 효과, 식으면 복귀) **/ ~62~64(식어도) = latch → 재부팅**. 벤치는 **probe 브래키팅**(전후 1발씩, 양쪽 건강일 때만 채택)으로 오염을 걸러낸다.
   - 재부팅 후 건강 카드에서 P4 기준선 재확인(probe 89.7 → 14.21s·82.7 agg — 새벽 값 14.05·84.1과 일치, 두 세션 교차 확정).
-  - ⚠ **미해결 (2026-07-17 저녁)**: 이후 대기+warm reboot을 거쳤는데도 **idle 58°C·캡 150 정상 상태에서 probe 상한 ~74** — 건강(~90)도 latch(~63)도 아닌 중간 상태. 콜드 부팅 판별은 미실시. 반복 crit 이벤트로 인한 **서멀 인터페이스 열화 가능성**도 후보에 올라, **포화 벤치를 중지**했다. 냉각 보강 후 콜드 부팅 → probe 재기준선 → 재개봉 측정(아래) 순서로 재개.
+  - **"probe 상한 ~74"의 정체 — 해소 (2026-07-26): 카드가 아니라 `--parallel 8`이었다.** 콜드 부팅(전원 차단)으로도 74가 그대로였고, 열(junction 79°C·mem 75°C)·클럭(mclk 1000/sclk 1725 = 최고 DPM)·캡(150W)·PCIe(16GT/s x16)가 전부 정상 → latch도 열화도 아니다. 같은 카드·같은 빌드에서 슬롯 수만 바꾸자 **P4 89.3 / P2 88.9 / P1 87.4 vs P8 73.7 t/s**(600토큰 정상상태) — 유닛이 `--parallel 8`로 올라가 있던 것이 그대로 -17%였다. **probe 판독 시 슬롯 수를 함께 볼 것**: 판독 3단계는 `--parallel 4` 기준이며, P8이면 건강해도 ~74가 정상이다.
 
 ### 전력 캡 — 발열을 원천에서 줄인다 (쿨링 보완이지 대체 아님)
 
@@ -208,7 +208,7 @@ raw 모델 검증(위) 이후 실제 파이프라인(`run_report` → 서버 →
 - 수확체감의 원인 절반은 **prefill 고정비**: 요청당 유니크 프롬프트 prefill(~수백 ms 합산)은 슬롯을 늘려도 안 줄어, 동일-body 반복 벤치(prefill이 슬롯 캐시로 공짜: 667/471/411ms — 폐기, ~×1.6로 낙관)보다 스케일이 낮게 나온다.
 - **벤치 방법론 교훈**: 연속 실행하면 마지막 패스는 열 손해, 직전 패스가 많은 패스는 슬롯 캐시 이득 — 서로 반대 방향이라 순서 역전까지 만든다(첫 시도에서 P2가 P4를 이기는 가짜 결과). **P별 개별 실행(동일 냉각 시작점 + 자체 워밍업)**이 공정 프로토콜.
 
-**서버 설정의 성능 비용 (2026-07-17) — `-c`도 `--parallel`도 필요 최소로.** ⚠ **이 표는 오염 의심 — 재측정 대기.** 측정 후 이 오후 세션의 카드가 **성능 latch**(아래 §MI50 쿨링)로 계단식 저하 중이었음이 드러났다(같은 부하 aggregate 84→74→69→66→64 tok/s). `-c` 과금의 방향성은 유효하나 크기, 8슬롯 -14%, **P8 판정(14.83 vs 14.05 — 잠긴 카드 측정치)은 미확정으로 되돌림.** 건강 카드 + probe 브래키팅으로 재측정 후 갱신할 것. 같은 P=4 포화 부하를 서버 설정만 바꿔 측정(각 60°C 시작):
+**서버 설정의 성능 비용 (2026-07-17) — `-c`도 `--parallel`도 필요 최소로.** 같은 P=4 포화 부하를 서버 설정만 바꿔 측정(각 60°C 시작):
 
 | llama-server 설정 | P4 벽시계 | 요청당 | vs 프로덕션 |
 |---|---|---|---|
@@ -218,6 +218,18 @@ raw 모델 검증(위) 이후 실제 파이프라인(`run_report` → 서버 →
 
 - **`-c`는 워크로드가 요구하는 최소로.** MI50 Vulkan(비-FA 경로)은 디코드 스텝마다 어텐션이 **할당된 KV 폭 전체**를 상대해, 시퀀스가 짧아도 `-c`에 비례해 느려진다(16k→32k = -42%).
 - **`--parallel`도 최소로.** 8슬롯은 활성이 4개여도 -14% 고정비 — 캐시 산개가 아니라 슬롯 자체 비용이다(8슬롯 전부 warm 상태의 P4도 17.0s로 동일하게 느림). P=8의 배칭 순이득은 ×1.08(763→706ms)뿐이라 고정비를 못 넘고, **P8 최고치(14.83s)가 프로덕션 P4(14.05s)를 못 이긴다 → `--parallel 4` 유지 확정.** 동시 처리 필요가 4를 넘게 되면 그때 슬롯 수·이 표를 함께 재평가.
+- **건강 카드 재확인 (2026-07-26)**: 콜드 부팅 직후 같은 빌드·같은 모델에서 슬롯 수만 스윕한 단일 스트림 decode(600토큰 정상상태) — **P4 89.3 / P2 88.9 / P1 87.4 / P8 73.7 t/s**. 슬롯 비용은 4→8 사이에서 절벽이고(1~4는 평평), 크기는 -14%가 아니라 **-17%**. 위 표의 방향·결론 그대로 유효하며 `--parallel 4`가 옳다. 참고: 이 카드에서 `translate_concurrency`는 4라 8슬롯은 절반이 놀면서 비용만 낸다.
+
+**모델 A/B — 지금 quant가 최선 (2026-07-26).** `--parallel 4` 고정, 600토큰 정상상태 decode로 세 GGUF를 같은 조건에서 비교:
+
+| 모델 | decode |
+|---|---|
+| **`unsloth/gemma-4-26B-A4B-it-qat` UD-Q4_K_XL (프로덕션)** | **89.3 t/s** |
+| 같은 repo의 이전 리비전 blob | 89.3 t/s (차이 없음) |
+| `VladimirGav/gemma4-26b-16GB-VRAM` (ollama 시절 quant) | 66.3 t/s (**-26%**) |
+
+- **`-hf`는 리비전을 조용히 따라간다** — repo가 같은 파일명·같은 크기(13.27GB)로 재업로드하면 캐시에 스냅샷이 둘 생기고 `refs/main`이 새 쪽을 가리킨다. 속도는 동일했지만, 성능 이상을 볼 땐 blob 해시부터 확인할 것.
+- **ollama blob이라고 다 못 읽는 건 아니다** — 커뮤니티 업로드(VladimirGav)는 평범한 GGUF(매직 `GGUF`)라 `-m`으로 바로 로드된다. §GGUF의 로드 실패 사례는 ollama **공식** 신형 레이아웃 모델에 해당한다. 다만 느려서 되돌릴 이유가 없다.
 
 **어드민 reasoning 제어 — 플러그인에 `think` 옵션 추가 (2026-07-15).** [llama.cpp 플러그인](../../scanlation-llama-cpp/scanlation_llama_cpp/plugin.py)의 `strip_think`은 출력을 잘라낼 뿐이라, 생성 자체를 막는 **`think`(bool, 기본 False)** 옵션을 추가했다(ollama의 `think`와 대칭). 요청 body에 `chat_template_kwargs:{enable_thinking: think}`로 전달. 단위테스트(body shape) green.
 
@@ -375,7 +387,7 @@ A가 폭주면 내용물로 다시 가른다: `reasoning_content`가 크면 **�
 2. ~~**벤치.**~~ **완료 (2026-07-15)** — 이전 GPU 대비 translate **1.62x**(§3 파이프라인 벤치). 기준 `run_report_20260710_111941.md`(ollama, 이전 GPU) vs `run_report_mi50_translate.md`(llama.cpp, MI50). 참고: 20260710은 CPU가 아니라 **이전 GPU** 실행이었다.
 3. ~~**영속화.**~~ **완료 — 배포·enable 확인 (2026-07-15).** 콜드 부팅에서 유닛 자동 기동 실측(`Started llama.cpp.service`). 배포 유닛은 Option B대로 budget 플래그 없음, `-c 16384 --parallel 4`. 예시 파일([deploy/llama.cpp-gemma-4-26B-A4B.service.example](../../../deploy/llama.cpp-gemma-4-26B-A4B.service.example))을 배포본과 동기화 + 전력 캡 `ExecStartPre` + 전역 토큰 캡 `--n-predict 1024` 추가, **서버 유닛에도 반영 완료(2026-07-16, `systemctl cat` 확인).**
 4. ~~**MI50 디바이스 핀 확정.**~~ **결정 (2026-07-15): 핀 없이 자동.** `GGML_VK_VISIBLE_DEVICES=0`이 오히려 lavapipe/iGPU를 잡아 10x 느렸다(§3 함정) — 기본 자동선택이 discrete(MI50)를 고른다.
-5. ~~**최종 토폴로지(9060 XT 재장착 후).**~~ **완료 (2026-07-24): detect=CPU / recognize=9060 XT / translate=MI50 물리 분리 배포.** 핀은 두 네임스페이스에 각각 — translate=llama-server `--device Vulkan1`(Vulkan enum), recognize=컨테이너 `HIP_VISIBLE_DEVICES=0,1` + `/admin` device `cuda:1`(HIP enum). HIP·Vulkan 인덱스가 서로 달라(MI50=HIP0/Vulkan1, 9060 XT=HIP1/Vulkan2) 각각 확인해 핀했다. translate는 파이프라인상 gate 밖이라 배포만으로 병렬 활성([recognize-gpu-speed.md](recognize-gpu-speed.md) 참조). 동시성 스윕의 **CPU recognize 직렬화(lockwait) 스케일 병목**(§3)이 분리의 정량 근거였다.
+5. ~~**최종 토폴로지(9060 XT 재장착 후).**~~ **완료 (2026-07-24): detect=CPU / recognize=9060 XT / translate=MI50 물리 분리 배포.** 두 llama-server를 각각 **`Environment=GGML_VK_VISIBLE_DEVICES=<N>`** 로 핀한다(translate=1, recognize=2; 인덱스는 이 env 없이 돌린 `llama-server --list-devices` 기준). **`--device`를 쓰지 말 것** — LM 레이어만 제한해 mtmd 비전 인코더가 다른 카드를 골라가고, render node를 숨기는 방식(`InaccessiblePaths=`)은 남은 장치를 재번호한다([recognize-decode-bound.md](recognize-decode-bound.md) 실측). 컨테이너 쪽 torch 엔진은 별 네임스페이스라 `HIP_VISIBLE_DEVICES` + `/admin` device로 따로 고른다(MI50=HIP0, 9060 XT=HIP1). translate는 파이프라인상 gate 밖이라 배포만으로 병렬 활성([recognize-gpu-speed.md](recognize-gpu-speed.md) 참조). 동시성 스윕의 **CPU recognize 직렬화(lockwait) 스케일 병목**(§3)이 분리의 정량 근거였다.
 6. **하드코딩 회피 점검.** 엔드포인트·모델·포트 등 조절값은 env 기본 + `/admin` 노출 원칙을 따른다(신규 값 생기면).
 7. **폭주 방어선.** 근본 수정은 플러그인 `dry_multiplier` 기본 0.8(§폭주 원인 확정). 전역 백스톱은 유닛 `--n-predict 1024`(plugin 상태와 무관 — 폭주가 사라져 실동작은 미검증인 채 백스톱으로 유지). 요청 단위 `max_tokens`(plugin 옵션 + `/admin`)는 필요해지면 추가(선택).
 8. ~~**전력 캡 적용·실측.**~~ **완료 (2026-07-16): 150W 확정** — decode 88.8~95.0 t/s로 225W와 동일(§MI50 쿨링 전력 캡, 캡 비용 ≈ 0). 유닛 `ExecStartPre`로 영속화 배포. 부수 효과: 발열·소음·8핀 데이지체인 부담 감소.
