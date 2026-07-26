@@ -105,18 +105,18 @@ detector 쪽만 커밋된 1차 자료가 없다 — 대결 산출물이 [.gitign
 
 ## 속도 변천사 — 같은 42 크롭 기준
 
-| # | 단계 | crops/sec | 직전 | 출처 |
-|---|---|---|---|---|
-| 0 | CPU | ~0.017 | — | 플러그인 docstring `~60s/crop`(어림) |
-| 1 | GPU, flash OFF | 0.094 | ~5.6x | [gpu-speed](packages/scanlation-server/tools/recognize-gpu-speed.md) |
-| 2 | **+ AOTriton flash attention** | 0.345 | **3.7x** | 〃 — env 한 줄 |
-| 3 | + 해상도 캡 150k / `pow2` | 0.58 | 1.7x | 〃 |
-| 4 | + 멀티워커 W4·K2 | ~0.77 | 1.3x | 〃 |
-| 5 | **llama.cpp로 런타임 교체** | 1.274 | 1.7x | [decode-bound §5](packages/scanlation-server/tools/recognize-decode-bound.md) |
-| 6 | **+ GPU 핀을 env로** | **5.585** | **4.4x** | 〃 §6 |
-| 7 | 현재 — `box` / 300k | 4.277 | 0.77x | 〃 §7 — 절단되던 크롭을 되사는 의도적 후퇴 |
+| # | 단계 | crops/sec | 직전 | 누적 | 출처 |
+|---|---|---|---|---|---|
+| 0 | CPU | ~0.017 | — | **1x** | 플러그인 docstring `~60s/crop`(어림) |
+| 1 | GPU, flash OFF | 0.094 | ~5.6x | ~5.6x | [gpu-speed](packages/scanlation-server/tools/recognize-gpu-speed.md) |
+| 2 | **+ AOTriton flash attention** | 0.345 | **3.7x** | ~21x | 〃 — env 한 줄 |
+| 3 | + 해상도 캡 150k / `pow2` | 0.58 | 1.7x | ~35x | 〃 |
+| 4 | + 멀티워커 W4·K2 | ~0.77 | 1.3x | ~46x | 〃 |
+| 5 | **llama.cpp로 런타임 교체** | 1.274 | 1.7x | ~76x | [decode-bound §5](packages/scanlation-server/tools/recognize-decode-bound.md) |
+| 6 | **+ GPU 핀을 env로** | **5.585** | **4.4x** | **~340x** | 〃 §6 |
+| 7 | 현재 — `box` / 300k | 4.277 | 0.77x | **~260x** | 〃 §7 — 절단되던 크롭을 되사는 의도적 후퇴 |
 
-실측된 첫 점(1번) 기준 **현재 46x**. 크기로 말하면 크롭 하나에 1분 → **1초에 4개**다.
+**누적에 `~`가 붙은 이유**: 0번의 `~60s/crop`은 잰 값이 아니라 어림이라 유효숫자가 없다. 배수를 정밀하게 인용해야 하면 실측된 첫 점인 **1번을 기준으로 쓴다 — 6번 59x, 현재 46x.** 크기만 말하면 크롭 하나에 1분 → **1초에 4개**다.
 
 **가장 큰 두 도약(2·6번)은 튜닝이 아니라 잘못된 설정을 고친 것이다.** 캡·멀티워커를 다 짜낸 3·4번의 합이 2.2배인데, 런타임 교체+핀(5·6번)이 7.3배다.
 
