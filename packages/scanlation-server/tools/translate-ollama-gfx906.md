@@ -55,7 +55,7 @@ inference compute library=ROCm compute=gfx906 name=ROCm0 total="32.0 GiB"
 
 그런데 모델을 올리면 러너가 죽는다 — `llama runner terminated, exit status 2`. [translate-gpu-mi50.md](translate-gpu-mi50.md)가 기록한 `invalid device function`과 같은 벽이고, 번들 `libggml-hip.so`에 gfx906 코드오브젝트가 없어서다. 호스트 rocBLAS를 컨테이너에 마운트하는 우회는 그 문서가 이미 막다른 길로 판정했다(벽은 rocBLAS가 아니라 ggml의 컴파일된 커널이다).
 
-**빌드**(Go 1.26 + cmake + hipcc 7.1 필요):
+**빌드**(Go 1.26 + cmake + hipcc 7.1 필요). 기각 후 산출물(`/opt/ollama-src` 3.3G, `/opt/ollama-dist` 2.1G)은 디스크에서 지웠으므로, 재시도하려면 아래를 그대로 다시 돌린다:
 
 ```bash
 git clone --depth 1 https://github.com/ollama/ollama.git /opt/ollama-src
