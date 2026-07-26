@@ -21,11 +21,11 @@ class LlamaCppTranslator(HttpTranslatorBase):
     name = "llama.cpp"
     display_name = "llama.cpp"
     homepage = "https://github.com/ggml-org/llama.cpp"
-    description = "LLM translation via an OpenAI-compatible /v1 server (llama.cpp, vllm, LM Studio…; must be running, model selected in /admin)."
+    description = "LLM translation via an OpenAI-compatible /v1 server (llama.cpp, vllm, LM Studio…; must be running). llama-server serves the one model it was launched with (-hf)."
     ENDPOINT_ENV = "LLAMACPP_ENDPOINT"
     DEFAULT_ENDPOINT = "http://127.0.0.1:8080"
     OPTION_SCHEMA = {
-        "model": {"type": str, "default": "", "description": "Model id (from the server's /v1/models). Required — pick it in /admin. (llama-server ignores it; other OpenAI servers require it.)"},
+        "model": {"type": str, "default": "", "description": "Model id (from the server's /v1/models). Required — pick it in /admin. llama-server ignores it and serves only the model it was launched with (-hf), so switching models means editing -hf and restarting llama-server; other OpenAI servers do require the id."},
         **COMMON_LLM_OPTIONS,  # temperature, seed, top_p
         "dry_multiplier": {"type": float, "default": 0.8, "description": "DRY repetition-penalty strength (0 = off). Stops runaway repetition loops (e.g. an SFX/moan translated as one endlessly repeated syllable under temperature 0) that neither EOS nor the batch JSON grammar can stop."},
         "think": {"type": bool, "default": False, "description": "Enable model 'thinking'/reasoning (slower; off for speed). Sent as chat_template_kwargs.enable_thinking — the model's chat template must honor it; else disable globally via the server's --reasoning-budget 0."},

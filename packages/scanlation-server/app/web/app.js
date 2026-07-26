@@ -204,15 +204,17 @@ function syncPromptEditor() {
 function findEngine(role, name) {
   return DATA.engines[role].find((e) => e.name === name);
 }
-// Localized option description: `opt.<engine>.<key>` then a generic `opt.<key>`
-// override from I18N[LANG], else the server's (English) schema description. Only
-// ko carries overrides, so en falls straight through to the server string.
-function optDesc(engine, opt, fallback) {
+// Localized option description: `opt.<role>.<engine>.<key>`, then `opt.<engine>.<key>`,
+// then a generic `opt.<key>` override from I18N[LANG], else the server's (English)
+// schema description. Only ko carries overrides, so en falls straight through to the
+// server string. The role-scoped form exists because one engine name can serve two
+// roles (llama.cpp is both translator and recognizer) with different option semantics.
+function optDesc(role, engine, opt, fallback) {
   const m = I18N[LANG];
-  const v = m && (m["opt." + engine + "." + opt] || m["opt." + opt]);
+  const v = m && (m["opt." + role + "." + engine + "." + opt] || m["opt." + engine + "." + opt] || m["opt." + opt]);
   return v || fallback || "";
 }
-function fieldInput(engine, opt, spec, value) {
+function fieldInput(role, engine, opt, spec, value) {
   const type = spec.type;
   const has = value !== undefined && value !== null;
   if (type === "bool") {
@@ -230,13 +232,13 @@ function fieldInput(engine, opt, spec, value) {
     // silently swapped for the default on the next save
     if (val && !spec.choices.includes(val)) opts.push(o(val, `${val} ${t("field.unknownChoice")}`));
     for (const ch of spec.choices) opts.push(o(ch, ch));
-    return `<label>${opt} <span class="desc">${optDesc(engine, opt, spec.description)}</span>
+    return `<label>${opt} <span class="desc">${optDesc(role, engine, opt, spec.description)}</span>
     <select data-opt="${opt}" data-type="${type}">${opts.join("")}</select></label>`;
   }
   const inputType = (type === "int" || type === "float") ? "number" : "text";
   const step = type === "float" ? ` step="any"` : "";
   const ph = spec.default === "" || spec.default === undefined ? t("field.default") : `${t("field.defaultPrefix")}: ${spec.default}`;
-  return `<label>${opt} <span class="desc">${optDesc(engine, opt, spec.description)}</span>
+  return `<label>${opt} <span class="desc">${optDesc(role, engine, opt, spec.description)}</span>
     <input type="${inputType}"${step} data-opt="${opt}" data-type="${type}" value="${val}" placeholder="${ph}"/></label>`;
 }
 // Per-engine device picker — only for engines that load onto a device
@@ -292,7 +294,7 @@ function optBlock(role, e) {
   const conc = concurrencyField(role, e);
   const fieldsHtml = keys.length
     ? `<div class="opt-fields">` +
-        keys.map((k) => fieldInput(e.name, k, schema[k], e.options[k])).join("") + `</div>`
+        keys.map((k) => fieldInput(role, e.name, k, schema[k], e.options[k])).join("") + `</div>`
     : (dev || conc ? "" : `<p class="opt-empty">${t("options.none")}</p>`);
   const saveBtn = (keys.length || dev || conc)
     ? `<button class="btn primary sm" data-save-engine="${e.name}">${t("btn.save")}</button>` : "";

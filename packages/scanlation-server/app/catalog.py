@@ -53,7 +53,7 @@ _CATALOG: dict[str, dict] = {
         # One package, two engines against SEPARATE llama-server instances: an LLM for
         # translation, a vision model (+ mmproj) for recognition.
         "roles": ["translator", "recognizer"],
-        "description": "Translation and text recognition via OpenAI-compatible /v1 servers (llama.cpp, vllm, LM Studio…; must be running, model selected in /admin).",
+        "description": "Translation and text recognition via OpenAI-compatible /v1 servers (llama.cpp, vllm, LM Studio…; must be running). Each llama-server serves one model, fixed at launch by -hf — /admin can't swap it.",
         "pip_args": [],
     },
 }
