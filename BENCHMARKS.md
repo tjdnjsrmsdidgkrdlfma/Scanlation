@@ -223,7 +223,7 @@ MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지
 
 - **보드는 GPU 온도를 모른다** — SYS_FAN 헤더는 CPU/보드 온도로 돈다. BIOS 팬커브로는 해결 불가, `fancontrol`로 `amdgpu` 온도에 매핑해야 한다.
 - **판단 기준은 `junction`(temp2)과 `mem`(temp3)** — `edge`는 느긋하다. Vega20는 HBM2가 먼저 병목되는 경우가 많다.
-- 확정 하드웨어: ARCTIC S4028-15K + 3D 프린팅 쉬라우드, **소음 상한 8,000~9,000 rpm**(냉각 설계의 하드 제약). 현재 **1팬 맨팬 가동**(SYS_FAN2, `nct6687` 아웃오브트리 드라이버로 OS 제어) — 이 상태로 포화 P1/P2/P4가 완주한다. 남은 게이트: 쉬라우드 2팬 vs 3팬 A/B와 `fancontrol` 영구화([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md) Task 2~5).
+- 확정 하드웨어: ARCTIC S4028-15K + 3D 프린팅 쉬라우드, **소음 상한 8,000~9,000 rpm**(냉각 설계의 하드 제약). **당분간 운영은 맨팬 1개**(SYS_FAN2, `nct6687` 드라이버, 30% duty ≈ 6,100rpm 고정, 부팅 영속 `MI50-fan-duty.service`) — 이 상태로 포화 P1/P2/P4·파이프라인 conc4가 완주한다. 고정 duty라 온도 연동이 없으므로 **다음 작업은 온도 알람(Task 5)**이고, 쉬라우드 A/B·`fancontrol`(Task 2~4)은 장착 시점으로 이월([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md)).
 
 ## ROCm 재도전 — 실험 완료: 된다, 그러나 빠르지는 않다
 
