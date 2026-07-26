@@ -11,6 +11,7 @@ Crivella의 `ocr_translate` + `ocr_extension` 스택을 대체합니다. **정�
 회전을 실제로 펴진 않습니다 — 계약은 회전 quad를 그대로 지원하니 회전 quad 검출기로 교체하면 되살아납니다.)
 
 > 설계 근거 & 단계별 로드맵 전체: **[SCANLATION_DESIGN.md](SCANLATION_DESIGN.md)**
+> 벤치마크 결론 종합(detector · recognizer · translator): **[BENCHMARKS.md](BENCHMARKS.md)**
 
 ---
 
