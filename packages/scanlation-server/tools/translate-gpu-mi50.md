@@ -195,6 +195,19 @@ raw 모델 검증(위) 이후 실제 파이프라인(`run_report` → 서버 →
 - 스케일 상한의 다음 병목은 GPU가 아니라 **CPU recognize 직렬화** — lockwait 평균 0(동1) → 172ms(동2) → 996ms(동4)로 급증. 9060 XT 재장착(recognize GPU 분리, TODO 5)의 정량 근거.
 - 전력 캡은 평균 기준이라 순간 193W 스파이크는 통과시킨다 — 캡을 걸어도 열 설계는 지속 부하 기준으로 한다.
 
+**재실행 (2026-07-26) — recognize GPU 이전 + 신냉각 1차 반영.** 같은 챕터, 회차별 개별 실행(junction ≤48°C 시작, 95/90 감시 — 발동 없음), recognize는 9060 XT의 PaddleOCR-VL:
+
+| 동시성 | wall-clock | 처리량 | detect+recognize 평균 | translate 평균 | max junction |
+|---|---|---|---|---|---|
+| 1 | 33.4s | 0.628 p/s | 551ms | 1020ms | 75°C |
+| 2 | 24.8s | 0.847 p/s (×1.35) | 623ms | 1592ms | 77°C |
+| 4 | 16.0s | **1.309 p/s (×2.08)** | 794ms | 2103ms | **74°C** |
+
+- **동시성 4가 crit 없이 완주** — 07-16의 차단 사유(20초 만에 100°C)가 해소됐다. 처리량은 translate 포화 천장(1.64 req/s)의 80%고, 남은 격차는 prefill 고정비 + d+r 직렬 구간의 몫.
+- **바꿀 운영값이 없다** — 서버 게이트(`translate_concurrency` 4, `gpu_concurrency` 2, recognize 풀 4)가 이미 이 흐름이고 확장은 무제한 발사라, 실사용이 이 스윕과 같은 게이트를 지난다.
+- conc2 첫 실행은 0.715로 나왔다(캐시 차가움) — 실행 순서 편향(§보충 방법론 교훈)의 재실증. 표는 웜 재실행 값.
+- 07-16 대비 conc1 42.5→33.4s, conc4 20.0→16.0s — recognize GPU 이전의 몫이 파이프라인 숫자로도 확인된다.
+
 **보충 — translate 단독 스케일링 (포화 공급, 2026-07-17).** 위 스윕은 파이프라인 처리량이라 translate 슬롯이 공급(recognize 직렬) 탓에 덜 채워진다 — "이미 인식 끝난 백로그가 무한 공급될 때 동시성이 뭘 사주나"를 [bench_translate_concurrency.py](bench_translate_concurrency.py)로 격리 측정했다: 실제 21페이지 텍스트로 페이지당 배치 body를 만들어(플러그인과 동일 — prefill 정직 지불) llama-server에 P개씩 직공급. **각 P를 junction 60°C에서 개별 실행**(자체 워밍업 포함 = 동일 조건, P2는 2회 재현):
 
 | P | 21요청 벽시계 | 처리량 | 요청당 | aggregate | 스케일 |
