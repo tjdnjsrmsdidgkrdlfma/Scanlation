@@ -196,7 +196,7 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 | **2** | 25.2s | **0.832 p/s (×1.68)** | 1367ms | 92°C |
 | 4 | 20.0s | 1.05 p/s (×2.13) | 1694ms | **100°C(crit)** |
 
-**동시성 4는 구냉각에서 20초 만에 junction crit에 닿았다.** 냉각 1차 보강 후 재실행(2026-07-26, recognize GPU 이전 반영)에서는 **동시성 4가 74°C로 완주한다**: conc1 0.628 / conc2 0.847 / conc4 **1.309 p/s**(×2.08) — translate 포화 천장(1.64 req/s)의 80%. 서버 게이트(`translate_concurrency` 4·`gpu_concurrency` 2·recognize 풀 4)가 이미 이 흐름이라 **실사용도 같은 수준으로 흐른다** — 바꿀 운영값이 없다. 첫 conc2는 0.715로 나왔는데 실행 순서 캐시 편향(교훈 4)이었고, 표준은 웜 재실행 값이다.
+**동시성 4는 구냉각에서 20초 만에 junction crit에 닿았다.** 냉각 1차 보강 후 재실행(2026-07-26, recognize GPU 이전 반영)에서는 **동시성 4가 74°C로 완주한다**: conc1 0.628 / conc2 0.847 / conc4 **1.309 p/s**(×2.08) — translate 포화 천장(1.64 req/s)의 80%. 서버 게이트(`translate_concurrency` 4, recognize 풀 4 — 게이트 폭은 풀을 따른다)가 이미 이 흐름이라 **실사용도 같은 수준으로 흐른다** — 바꿀 운영값이 없다. 첫 conc2는 0.715로 나왔는데 실행 순서 캐시 편향(교훈 4)이었고, 표준은 웜 재실행 값이다.
 
 **공급을 포화시킨 격리 측정**(백로그 무한 공급 가정, [bench_translate_concurrency.py](packages/scanlation-server/tools/bench_translate_concurrency.py))에서는 P4가 P2 대비 **+22%**가 실재한다(1.23 → 1.49 req/s). 수확체감의 절반은 요청당 유니크 프롬프트의 **prefill 고정비**라 슬롯을 늘려도 안 줄어든다. 냉각 1차 보강 후 재실측(2026-07-26, 맨팬 ~6,500rpm)은 **스로틀 없이 P1/P2/P4 완주 — 1.03/1.39/1.64 req/s(피크 81/89/78°C)**. 구 수치는 부분 스로틀 속의 값이었고, 천장은 **1.64 req/s**다.
 

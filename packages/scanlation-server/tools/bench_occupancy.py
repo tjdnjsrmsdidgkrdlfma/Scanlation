@@ -4,7 +4,8 @@
 bundle, so workers idle when a page's crops sum < W" claim, and whether erasing image
 boundaries (a crop queue / stage separation) would actually speed things up.
 
-For each K it: sets the active recognizer's ``gpu_concurrency`` to K, resets the
+For each K it: sets the active recognizer's ``recognize_concurrency`` to K (pool
+size; the gate width mirrors it — there is no separate gate knob), resets the
 server's occupancy sink, fires every image at once (skip_translate, force), then reads
 two numbers that together answer "how much / how meaningful":
 
@@ -74,7 +75,7 @@ def _measure(server: str, token: str, imgs: list, k: int | None, rec: str | None
     if k is not None:
         if not rec:
             raise SystemExit("cannot set K: no active recognizer found in /get_settings/")
-        _req(server, "/set_gpu_concurrency/", token, method="POST",
+        _req(server, "/set_recognize_concurrency/", token, method="POST",
              body={"engine": rec, "concurrency": k})
     _req(server, "/bench_occupancy_reset/", token, method="POST")
     ok, failed, wall = _fire_parallel(server, token, imgs, skip_translate=True)
@@ -83,15 +84,16 @@ def _measure(server: str, token: str, imgs: list, k: int | None, rec: str | None
 
 
 def _current_k(settings: dict, rec: str | None):
-    """Effective gpu_concurrency (K) for the active recognizer from /get_settings/:
-    the per-engine override if set, else the server default. So a no-sweep run can
-    still label which K it measured at instead of a bare '-'."""
+    """Effective recognize_concurrency (K = pool size = gate width) for the active
+    recognizer from /get_settings/: the per-engine override if set, else the server
+    default. So a no-sweep run can still label which K it measured at instead of a
+    bare '-'."""
     if not settings:
         return None
-    default = settings.get("gpu_concurrency_default")
+    default = settings.get("recognize_concurrency_default")
     for e in (settings.get("engines") or {}).get("recognizer", []):
         if e.get("name") == rec:
-            ov = e.get("gpu_concurrency")
+            ov = e.get("recognize_concurrency")
             return int(ov) if ov not in (None, "") else default
     return default
 
@@ -115,7 +117,7 @@ def main() -> int:
     ap.add_argument("--server", default=os.environ.get("SCANLATION_SERVER", "http://127.0.0.1:4010"))
     ap.add_argument("--token", default=os.environ.get("SCANLATION_AUTH_TOKEN", ""))
     ap.add_argument("--k", nargs="*", type=int, default=None,
-                    help="gpu_concurrency values to sweep (sets each on the active recognizer). "
+                    help="recognize_concurrency values to sweep (pool size; the gate width follows). "
                          "Omit to measure once at the server's current K.")
     ap.add_argument("--out", default=None, help="also write the rows as JSON to this path")
     a = ap.parse_args()

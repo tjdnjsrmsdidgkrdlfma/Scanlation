@@ -70,26 +70,24 @@ def test_set_recognize_concurrency_validates():
         state.set_recognize_concurrency("dummy", None)
 
 
-def test_set_gpu_concurrency_validates():
-    """Per-recognizer gate size: set it, floor a sub-1 value, reset (null -> global
-    default), reject an unknown engine. Mirrors /set_recognize_concurrency/."""
+def test_set_recognize_concurrency_resizes_gate():
+    """The gate width mirrors the pool size: changing the ACTIVE recognizer's worker
+    count swaps in a gate of that width (in-flight inference finishes on the old
+    one); a non-active engine's change leaves the gate alone."""
     from app.state import state
 
     c = client()
+    saved = state.selection.recognizer
     try:
-        r = c.post("/set_gpu_concurrency/", json={"engine": "dummy", "concurrency": 4})
-        assert r.status_code == 200 and r.json()["concurrency"] == 4
-        assert state.resolve_gpu_concurrency("dummy") == 4
-        # a sub-1 value is floored to 1 (serial)
-        r = c.post("/set_gpu_concurrency/", json={"engine": "dummy", "concurrency": 0})
-        assert r.status_code == 200 and r.json()["concurrency"] == 1
-        # null resets to the global default -> the override is removed
-        assert c.post("/set_gpu_concurrency/", json={"engine": "dummy", "concurrency": None}).status_code == 200
-        assert "dummy" not in state.selection.gpu_concurrency
-        # unknown engine -> 400
-        assert c.post("/set_gpu_concurrency/", json={"engine": "nope", "concurrency": 2}).status_code == 400
+        assert c.post("/set_engines/", json={"recognizer": "dummy"}).status_code == 200
+        old_gate = state.gpu_gate
+        assert c.post("/set_recognize_concurrency/", json={"engine": "dummy", "concurrency": 3}).status_code == 200
+        assert state.gpu_gate is not old_gate                   # active engine -> gate swapped...
+        assert state.gpu_gate._k == 3                           # ...at the pool's width
     finally:
-        state.set_gpu_concurrency("dummy", None)
+        state.set_recognize_concurrency("dummy", None)
+        state.set_engines(None, saved, None)
+        state.rebuild_gpu_gate()
 
 
 TESTS = [
@@ -97,7 +95,7 @@ TESTS = [
     test_set_languages_validates,
     test_set_engine_device_validates,
     test_set_recognize_concurrency_validates,
-    test_set_gpu_concurrency_validates,
+    test_set_recognize_concurrency_resizes_gate,
 ]
 
 if __name__ == "__main__":

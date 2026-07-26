@@ -48,7 +48,7 @@
 
 ### 0-B. GPU 경로 레버가 실제로 켜져 있는지 점검·명문화
 - **현황**: [recognize-gpu-speed.md](packages/scanlation-server/tools/recognize-gpu-speed.md)에 실측된 레버들이 **배포 env에 달림**. flash/AOTriton(`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`) → vision attention **~3.7x**, 다운스케일 캡(`downscale_to_cap`, PaddleOCR-VL `recognize` 입력 전) → **~1.66x**(이미 구현). 코드가 아니라 **환경에서 빠지면 그냥 손해**.
-- **할 일**: 실제 배포에서 env가 적용되는지 확인하고, README/`/admin` 도움말에 "GPU 배포 시 이 env" 체크리스트로 명문화. 멀티워커(`recognize_concurrency`)·게이트(`gpu_concurrency`)는 opt-in 유지하되 GPU에서 켤 때의 값 가이드만.
+- **할 일**: 실제 배포에서 env가 적용되는지 확인하고, README/`/admin` 도움말에 "GPU 배포 시 이 env" 체크리스트로 명문화. 멀티워커(`recognize_concurrency` — 게이트 폭도 이 값을 따른다)는 opt-in 유지하되 GPU에서 켤 때의 값 가이드만.
 - **효과/위험**: 이미 검증된 큰 배수를 **실제로 받게** 함. 코드 변경 없음.
 
 ### 0-C. `/admin` 조절 힌트 — 동시성이 실제로 이득 나게
@@ -57,7 +57,7 @@
 - **효과/위험**: opt-in 정책 유지하면서 "켜면 실제로 빨라지는" 경로. 순수 텍스트.
 
 ### 0-D. detect 직렬 천장 문서화
-- **현황**: `gpu_concurrency>1`로 이미지 겹침을 켜도 detect forward는 전 이미지 직렬 — 검출기가 **1-worker 풀**([engine_pool.py](packages/scanlation-server/app/engine_pool.py))에서 돌기 때문(**설계상 의도**: detect는 페이지당 1회라 팬아웃할 게 없고, 워커 수를 늘리면 모델 사본만 늘어난다).
+- **현황**: `recognize_concurrency>1`(게이트 폭 동반)로 이미지 겹침을 켜도 detect forward는 전 이미지 직렬 — 검출기가 **1-worker 풀**([engine_pool.py](packages/scanlation-server/app/engine_pool.py))에서 돌기 때문(**설계상 의도**: detect는 페이지당 1회라 팬아웃할 게 없고, 워커 수를 늘리면 모델 사본만 늘어난다).
 - **할 일**: GPU 겹침 사용 시 "detect는 여전히 직렬"이라는 **알려진 천장**을 README/주석에 기록.
 - **효과/위험**: 오해 방지. 코드 변경 없음.
 

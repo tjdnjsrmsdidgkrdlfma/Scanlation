@@ -54,11 +54,10 @@ def _engine_entries(role: str) -> list[dict]:
             "schema": serialize_schema(cls),
             "options": dict(state.selection.options.get(opt_key(role, name), {})),
             "device": state.selection.devices.get(name, ""),
-            # per-engine recognize worker-pool override ("" = the global default);
-            # the admin UI shows this field only for recognizers that load onto a device
+            # per-engine recognize worker-pool override ("" = the global default),
+            # which also sets the gate width (max concurrent images); the admin UI
+            # shows this field only for recognizers that load onto a device
             "recognize_concurrency": state.selection.recognize_concurrency.get(name, ""),
-            # per-recognizer gate size (max concurrent images); same UI condition as above
-            "gpu_concurrency": state.selection.gpu_concurrency.get(name, ""),
         })
     installed_names = {e["name"] for e in entries}
     for name, entry in catalog().items():
@@ -78,7 +77,6 @@ def _engine_entries(role: str) -> list[dict]:
             "options": {},
             "device": "",
             "recognize_concurrency": "",
-            "gpu_concurrency": "",
         })
     return entries
 
@@ -108,9 +106,8 @@ def get_settings() -> dict:
         "languages": LANGUAGES,
         # Global fallback the per-engine recognize-worker field shows as its placeholder
         # (an engine with no override runs this many workers; 1 = a 1-worker pool).
+        # The gate width (max concurrent images) follows the same value.
         "recognize_concurrency_default": settings.recognize_concurrency,
-        # Global fallback for the per-recognizer gate-size field (1 = serial images).
-        "gpu_concurrency_default": settings.gpu_concurrency,
         "gpus": list_gpus(),                # [{index, name}] for the per-engine device picker
         "gpu_vendor": detect_gpu_vendor(),  # amd/nvidia/both/None from device nodes (torch backend auto-pick)
         "torch_build": installed_torch_build(),  # cpu/cuda/rocm/None — for the backend-mismatch warning

@@ -28,7 +28,6 @@ def test_state_json_roundtrip():
         st.set_languages("en", "ja")
         st.set_engine_device("rec-x", "cuda")
         st.set_recognize_concurrency("rec-x", 4)
-        st.set_gpu_concurrency("rec-x", 3)
         st.set_options("detector", "x", {"a": 1})
         st.save_prompt("mine", "PROMPT")
         old_sem = st.translate_sem
@@ -39,7 +38,6 @@ def test_state_json_roundtrip():
         # a fresh instance reads state.json back; dataclass equality covers every field
         assert AppState().selection == st.selection
         assert AppState().selection.recognize_concurrency == {"rec-x": 4}  # per-engine pool size persisted
-        assert AppState().selection.gpu_concurrency == {"rec-x": 3}  # per-recognizer gate size persisted
         assert AppState().selection.verbose_log is True  # verbose toggle persisted
         assert AppState().selection.translate_concurrency == 8  # concurrency persisted
         assert AppState().selection.model_idle_unload_minutes == 20  # idle-unload window persisted
@@ -127,10 +125,10 @@ def test_recognize_concurrency_override():
         context.base_dir = saved_base
 
 
-def test_gpu_concurrency_override_and_gate_rebuild():
-    """Per-recognizer gate size mirrors recognize_concurrency (absent -> global
-    default; explicit int stored incl. 1; None resets). Rebuilding for the active
-    recognizer swaps in a fresh InferenceGate instance."""
+def test_gate_width_follows_recognize_concurrency():
+    """The InferenceGate width mirrors the active recognizer's worker-pool size —
+    there is no separate gate knob. Rebuilding swaps in a fresh gate sized by
+    resolve_recognize_concurrency (override, else the global default)."""
     from app.config import settings
 
     saved_base = context.base_dir
@@ -139,18 +137,31 @@ def test_gpu_concurrency_override_and_gate_rebuild():
         st = AppState()
         eng = "rec-y"
         st.set_engines(None, eng, None)                         # make it the active recognizer
-        assert st.resolve_gpu_concurrency(eng) == max(1, settings.gpu_concurrency)  # no override
         old_gate = st.gpu_gate
-        st.set_gpu_concurrency(eng, 4)
+        st.set_recognize_concurrency(eng, 4)
         st.rebuild_gpu_gate()
-        assert st.resolve_gpu_concurrency(eng) == 4
-        assert st.gpu_gate is not old_gate                      # gate swapped for the new size
-        assert st.selection.gpu_concurrency[eng] == 4
-        st.set_gpu_concurrency(eng, 1)                          # explicit 1 = serial, kept
-        assert st.resolve_gpu_concurrency(eng) == 1
-        st.set_gpu_concurrency(eng, None)                       # None resets to the global default
-        assert eng not in st.selection.gpu_concurrency
-        assert st.resolve_gpu_concurrency(eng) == max(1, settings.gpu_concurrency)
+        assert st.gpu_gate is not old_gate                      # gate swapped...
+        assert st.gpu_gate._k == 4                              # ...at the pool's width
+        st.set_recognize_concurrency(eng, None)                 # None resets to the global default
+        st.rebuild_gpu_gate()
+        assert st.gpu_gate._k == max(1, settings.recognize_concurrency)
+    finally:
+        context.base_dir = saved_base
+
+
+def test_state_load_ignores_unknown_keys():
+    """A stale state.json key from a removed setting (e.g. the old gpu_concurrency
+    dict) must be dropped on load — NOT TypeError the ctor, which would silently
+    reset the whole selection to defaults."""
+    saved_base = context.base_dir
+    try:
+        context.base_dir = Path(tempfile.mkdtemp())
+        st = AppState()
+        st.set_engines("det-x", "rec-x", "tr-x")
+        data = json.loads(st._path.read_text(encoding="utf-8"))
+        data["gpu_concurrency"] = {"rec-x": 3}                  # key removed from Selection
+        st._path.write_text(json.dumps(data), encoding="utf-8")
+        assert AppState().selection.recognizer == "rec-x"       # kept, not reset to defaults
     finally:
         context.base_dir = saved_base
 
@@ -187,14 +198,6 @@ def test_config_env_seeds_settings_and_selection():
     finally:
         os.environ.pop("SCANLATION_RECOGNIZE_CONCURRENCY", None)
 
-    os.environ["SCANLATION_GPU_CONCURRENCY"] = "4"
-    try:
-        assert Settings().gpu_concurrency == 4                 # env read per instance
-        os.environ["SCANLATION_GPU_CONCURRENCY"] = "0"
-        assert Settings().gpu_concurrency == 1                 # floor 1 (1 = serial)
-    finally:
-        os.environ.pop("SCANLATION_GPU_CONCURRENCY", None)
-
     # Selection defaults are seeded from the settings singleton (wiring, not literals)
     sel = Selection()
     assert sel.translate_concurrency == settings.translate_concurrency
@@ -203,7 +206,6 @@ def test_config_env_seeds_settings_and_selection():
     assert sel.torch_vendor == settings.torch_vendor
     assert sel.torch_index == settings.torch_index
     assert sel.recognize_concurrency == {}                 # per-engine overrides start empty
-    assert sel.gpu_concurrency == {}                       # per-recognizer overrides start empty
 
 
 TESTS = [
@@ -212,7 +214,8 @@ TESTS = [
     test_engine_device_override,
     test_options_are_scoped_per_role,
     test_recognize_concurrency_override,
-    test_gpu_concurrency_override_and_gate_rebuild,
+    test_gate_width_follows_recognize_concurrency,
+    test_state_load_ignores_unknown_keys,
     test_config_env_seeds_settings_and_selection,
 ]
 

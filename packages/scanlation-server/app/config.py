@@ -74,18 +74,10 @@ class Settings:
     # per-engine LOAD-TIME setting (pool built with N workers), so it lives in
     # Selection.recognize_concurrency (a dict, like devices), NOT as an OPTION_SCHEMA
     # option; this is only the global fallback when an engine has no override.
+    # The same value sizes the InferenceGate (max concurrent images through
+    # detect+recognize) — gate width = pool size, no separate knob.
     recognize_concurrency: int = field(
         default_factory=lambda: _env_int("SCANLATION_RECOGNIZE_CONCURRENCY", 1, floor=1)
-    )
-
-    # First-run default for the gate size (per-recognizer, overridable in /admin plugin
-    # options). Floor 1: 1 = serial detect+recognize (today's behavior, byte-identical);
-    # >1 lets that many images run the GPU half at once so their crops fill the SHARED
-    # recognize pool together (cross-image overlap), lifting the per-image crop ceiling.
-    # Like recognize_concurrency it's a per-recognizer LOAD-TIME setting (sizes the
-    # InferenceGate) stored in Selection.gpu_concurrency; this is only the global fallback.
-    gpu_concurrency: int = field(
-        default_factory=lambda: _env_int("SCANLATION_GPU_CONCURRENCY", 1, floor=1)
     )
 
     # First-run default for idle model unload (MINUTES): a local torch engine

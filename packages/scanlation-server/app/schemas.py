@@ -44,13 +44,7 @@ class SetEngineDeviceRequest(BaseModel):
 # --- /set_recognize_concurrency/ --------------------------------------------
 class SetRecognizeConcurrencyRequest(BaseModel):
     engine: str
-    concurrency: Optional[int] = None    # worker-pool size (>=1); null resets to the global default
-
-
-# --- /set_gpu_concurrency/ --------------------------------------------------
-class SetGpuConcurrencyRequest(BaseModel):
-    engine: str
-    concurrency: Optional[int] = None    # gate size / max concurrent images (>=1); null resets to the global default
+    concurrency: Optional[int] = None    # worker-pool size (>=1), which also sets the gate width; null resets to the global default
 
 
 # --- /install_plugins/ ------------------------------------------------------
