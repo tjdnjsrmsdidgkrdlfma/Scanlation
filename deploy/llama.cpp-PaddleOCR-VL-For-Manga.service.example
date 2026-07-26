@@ -1,14 +1,19 @@
 [Unit]
-After=network-online.target
-Wants=network-online.target
+Description=recognize llama-server (PaddleOCR-VL)
+# Socket-activated: the .socket owns the public port and the proxy starts this on
+# demand, so do NOT enable this unit -- enable the .socket instead. StopWhenUnneeded
+# lets it go when the proxy idles out, which is what frees VRAM and lets the card
+# suspend (llama-server otherwise holds the model for its whole process lifetime).
+StopWhenUnneeded=yes
 
 [Service]
 # Index is from `llama-server --list-devices` run WITHOUT this env. Pin only this
 # way: --device leaves the vision encoder (mtmd) free to pick another card, and
 # anything that hides a render node (InaccessiblePaths=) renumbers the survivors.
 Environment="GGML_VK_VISIBLE_DEVICES=2"
-ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -m /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-BF16.gguf --mmproj /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-mmproj-BF16.gguf -ngl 99 --temp 0 --host 0.0.0.0 --port 8090
+# Bind the BACKEND port here; the proxy fronts it on the public one.
+ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -m /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-Q8_0.gguf --mmproj /opt/models/paddleocr-vl-gguf/PaddleOCR-VL-For-Manga-mmproj-BF16.gguf -ngl 99 --temp 0 --host 127.0.0.1 --port 8091
+# llama-server has no sd_notify, so systemd would call it "started" before it binds
+# and the proxy would forward into a refused port. Hold readiness until /health.
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf -o /dev/null http://127.0.0.1:8091/health && exit 0; sleep 1; done; exit 1'
 Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target

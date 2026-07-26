@@ -1,0 +1,9 @@
+[Unit]
+Description=recognize llama-server proxy (idle-exit)
+Requires=llama.cpp-PaddleOCR-VL-For-Manga.service
+After=llama.cpp-PaddleOCR-VL-For-Manga.service
+
+[Service]
+# Exiting on idle is what releases the server (StopWhenUnneeded) -> VRAM back and
+# the card free to suspend. Cold start is ~2s, so a short idle time is cheap.
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=5min 127.0.0.1:8091

@@ -1,0 +1,12 @@
+[Unit]
+Description=recognize llama-server socket (on-demand)
+
+[Socket]
+ListenStream=0.0.0.0:8090
+# Activate the PROXY, not the server. Without this, systemd activates the
+# same-named .service directly: llama-server ignores the inherited fd, and since
+# nothing Requires it, StopWhenUnneeded kills it right back (start-limit loop).
+Service=llama.cpp-PaddleOCR-VL-For-Manga-proxy.service
+
+[Install]
+WantedBy=sockets.target

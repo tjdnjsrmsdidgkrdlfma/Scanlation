@@ -239,7 +239,7 @@ MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지
 - **다음 레버가 여기다**(파이프라인의 62%). 2026-07-16 스윕의 열 상한은 그대로지만 **공급이 바뀌었다** — 그때는 "다음 병목은 CPU recognize 직렬화"로 끝났는데 지금은 lockwait이 0이라 translate 슬롯이 처음으로 제대로 채워진다. 같은 동시성에서 더 나올 여지가 있다.
 - **ollama 교체 후 페이지 기준 재측정** — 단일 decode -6.6%가 페이지 total에 얼마로 나타나는지, 그리고 `OLLAMA_NUM_PARALLEL`이 `--parallel`과 같은 슬롯 고정비를 갖는지 확인.
 - 냉각 보강 → 동시성 4 재평가(+22% 회수). **P2조차 포화에서 94°C**라 현 냉각으로 측정 가능한 건 P1뿐이다.
-- **recognize를 온디맨드로** — 9060 XT는 유휴 시 D3cold로 내려가는데(`power/control=auto`), 그 상태에서 요청이 오면 상주 llama-server의 Vulkan 컨텍스트가 깨져 그 요청이 실패한다. 절전과 상주 서버가 상충하므로 socket activation / 프록시 / recognize도 ollama로 중 하나가 필요하다.
+- ~~**recognize를 온디맨드로**~~ **완료** — systemd socket activation(socket + `systemd-socket-proxyd --exit-idle-time=5min` + `StopWhenUnneeded`)으로 8090을 온디맨드화했다. 유휴 시 3.74GB → 0.06GB, 콜드 스타트 2.0초. 공개 포트가 그대로라 플러그인 설정은 안 바뀐다. ※ **recognize를 ollama로 옮기는 건 불가** — ollama 변환기가 `PaddleOCRVLForConditionalGeneration`을 지원하지 않고, 이미 있는 mmproj GGUF를 붙일 Modelfile 지시자도 없다(bare GGUF는 `model does not support multimodal requests`).
 
 ---
 

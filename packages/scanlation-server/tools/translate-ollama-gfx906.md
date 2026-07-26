@@ -110,6 +110,49 @@ t+300s  loaded_models=0  vram=0.01GB    ← KEEP_ALIVE 만료
 
 카드를 완전히 놓는다. 단 **VRAM만 회수되고 카드는 D0에 머문다** — MI50는 `power/control=on`(런타임 PM 비활성)이라 유휴 전력·발열은 그대로다.
 
+## recognize도 유휴에 놓게 한다 — socket activation
+
+[recognize-decode-bound.md §5](recognize-decode-bound.md)가 llama.cpp 교체의 대가로 이미 지목한 항목이다: "llama-server는 프로세스 수명 동안 모델을 붙들어 9060 XT가 D3hot으로 못 내려가고 상시 ~15W를 먹는다 — 회수하려면 TTL 프록시가 필요하다(콜드스타트 ~1.9초라 싸다)." **그 처방을 실행한 기록**이 이 절이다. recognize를 ollama로 옮겨 해결하는 길은 막혀 있다(§아래).
+
+llama-swap 대신 **systemd socket activation**을 골랐다 — recognize는 모델이 하나뿐이라 llama-swap의 강점(모델 스왑)을 쓸 데가 없고, 남는 이득인 health-wait는 `ExecStartPost` 한 줄로 대체되므로 새 의존성을 유지할 값을 하지 못한다. 유닛 셋:
+
+```ini
+# …-PaddleOCR-VL-For-Manga.socket   — 공개 포트를 항상 열어둔다(요청이 connection-refused를 안 본다)
+[Socket]
+ListenStream=0.0.0.0:8090
+Service=llama.cpp-PaddleOCR-VL-For-Manga-proxy.service   # ← 필수
+
+# …-proxy.service — 유휴에 스스로 빠지고, 그러면 아래 서버도 "불필요"가 된다
+[Unit]
+Requires=llama.cpp-PaddleOCR-VL-For-Manga.service
+After=llama.cpp-PaddleOCR-VL-For-Manga.service
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=5min 127.0.0.1:8091
+
+# …-PaddleOCR-VL-For-Manga.service — 실제 서버는 8091로 내려간다
+[Unit]
+StopWhenUnneeded=yes
+[Service]
+ExecStart=… --host 127.0.0.1 --port 8091
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf -o /dev/null http://127.0.0.1:8091/health && exit 0; sleep 1; done; exit 1'
+```
+
+- **`Service=`를 빼면 안 된다.** socket은 기본적으로 **같은 이름의 service**를 활성화하므로, 그러면 프록시를 건너뛰고 실제 서버가 직접 깨어난다 — 그리고 아무도 그걸 `Requires`하지 않으니 `StopWhenUnneeded`가 즉시 죽여서 start-limit까지 간다(실제로 밟았다).
+- **`ExecStartPost`의 health 폴링이 llama-server의 socket-activation 미지원을 메운다.** llama-server는 전달된 fd를 안 받고 자기가 bind하므로 프록시가 먼저 붙으면 connection refused가 난다. 준비될 때까지 systemd가 "시작 완료"로 안 보게 막는다.
+- 공개 포트가 8090으로 유지되므로 **플러그인 설정(`LLAMACPP_RECOGNIZE_ENDPOINT`)은 그대로**다.
+- `systemctl disable` 실제 서버 + `systemctl enable` socket — 부팅 시엔 socket만 뜬다.
+
+**실측**: 유휴 3.74GB → **0.06GB**, 콜드 스타트 **2.0초**(모델이 498MB Q8_0 + mmproj라 가볍다), 파이프라인 정상(recognize 479ms).
+
+## 최종 절전 상태
+
+| | idle 언로드 | PCI D3 |
+|---|---|---|
+| **MI50** (translate/ollama) | ✅ `OLLAMA_KEEP_ALIVE=5m` → 15.5GB → 0.01GB | **안 간다** — `power/control=on`(런타임 PM 비활성)이라 모델을 언로드해도 `D0`에 머물고 유휴 ~20W를 계속 먹는다 |
+| **9060 XT** (recognize/llama.cpp) | ✅ 프록시 유휴 종료 → 3.74GB → 0.06GB | ✅ `ctrl=auto`, **D3cold 실측** |
+
+즉 MI50에서 얻을 수 있는 건 **VRAM 회수까지**고, D3는 9060 XT 몫이다. (MI50의 `on`이 카드/드라이버가 런타임 PM을 못 해서인지, 어딘가에서 설정된 값인지는 확인하지 않았다 — 절전 설정을 실험 대상으로 삼지 않았다.)
+
 ## 함정 둘 (이번에 밟은 것)
 
 **① `/plugins` 볼륨의 구버전 코드가 `git pull`을 무력화한다.** 컨테이너를 재빌드해도 플러그인은 `/plugins` 볼륨에서 임포트되므로 **옛 코드가 계속 살아 있다.** 이번엔 그 때문에 recognize가 계속 실패했고, 증상이 원인을 가렸다 — 워커가 HTTP 에러를 던지려다 `TypeError: HTTPStatusError.__init__() missing 2 required keyword-only arguments`로 죽어 `BrokenProcessPool`이 됐고, 진짜 에러는 안 보였다. **판별**: 설치본과 리포지토리의 해시를 비교한다.
@@ -121,4 +164,4 @@ md5sum packages/scanlation-llama-cpp/scanlation_llama_cpp/recognizer.py
 
 **해결**: `POST /install_plugins/ {"plugins":{...},"force":true}` → **서버 재시작**(임포트된 모듈은 재시작 없이 안 바뀐다).
 
-**② 9060 XT의 런타임 PM(D3cold)이 상주 서버의 Vulkan 컨텍스트를 깨뜨린다.** 그 카드는 `power/control=auto`라 유휴 시 **D3cold까지** 내려간다(콜드 부팅 후 recognize 요청이 없으면 그렇게 된다). 그 상태에서 요청이 오면 카드는 깨어나지만 recognize llama-server가 크래시하고 `Restart=on-failure`로 재기동된다 — 그 요청은 실패한다. 절전과 "GPU 컨텍스트를 열어둔 상주 서버"는 이 조합에서 상충한다. 근본 해법은 recognize를 **온디맨드로 띄우는 것**(socket activation / 프록시 / recognize도 ollama로)이다.
+**② 상관관계를 인과로 읽지 않는다 — D3cold는 무죄였다.** ①의 증상을 처음 봤을 때 마침 9060 XT가 D3cold였고(`power/control=auto`라 유휴 시 거기까지 내려간다), "잠든 카드가 상주 서버의 Vulkan 컨텍스트를 깨뜨렸다"고 진단했다. **실측으로 반증됐다** — `server=active` + `card=D3cold` 상태에 실제 인식 요청을 넣으니 카드가 깨어나 정상 처리되고(recognize 1418ms) 서버는 살아남았다. 그때 저널에 있던 core-dump는 요청 때문이 아니라 **유닛을 편집하고 `daemon-reload`한 창에서 난 재기동 실패**였다. 원인은 ①뿐이었다.

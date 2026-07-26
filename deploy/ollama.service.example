@@ -1,0 +1,27 @@
+[Unit]
+Description=ollama (self-built for gfx906: vulkan + rocm_v7_2)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# systemd passes no $HOME and ollama needs one for its key/config dir -> it exits
+# immediately without this.
+Environment="HOME=/root"
+# Pin the translate card by UUID (`rocm-smi --showuniqueid`): indexes move, UUIDs
+# don't. The other GPU stays free for the recognize llama-server, which pins itself
+# in the Vulkan namespace (GGML_VK_VISIBLE_DEVICES) -- different namespace, no clash.
+Environment="ROCR_VISIBLE_DEVICES=GPU-3b3210a17337ec1b"
+Environment="OLLAMA_MODELS=/opt/ollama/models"
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+# The reason for running ollama at all: llama-server held the card's VRAM around the
+# clock because a translator is out-of-process and thus outside idle_unload's reach.
+Environment="OLLAMA_KEEP_ALIVE=5m"
+Environment="OLLAMA_MAX_LOADED_MODELS=1"
+# Keep in sync with /admin's translate concurrency -- real parallelism is the lower
+# of the two.
+Environment="OLLAMA_NUM_PARALLEL=4"
+ExecStart=/opt/ollama-dist/bin/ollama serve
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
