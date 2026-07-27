@@ -198,7 +198,16 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 | 실측 / 실효 대역폭 | 89.3 t/s / ~196 GB/s |
 | **peak 대비** | **19%** |
 
-**같은 llama.cpp가 9060 XT에서는 65%를 낸다** — B=1 decode가 현실적으로 닿는 영역이 그쯤이므로 translate는 3배 이상을 흘리고 있다. 유력한 몫은 KV다: 슬롯당 `n_ctx` 4096에서 할당 폭 전체를 매 스텝 읽으면 +0.25~0.88 GB/token이 붙어 천장이 ~330~420 t/s로 내려간다. **`-c` 16k→32k = -42%가 그 서명이고, 그래서 다음 레버는 `-c` 하향이다**(선행: 페이지당 실제 프롬프트 토큰 분포 확인). 유도·재현은 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md).
+**같은 llama.cpp가 9060 XT에서는 65%를 낸다** — B=1 decode가 현실적으로 닿는 영역이 그쯤이므로 translate는 3배 이상을 흘리고 있다.
+
+**그런데 그 격차는 대역폭 효율이 아니다.** KV(할당 4096 전폭 0.88GB)를 전부 낭비로 치고 대역폭을 이론 peak로 쳐도 메모리는 토큰당 11.2ms 중 **3.0ms(27%)**뿐이다 — 나머지 73%는 메모리를 읽는 시간이 아니다. 소거하면 **연산 바운드 아님**(150W 캡 비용 0)이고 **백엔드 문제도 아니다**(HIP 88.1 ≈ Vulkan 89.3). 남는 건 커널 디스패치·동기화 지연이고, 이 모델이 유독 디스패치 밀도가 높다(레이어당 norm/scale 텐서 10개, dense FFN과 routed expert 병존, hidden 2816). **⚠️ 여기까지 중 "디스패치가 범인"은 가설이다** — 확증은 `rocprof`/`GGML_VULKAN_PERF_LOGGER`로 커널을 직접 세는 것이고 아직 안 했다.
+
+| 레버 | 회수 가능분 |
+|---|---|
+| `-c` 하향 (실측 컨텍스트 122~347 토큰인데 슬롯당 4096 할당) | 스텝의 **8%** |
+| 나머지 73% | 설정으로 불가 |
+
+**translate decode를 완전히 고쳐도 파이프라인 상한은 1.7배**(페이지 2101.6 → ~1240ms)다. 유도·재현은 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md).
 
 ## 동시성과 열
 
@@ -253,7 +262,8 @@ MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지
 ## 남은 일
 
 - ~~다음 레버(파이프라인의 62%)~~ **실측 완료 (2026-07-26)** — 공급 교체(recognize GPU)의 몫이 파이프라인에서 확인됐다: conc1 0.494 → 0.628, conc4 1.05 → **1.309 p/s**. 남은 격차(천장 1.64의 20%)는 prefill 고정비와 d+r 직렬 구간의 몫이다.
-- **`-c` 하향 스윕** — 대역폭 지붕이 실측 89.3을 peak의 19%로 놓았고, 남는 몫의 유력한 행선지가 할당 KV다(`-c` 16k→32k = -42%). 슬롯당 4096을 줄이는 게 다음 레버. **선행: 페이지당 실제 프롬프트 토큰 분포 확인** — `--n-predict 1024` 백스톱과 함께여야 하한이 정해진다.
+- **`-c` 하향 스윕** — 실측 컨텍스트가 122~347 토큰인데 슬롯당 4096을 잡는다. `-c 8192`는 안전한 드롭인이고, 더 내리려면 `--n-predict`(현 1024, 실제 생성 34~116)를 먼저 낮춘다. **다만 스텝의 8%짜리다** — 대역폭 지붕이 남은 73%는 KV가 아니라고 말한다.
+- **디스패치 프로파일 (가설 확증)** — 스텝의 73%가 메모리도 연산도 아닌 시간인데, 범인을 커널 디스패치로 지목한 건 아직 가설이다. `rocprof`/`GGML_VULKAN_PERF_LOGGER`로 토큰당 커널 수와 커널당 시간을 세면 끝난다. **이게 확증돼야 "모델을 바꿔야 하나"가 답이 있는 질문이 된다.**
 - **translate에 idle 언로드는 두지 않는다** — MI50가 D3에 못 가서 VRAM 회수의 절전 이득이 0이고, 첫 요청 재로드(~5초)만 붙는다. 카드가 바뀌면(D3 되는 GPU) 다시 볼 항목이다.
 - ~~냉각 보강 → 포화·파이프라인 동시성 재평가~~ **완료 (2026-07-26)** — 맨팬 1개(~6,500rpm)로 포화 P1/P2/P4 완주(천장 1.49 → **1.64 req/s**), 파이프라인 conc4 **1.309 p/s**(피크 74°C, crit 해소). 남은 것: 쉬라우드 A/B·`fancontrol`([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md) Task 2~5), **수 분 지속 부하 검증**(지금까지는 16~42초 버스트).
 - ~~**recognize를 온디맨드로**~~ **완료** — systemd socket activation(socket + `systemd-socket-proxyd --exit-idle-time=5min` + `StopWhenUnneeded`)으로 8090을 온디맨드화했다. 유휴 시 3.74GB → 0.06GB, 콜드 스타트 2.0초. 공개 포트가 그대로라 플러그인 설정은 안 바뀐다. ※ **recognize를 ollama로 옮기는 건 불가** — ollama 변환기가 `PaddleOCRVLForConditionalGeneration`을 지원하지 않고, 이미 있는 mmproj GGUF를 붙일 Modelfile 지시자도 없다(bare GGUF는 `model does not support multimodal requests`).
