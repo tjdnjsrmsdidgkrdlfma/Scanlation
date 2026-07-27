@@ -186,6 +186,20 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 - **`strip_think`처럼 생성 뒤 잘라내는 건 속도에 무효** — 생성 자체를 막아야 한다. 그래서 옵션을 제거하고 `think`(=`enable_thinking`) 토글로 옮겼다.
 - **서버 `--reasoning-budget 0`은 채택하지 않았다** — 하드 캡이라 per-request `enable_thinking`을 덮어써 `/admin` 토글을 죽인다. 제어는 플러그인 쪽에 둔다(Option B).
 
+## 대역폭 지붕 — decode는 peak의 19%다
+
+토큰당 읽는 바이트를 **프로덕션 GGUF의 텐서 합**에서 직접 구한 값(추정 아님, 658 텐서). 128 전문가 중 8개 활성이라 총 14.25GB 중 15%만 읽는다.
+
+| | 값 |
+|---|---|
+| 토큰당 (dense 1.39GB + 활성 전문가 0.80GB) | **2.19 GB** |
+| MI50 peak | 1024 GB/s |
+| **이론 천장** | **~468 t/s** |
+| 실측 / 실효 대역폭 | 89.3 t/s / ~196 GB/s |
+| **peak 대비** | **19%** |
+
+**같은 llama.cpp가 9060 XT에서는 65%를 낸다** — B=1 decode가 현실적으로 닿는 영역이 그쯤이므로 translate는 3배 이상을 흘리고 있다. 유력한 몫은 KV다: 슬롯당 `n_ctx` 4096에서 할당 폭 전체를 매 스텝 읽으면 +0.25~0.88 GB/token이 붙어 천장이 ~330~420 t/s로 내려간다. **`-c` 16k→32k = -42%가 그 서명이고, 그래서 다음 레버는 `-c` 하향이다**(선행: 페이지당 실제 프롬프트 토큰 분포 확인). 유도·재현은 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md).
+
 ## 동시성과 열
 
 **파이프라인 동시성 스윕**(21장 챕터, DRY·150W 캡, ARCTIC S4028-15K 맨팬 1개 ~6,500rpm, recognize는 9060 XT. 2026-07-26, 회차별 개별 실행):
@@ -239,6 +253,7 @@ MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지
 ## 남은 일
 
 - ~~다음 레버(파이프라인의 62%)~~ **실측 완료 (2026-07-26)** — 공급 교체(recognize GPU)의 몫이 파이프라인에서 확인됐다: conc1 0.494 → 0.628, conc4 1.05 → **1.309 p/s**. 남은 격차(천장 1.64의 20%)는 prefill 고정비와 d+r 직렬 구간의 몫이다.
+- **`-c` 하향 스윕** — 대역폭 지붕이 실측 89.3을 peak의 19%로 놓았고, 남는 몫의 유력한 행선지가 할당 KV다(`-c` 16k→32k = -42%). 슬롯당 4096을 줄이는 게 다음 레버. **선행: 페이지당 실제 프롬프트 토큰 분포 확인** — `--n-predict 1024` 백스톱과 함께여야 하한이 정해진다.
 - **translate에 idle 언로드는 두지 않는다** — MI50가 D3에 못 가서 VRAM 회수의 절전 이득이 0이고, 첫 요청 재로드(~5초)만 붙는다. 카드가 바뀌면(D3 되는 GPU) 다시 볼 항목이다.
 - ~~냉각 보강 → 포화·파이프라인 동시성 재평가~~ **완료 (2026-07-26)** — 맨팬 1개(~6,500rpm)로 포화 P1/P2/P4 완주(천장 1.49 → **1.64 req/s**), 파이프라인 conc4 **1.309 p/s**(피크 74°C, crit 해소). 남은 것: 쉬라우드 A/B·`fancontrol`([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md) Task 2~5), **수 분 지속 부하 검증**(지금까지는 16~42초 버스트).
 - ~~**recognize를 온디맨드로**~~ **완료** — systemd socket activation(socket + `systemd-socket-proxyd --exit-idle-time=5min` + `StopWhenUnneeded`)으로 8090을 온디맨드화했다. 유휴 시 3.74GB → 0.06GB, 콜드 스타트 2.0초. 공개 포트가 그대로라 플러그인 설정은 안 바뀐다. ※ **recognize를 ollama로 옮기는 건 불가** — ollama 변환기가 `PaddleOCRVLForConditionalGeneration`을 지원하지 않고, 이미 있는 mmproj GGUF를 붙일 Modelfile 지시자도 없다(bare GGUF는 `model does not support multimodal requests`).
