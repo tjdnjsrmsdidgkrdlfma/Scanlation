@@ -188,15 +188,17 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 
 ## 동시성과 열
 
-**파이프라인 동시성 스윕**(21장 챕터, DRY·150W 캡·케이스 팬 상태):
+**파이프라인 동시성 스윕**(21장 챕터, DRY·150W 캡, ARCTIC S4028-15K 맨팬 1개 ~6,500rpm, recognize는 9060 XT. 2026-07-26, 회차별 개별 실행):
 
-| 동시성 | wall-clock | 처리량 | translate 평균 | max junction |
-|---|---|---|---|---|
-| 1 | 42.5s | 0.494 p/s | 1002ms | 85°C |
-| **2** | 25.2s | **0.832 p/s (×1.68)** | 1367ms | 92°C |
-| 4 | 20.0s | 1.05 p/s (×2.13) | 1694ms | **100°C(crit)** |
+| 동시성 | wall-clock | 처리량 | detect+recognize 평균 | translate 평균 | max junction |
+|---|---|---|---|---|---|
+| 1 | 33.4s | 0.628 p/s | 551ms | 1020ms | 75°C |
+| 2 | 24.8s | 0.847 p/s (×1.35) | 623ms | 1592ms | 77°C |
+| **4** | 16.0s | **1.309 p/s (×2.08)** | 794ms | 2103ms | 74°C |
 
-**동시성 4는 구냉각에서 20초 만에 junction crit에 닿았다.** 냉각 1차 보강 후 재실행(2026-07-26, recognize GPU 이전 반영)에서는 **동시성 4가 74°C로 완주한다**: conc1 0.628 / conc2 0.847 / conc4 **1.309 p/s**(×2.08) — translate 포화 천장(1.64 req/s)의 80%. 이 스윕은 실운영 게이트 그대로를 통과했다(`translate_concurrency` 4; 활성 recognizer(llama.cpp)는 풀 override가 없어 d+r **직렬** — state의 2/4 override는 비활성 torch 엔진 몫) — **실사용도 같은 수준으로 흐르고, 바꿀 운영값이 없다.** 첫 conc2는 0.715로 나왔는데 실행 순서 캐시 편향(교훈 4)이었고, 표준은 웜 재실행 값이다.
+**동시성 4가 crit 없이 완주하고, 그게 운영값이다.** 처리량은 translate 포화 천장(1.64 req/s)의 80%고 남은 격차는 prefill 고정비 + d+r 직렬 구간의 몫이다. 이 스윕은 실운영 게이트 그대로를 통과했다(`translate_concurrency` 4; 활성 recognizer(llama.cpp)는 풀 override가 없어 d+r **직렬** — state의 2/4 override는 비활성 torch 엔진 몫) — **실사용도 같은 수준으로 흐르고, 바꿀 운영값이 없다.** 첫 conc2는 0.715로 나왔는데 실행 순서 캐시 편향(교훈 4)이었고, 표준은 웜 재실행 값이다.
+
+**단, 동시성 4는 냉각에 걸려 있다.** 케이스 팬만 쓰던 구성에서는 같은 스윕의 conc4가 20초 만에 junction crit(100°C)에 닿아 스로틀이 개입했고, 그래서 운영값이 2였다. 팬이 빠지거나 duty가 떨어지면 4는 다시 안전하지 않다([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md)).
 
 **공급을 포화시킨 격리 측정**(백로그 무한 공급 가정, [bench_translate_concurrency.py](packages/scanlation-server/tools/bench_translate_concurrency.py))에서는 P4가 P2 대비 **+22%**가 실재한다(1.23 → 1.49 req/s). 수확체감의 절반은 요청당 유니크 프롬프트의 **prefill 고정비**라 슬롯을 늘려도 안 줄어든다. 냉각 1차 보강 후 재실측(2026-07-26, 맨팬 ~6,500rpm)은 **스로틀 없이 P1/P2/P4 완주 — 1.03/1.39/1.64 req/s(피크 81/89/78°C)**. 구 수치는 부분 스로틀 속의 값이었고, 천장은 **1.64 req/s**다.
 
