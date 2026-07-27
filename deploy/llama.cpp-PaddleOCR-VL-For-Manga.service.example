@@ -12,7 +12,12 @@ StopWhenUnneeded=yes
 # anything that hides a render node (InaccessiblePaths=) renumbers the survivors.
 Environment="GGML_VK_VISIBLE_DEVICES=2"
 # Bind the BACKEND port here; the proxy fronts it on the public one.
-ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -m /opt/models/gguf/paddleocr-vl/PaddleOCR-VL-For-Manga-Q8_0.gguf --mmproj /opt/models/gguf/paddleocr-vl/PaddleOCR-VL-For-Manga-mmproj-BF16.gguf -ngl 99 --temp 0 --host 127.0.0.1 --port 8091
+# -c 8192 = 2048 per slot. Without it llama-server takes the model's trained context
+# (131072, unified across slots) for requests that are ~250 tokens. It buys no speed
+# here -- 16x narrower measured identical, unlike gfx906 -- but there is no reason to
+# reserve it. Do NOT go to 4096: a slot must hold ~230 prompt + the plugin's
+# max_tokens 1024, so 1024/slot truncates a runaway. Measurement: tools/recognize-decode-bound.md §9
+ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server -m /opt/models/gguf/paddleocr-vl/PaddleOCR-VL-For-Manga-Q8_0.gguf --mmproj /opt/models/gguf/paddleocr-vl/PaddleOCR-VL-For-Manga-mmproj-BF16.gguf -ngl 99 -c 8192 --parallel 4 --temp 0 --host 127.0.0.1 --port 8091
 # llama-server has no sd_notify, so systemd would call it "started" before it binds
 # and the proxy would forward into a refused port. Hold readiness until /health.
 ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf -o /dev/null http://127.0.0.1:8091/health && exit 0; sleep 1; done; exit 1'
