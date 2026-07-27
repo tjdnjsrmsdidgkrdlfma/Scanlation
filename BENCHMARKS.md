@@ -175,7 +175,7 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 | 전력 캡 | **150W** — decode 88.8~95.0 t/s로 225W와 동일, 비용 ≈ 0 |
 | 서버 설정 | `-c 16384 --parallel 4` — 슬롯 비용은 4→8 사이가 절벽(-17%)이고 1~4는 평평하다 |
 | GPU 핀 | 두 llama-server를 각각 **`Environment=GGML_VK_VISIBLE_DEVICES=<N>`** 로. `--device`는 쓰지 않는다(mtmd 비전 인코더가 다른 카드로 샌다) |
-| 운영 동시성 | **2**(현 냉각 기준) |
+| 운영 동시성 | **4** — 서버 게이트 `translate_concurrency`. 피크 74°C로 완주하고 포화 천장의 80%를 낸다 |
 
 **한 줄: gfx906에서 막힌 건 하드웨어가 아니라 런타임 패키징이었다.** ollama·llama.cpp 모두 **그 arch를 타깃으로 직접 빌드하면 ROCm으로 돈다**(`GPU_TARGETS`/`CMAKE_HIP_ARCHITECTURES=gfx906`). 배포 바이너리에 gfx906 코드가 없었을 뿐이고, 시스템 rocBLAS는 EPEL 7.2.0에서도 gfx906 커널 156개를 싣고 있어 되공급도 불필요하다. Vulkan(RADV)은 arch 비의존이라 지금도 유효한 대안이다 — 실제로 recognize는 Vulkan을 쓴다.
 
