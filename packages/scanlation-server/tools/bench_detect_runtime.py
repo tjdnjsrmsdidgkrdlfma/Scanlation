@@ -50,8 +50,10 @@ REPO = "ogkalu/comic-text-and-bubble-detector"
 TORCH_COLOR, ORT_COLOR, MISS_COLOR = (40, 110, 255), (230, 40, 40), (255, 170, 0)
 
 
-def _load_detector():
+def _load_detector(device: str | None):
     det = ComicTextAndBubbleDetector()
+    if device:                       # same knob /admin writes into state.json
+        det._device_override = device
     det.load()
     return det
 
@@ -181,6 +183,11 @@ def main() -> int:
     ap.add_argument("--conf", type=float, default=None, help="score threshold (default: the plugin's)")
     ap.add_argument("--reps", type=int, default=2, help="timed repetitions per page")
     ap.add_argument("--html", default="", help="write the box-comparison page here")
+    ap.add_argument("--device", default=None,
+                    help="torch device for the transformers side (e.g. cuda:1). ONNX Runtime stays on "
+                         "whatever providers its build has — the stock wheel is CPU-only. On this host "
+                         "cuda:0 is the gfx906 card, where torch dies in its first matmul.")
+    ap.add_argument("--skip-onnx", action="store_true", help="time the torch side only")
     args = ap.parse_args()
     if not args.data:
         return print("need a page folder (or $BENCH_DATA)") or 2
@@ -188,10 +195,10 @@ def main() -> int:
     import torch
     torch.set_num_threads(args.threads)
 
-    det = _load_detector()
+    det = _load_detector(args.device)
     opts = det.resolve_options({})
     conf = args.conf if args.conf is not None else opts["conf"]
-    sess = _ort_session(args.onnx, args.threads)
+    sess = None if args.skip_onnx else _ort_session(args.onnx, args.threads)
 
     pages = sorted(p for p in glob.glob(os.path.join(args.data, "*")) if Path(p).suffix.lower() in
                    {".jpg", ".jpeg", ".png", ".webp"})
@@ -202,15 +209,20 @@ def main() -> int:
     imgs = [(Path(p).name, Image.open(p).convert("RGB")) for p in pages]
     for _, img in imgs[:2]:                      # warm both runtimes
         _torch_dets(det, img, conf)
-        _ort_dets(sess, det, img, conf)
+        if sess is not None:
+            _ort_dets(sess, det, img, conf)
 
     rows, t_ms, o_ms, n_t_all, n_o_all, worst_all, miss_pages = [], [], [], 0, 0, 0.0, 0
     for name, img in imgs:
         tt, to = [], []
         for _ in range(args.reps):
             s = time.perf_counter(); td = _torch_dets(det, img, conf); tt.append((time.perf_counter() - s) * 1000)
-            s = time.perf_counter(); od = _ort_dets(sess, det, img, conf); to.append((time.perf_counter() - s) * 1000)
-        t_ms += tt; o_ms += to
+            if sess is not None:
+                s = time.perf_counter(); od = _ort_dets(sess, det, img, conf); to.append((time.perf_counter() - s) * 1000)
+        t_ms += tt
+        if sess is None:                          # torch-only run: compare against itself
+            od, to = td, tt
+        o_ms += to
         tk, ok = _kept(det, td, opts), _kept(det, od, opts)
         pairs, only_t, only_o = _pair_up(tk, ok)
         worst = max((max(abs(x - y) for x, y in zip(a.xyxy, b.xyxy)) for a, b in pairs), default=0.0)

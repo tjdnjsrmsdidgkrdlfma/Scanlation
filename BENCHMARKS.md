@@ -22,6 +22,7 @@ lockwait / semwait 모두 0 — 서버 측 직렬화는 남아 있지 않다. **
 
 | 문서 | 역할 | 다루는 것 | 상태 |
 |---|---|---|---|
+| [detect-runtime.md](packages/scanlation-server/tools/detect-runtime.md) | detector | CPU 레버·ONNX Runtime·GPU detect·GPU hang 분석 | 현행 기준 |
 | [recognize-cpu-threads.md](packages/scanlation-server/tools/recognize-cpu-threads.md) | recognizer | manga-ocr CPU 스레드/워커 배치 | 종결 |
 | [recognize-crop-batching.md](packages/scanlation-server/tools/recognize-crop-batching.md) | recognizer | crop 배치(단일 forward에 N크롭) | 종결(기각) |
 | [recognize-gpu-speed.md](packages/scanlation-server/tools/recognize-gpu-speed.md) | recognizer | flash · 해상도 캡 · 멀티워커(W·K) | 종결 |
@@ -32,7 +33,7 @@ lockwait / semwait 모두 0 — 서버 측 직렬화는 남아 있지 않다. **
 | [cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md) | translator(인프라) | 팬·쉬라우드·fancontrol | 하드웨어 대기 |
 | `compare_out/`(로컬) | detector · recognizer | 모델 대결 원본 출력 | gitignore, 개발 PC에만 |
 
-detector 쪽만 커밋된 1차 자료가 없다 — 대결 산출물이 [.gitignore](.gitignore)된 `packages/scanlation-server/compare_out/`(`_compare.md`, `_compare_box.html`, `_compare_crops.md`)에 있어서다. 그래서 아래 detector 절과 recognizer 정확도 표는 **이 문서가 그 결론의 유일한 커밋본**이다.
+detector의 **런타임·속도**는 [detect-runtime.md](packages/scanlation-server/tools/detect-runtime.md)에 있지만, **모델 대결(정확도) 쪽은 커밋된 1차 자료가 없다** — 산출물이 [.gitignore](.gitignore)된 `packages/scanlation-server/compare_out/`(`_compare.md`, `_compare_box.html`, `_compare_crops.md`)에 있어서다. 그래서 아래 detector 절의 모델 선정·튜닝 부분과 recognizer 정확도 표는 **이 문서가 그 결론의 유일한 커밋본**이다.
 
 ---
 
@@ -71,7 +72,8 @@ detector 쪽만 커밋된 1차 자료가 없다 — 대결 산출물이 [.gitign
 
 - **torch 안의 CPU 레버는 소진됐다 (2026-08-05 실측)** — 단독 실행 기준 per-page 237ms인데 **forward가 98%**다(전처리 4.4ms + 후처리 0.4ms = 2%). 스레드는 **8이 최적이고 이미 그 값**이며(1→892 / 4→303 / **8→223** / 12→257 / 16→253ms) 12·16이 느려지는 것도 recognize의 "물리 코어가 단위" 결론과 같다. `torch.inference_mode`는 223.9 vs 225.8ms로 **노이즈**다([PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md) Tier 1-C는 이걸로 닫힌다). **입력이 640×640 고정**이라(2400×1800 페이지가 비율 무시하고 리사이즈된다) 해상도 노브도 없다.
 - **남은 건 런타임 교체뿐이고, ONNX Runtime이 2.33x다** — 같은 21페이지에서 torch 237.4 → **ORT 102.0ms**([bench_detect_runtime.py](packages/scanlation-server/tools/bench_detect_runtime.py), 전처리 텐서 공유·스레드 8 동일). 모델 저장소가 safetensors 옆에 ONNX를 같이 배포하는데 현재 설치는 그걸 건너뛴다. **INT8은 오히려 느리다**(154.9ms) — 이 크기에선 양자화 오버헤드가 이득을 못 넘는다. **단 출력이 완전히 같지는 않다**: 42 vs 41 박스(21페이지 중 1장에서 ORT가 하나를 놓침), 좌표는 20페이지가 1.5~10.4px에 1페이지만 35.7px. 채택은 **그 차이가 실제 손해인지 눈으로 판정한 뒤**다(`--html`이 두 런타임 박스를 겹쳐 그린 페이지를 낸다).
-- **GPU detect** — 아직 미측정. 컨테이너 torch가 보는 카드가 `HIP_VISIBLE_DEVICES=0`(= MI50, translate가 상주하는 카드)이므로 옮기려면 그 배정부터 정리해야 한다.
+- **GPU detect** — ❌ **실측 폐기(성능이 아니라 안정성)**. `/admin`에서 device를 `cuda:1`(9060 XT)로 두면 되고 **속도는 최고다** — 단독 98.8ms, 파이프라인 detect **302 → 151.5ms**. 그런데 같은 런에서 **GPU가 두 번 hang했다**(00.jpg 실패 → 리셋 → 01.jpg 61.9초). recognize와 카드를 공유하는 한 못 쓰고 옮길 카드도 없다(MI50은 torch가 안 돈다). ※ `cuda:0`은 MI50이라 첫 matmul에 죽는다.
+- **⚠ 9060 XT는 컴퓨트 소비자를 하나만 받는다** — 2026-08-05 하루에 GPU hang **7건**, 전부 이 카드고 MI50은 0건이다. **온도(이벤트 0건, 36~45°C)도 VRAM(2.6GB일 때도 발생)도 아니고** `ring comp timeout`에 seq 차이 1~2 — 제출한 작업 하나가 안 끝나 드라이버가 링을 리셋한다. 프로세스가 하나여도 난다. 변형 비교는 서버 2개까지. 상세는 [detect-runtime.md §5](packages/scanlation-server/tools/detect-runtime.md).
 - **크기 하한 값 정하기** — 옵션(`min_area`·`min_side`)은 있고 기본 0(끔)이다. 실제 노이즈 박스의 크기 분포를 봐야 켤 값이 나온다.
 - **kitsumed 하이브리드** — 말풍선 마스크가 필요해지면.
 
