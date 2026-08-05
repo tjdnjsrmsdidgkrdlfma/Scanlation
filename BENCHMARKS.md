@@ -161,8 +161,8 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 
 - ~~**`image_min_pixels`**~~ **측정 완료 → 기각 (2026-08-05)** — 속도는 실재했다(+20~25%, mmproj 바닥 147,384 → 50,176 → 25,088). 대가가 크다: 42 크롭 중 프로덕션과 바이트 일치가 12개뿐이고, 표기 흔들림을 정규화해도 **20~21개에서 문자가 다르다.** 64토큰과 32토큰의 오독 집합이 거의 같아 **중간값 타협이 안 된다** — 문제는 얼마나 낮췄나가 아니라 바닥을 건드렸는가다. 되살리려면 106 크롭 인간 채점이 선행돼야 한다. [decode-bound §10](packages/scanlation-server/tools/recognize-decode-bound.md)
 - **recognize에서 살 수 있는 속도는 남지 않았다** — 캡·동시성·`-c`·`image_min_pixels`·양자화가 전부 닫혔다(2026-08-05). prefill은 per-crop의 2/3인데 연산이고, decode는 Q8_0에서 이미 대역폭 바운드를 벗어났다. **다음 이득은 recognize 안이 아니라 translate(62%)·detect(14.4%)에 있다.**
-- **llama-swap** — llama-server가 모델을 상시 붙들어 9060 XT가 유휴에도 ~15W다. TTL 프록시로 회수 가능(콜드스타트 ~1.9초).
-- **모델 배포가 서버 관리자 몫**이 됐다(GGUF 교체·GPU 선택 = `llama-server` 커맨드라인).
+- ~~**llama-swap으로 유휴 전력 회수**~~ **불필요해졌다** — systemd socket activation이 같은 일을 한다(유휴 5분에 프로세스가 내려가고 VRAM 3.74GB → 0.06GB, 카드는 low-power로, 콜드 스타트 ~2초). [translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md) · [deploy/](deploy/). ※ [TODO](TODO.md)의 llama-swap 항목은 목적이 다르다(`/admin`에서 여러 모델 스왑) — 그건 아직 열려 있다.
+- **모델 배포가 서버 관리자 몫**이 됐다(GGUF 교체·GPU 선택 = `llama-server` 커맨드라인). mmproj를 다시 뽑아야 하면 config의 `vision_config.architectures`를 고쳐야 한다 — 레시피는 [decode-bound §10](packages/scanlation-server/tools/recognize-decode-bound.md).
 
 ---
 
