@@ -27,6 +27,7 @@ recognizer를 PaddleOCR-VL로 바꾸면 파이프라인이 recognize-bound가 �
 
 - 호스트: Ryzen 7 9700X, ROCm **7.1.1**(dnf 설치, `/usr/lib64` — `/opt/rocm` 아님).
 - GPU: **MI50**(gfx906, DID `0x66a1`, UUID `GPU-3b3210a17337ec1b`, 32GB) + CPU 내장 **iGPU**(gfx1036).
+- **VRAM은 32GB인데 PCI BAR는 16GB다** — `lspci`의 prefetchable 창이 `[size=16G]`라 CPU가 직접 주소를 매길 수 있는(visible) 영역이 절반이다. 지금 모델 14.25GB + KV가 그 안에 겨우 들어가 있어, **모델을 키울 때 천장은 32GB가 아니라 visible 16GB**다. 판독 시 주의: `llama-server --list-devices`는 이 창 기준으로 free를 보고해서 **정상 상태에서도 "32768 MiB, 68 MiB free"로 나온다.** 실제 여유는 커널 쪽을 본다 — `mem_info_vram_used`(15.97 GiB) 또는 debugfs `amdgpu_vram_mm`(`free: 16400MiB`, order-21 연속 블록까지 남아 있음).
 - 호스트 ROCm은 **gfx906를 완전 지원**한다: `rocminfo`가 gfx906 열거, `rocblas-7.1.1`이 `/usr/lib64/rocblas/library/`에 gfx906 커널(`Kernels.so-000-gfx906-xnack-.hsaco`, `TensileLibrary_*_gfx906.*`)을 싣고 있음. **막힌 건 하드웨어/호스트가 아니라 런타임(ollama/llama.cpp) 패키징이었다.**
 
 ## MI50 쿨링 — 능동 냉각 필수
