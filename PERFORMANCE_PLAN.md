@@ -32,7 +32,7 @@
 | 3 | 메인스레드 md5 → Web Worker | ext 2~3 | 중간 | 이미지당 UI 프리즈 제거 |
 | 3 | lazy-load/뷰포트(IntersectionObserver) | `content.js` | 중간 | 누락 이미지 해소 + 가시 우선 |
 | 3 | 렌더 read/write 분리 + DocumentFragment | `content.js` | 낮음~중간 | resize/오버레이 reflow 폭풍 완화 |
-| 4 | RT-DETR ONNX Runtime(CPU detect) | detector plugin | 미지수 | CPU detect 큰 이득 가능 |
+| ~~4~~ | ~~RT-DETR ONNX Runtime(CPU detect)~~ | detector plugin | — | ❌ 실측 폐기 — 2.33x지만 대사를 놓친다 |
 | 4 | 검출기 풀화 / batch-lookup / async httpx / 부팅 워밍업 | 다수 | 미지수 | 상황별 천장 제거 |
 
 ---
@@ -84,7 +84,7 @@
 ### ~~1-C. `torch.inference_mode` (detector)~~ — ❌ 실측 폐기 (2026-08-05)
 - **결과**: `no_grad` 225.8ms vs `inference_mode` 223.9ms = **0.8%, 노이즈**. 바꿀 이유가 없다.
 - **왜 안 나오나**: detect의 **98%가 forward**고(전처리 4.4ms + 후처리 0.4ms) autograd 부기는 그 안에서 잴 수 있는 몫이 아니다. 같은 측정에서 **스레드도 이미 최적**(8, 자동 감지값)이었다 — torch 안에 남은 CPU 레버가 없다는 뜻이다.
-- **대신 볼 것**: 런타임 교체. ONNX Runtime이 같은 페이지에서 **2.33x**다([BENCHMARKS.md](BENCHMARKS.md) detector 절, [bench_detect_runtime.py](packages/scanlation-server/tools/bench_detect_runtime.py)).
+- **런타임 교체도 닫혔다**: ONNX Runtime이 같은 페이지에서 **2.33x**지만 대사를 놓쳐 미채택이다(아래 Tier 4).
 
 ### 1-D. MutationObserver 디바운스
 - **현황**: [content.js:297](extension/src/content.js#L297) 콜백이 추가 노드마다 `scan(n)`→`querySelectorAll`를 스로틀 없이 실행 — SPA/광고 페이지에서 잦은 DOM 변동 시 오버헤드.
@@ -145,7 +145,7 @@
 
 이 팀은 채택 전 실측하는 문화이므로([recognize-crop-batching.md](packages/scanlation-server/tools/recognize-crop-batching.md)에서 배치 기각) 모두 **스파이크 브랜치에서 A/B 후 판단**. 계획엔 후보로만 둡니다.
 
-- **RT-DETR ONNX Runtime (CPU detect)**: CPU 경로 detect를 ONNX Runtime으로 — CPU 배포에서 큰 이득 가능성. 정확도/속도 A/B 필수. 현재 transformers safetensors만 fetch.
+- ~~**RT-DETR ONNX Runtime (CPU detect)**~~ — ❌ **실측 폐기.** 속도는 2.33x가 맞지만 export된 ONNX가 safetensors와 다른 모델이라 **대사를 놓치는 페이지가 있다**. 이득도 파이프라인 5~8%로 천장(translate 1.64 req/s)에 못 미친다. 다시 볼 사유는 속도가 아니라 torch·torchvision 제거다([detect-runtime.md](packages/scanlation-server/tools/detect-runtime.md)).
 - **검출기 풀 W>1 (Tier 0-D 연장)**: 검출기는 이미 워커 프로세스에서 돌지만 워커가 1개다. 직렬 천장을 걷으려면 W를 노출해야 하는데, 페이지당 detect는 1회라 이득은 **이미지가 겹칠 때만** 나고 워커마다 모델 사본이 붙는다. 겹침 워크로드에서 detect가 실제 병목으로 측정될 때만.
 - **batch-lookup 엔드포인트**: 콜드 캐시에서 이미지마다 `/run_lookup/`+`/run_pipeline/` 2 RTT([content.js:83](extension/src/content.js#L83)) — N개 md5를 1회 프로브로 묶어 RTT 절감. **localhost에선 무의미**, 원격 배포에서만 가치.
 - **async httpx translator**: [http_translator.py:72](packages/scanlation-sdk/scanlation_sdk/http_translator.py#L72) `httpx.Client`(동기) — 지금은 threadpool에서 돌아 루프를 막지 않으므로 우선순위 낮음. 동시성 상향으로 threadpool 포화가 **관측될 때만**.
