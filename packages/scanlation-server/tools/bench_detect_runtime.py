@@ -10,11 +10,18 @@ draws both runtimes' boxes on the same image (torch blue, ORT red) with the
 disagreements first, because whether a missing box mattered is a judgement about
 a picture, not a number.
 
-    # in the server container, with onnxruntime importable
-    python tools/bench_detect_runtime.py /data/benchpages --html /data/detect_ab.html
+onnxruntime is NOT a project dependency — nothing ships it, and this tool is the
+only thing that wants it. Install it somewhere temporary so the container's
+site-packages stays clean, and delete it after; the whole setup rebuilds in a few
+minutes (the ONNX weights come from the hub on first use):
 
-Requires onnxruntime (not a project dependency — install it into a temp path and
-put that on PYTHONPATH if you are only measuring).
+    docker cp packages/scanlation-server/tools/bench_detect_runtime.py scanlation-server:/tmp/tools/
+    docker exec scanlation-server pip install --target=/tmp/ort onnxruntime
+    docker exec -e PYTHONPATH=/plugins:/tmp/ort scanlation-server \
+        python /tmp/tools/bench_detect_runtime.py /data/benchpages --html /data/detect_ab.html
+    docker cp scanlation-server:/data/detect_ab.html .          # judge it, then
+    docker exec scanlation-server rm -rf /tmp/ort /data/detect_ab.html \
+        /data/hf/hub/models--ogkalu--comic-text-and-bubble-detector
 """
 from __future__ import annotations
 
