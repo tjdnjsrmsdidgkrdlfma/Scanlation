@@ -69,7 +69,9 @@ detector 쪽만 커밋된 1차 자료가 없다 — 대결 산출물이 [.gitign
 
 ## 남은 레버
 
-- **CPU 302ms를 통째로 없앨 여지** — detect는 1-worker 풀에서 **설계상 직렬**이다(페이지당 1회라 팬아웃할 게 없고, 워커를 늘리면 모델 사본만 는다). translate 다음 순번의 레버가 여기다. 후보는 검출기 풀링 · GPU detect · RT-DETR ONNX Runtime([PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md) Tier 4).
+- **torch 안의 CPU 레버는 소진됐다 (2026-08-05 실측)** — 단독 실행 기준 per-page 237ms인데 **forward가 98%**다(전처리 4.4ms + 후처리 0.4ms = 2%). 스레드는 **8이 최적이고 이미 그 값**이며(1→892 / 4→303 / **8→223** / 12→257 / 16→253ms) 12·16이 느려지는 것도 recognize의 "물리 코어가 단위" 결론과 같다. `torch.inference_mode`는 223.9 vs 225.8ms로 **노이즈**다([PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md) Tier 1-C는 이걸로 닫힌다). **입력이 640×640 고정**이라(2400×1800 페이지가 비율 무시하고 리사이즈된다) 해상도 노브도 없다.
+- **남은 건 런타임 교체뿐이고, ONNX Runtime이 2.33x다** — 같은 21페이지에서 torch 237.4 → **ORT 102.0ms**([bench_detect_runtime.py](packages/scanlation-server/tools/bench_detect_runtime.py), 전처리 텐서 공유·스레드 8 동일). 모델 저장소가 safetensors 옆에 ONNX를 같이 배포하는데 현재 설치는 그걸 건너뛴다. **INT8은 오히려 느리다**(154.9ms) — 이 크기에선 양자화 오버헤드가 이득을 못 넘는다. **단 출력이 완전히 같지는 않다**: 42 vs 41 박스(21페이지 중 1장에서 ORT가 하나를 놓침), 좌표는 20페이지가 1.5~10.4px에 1페이지만 35.7px. 채택은 **그 차이가 실제 손해인지 눈으로 판정한 뒤**다(`--html`이 두 런타임 박스를 겹쳐 그린 페이지를 낸다).
+- **GPU detect** — 아직 미측정. 컨테이너 torch가 보는 카드가 `HIP_VISIBLE_DEVICES=0`(= MI50, translate가 상주하는 카드)이므로 옮기려면 그 배정부터 정리해야 한다.
 - **크기 하한 값 정하기** — 옵션(`min_area`·`min_side`)은 있고 기본 0(끔)이다. 실제 노이즈 박스의 크기 분포를 봐야 켤 값이 나온다.
 - **kitsumed 하이브리드** — 말풍선 마스크가 필요해지면.
 
@@ -298,6 +300,7 @@ MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지
 |---|---|
 | [run_report.py](packages/scanlation-server/tools/run_report.py) | 파이프라인 end-to-end, 스테이지별 분해(`--parallel` / `--no-translate`) |
 | [compare_models.py](packages/scanlation-server/tools/compare_models.py) | 검출·인식 모델 대결 하네스(`ocrbatch`/`consolidate`, 채점 HTML) |
+| [bench_detect_runtime.py](packages/scanlation-server/tools/bench_detect_runtime.py) | detect 런타임 A/B(torch vs ONNX Runtime) — 속도 + 박스 일치, `--html`로 두 박스를 겹쳐 그린 판정 페이지 |
 | [bench_recognize_threads.py](packages/scanlation-server/tools/bench_recognize_threads.py) | CPU recognize 워커×스레드 스윕 |
 | [bench_recognize_batch.py](packages/scanlation-server/tools/bench_recognize_batch.py) | crop 배치 스윕 |
 | [bench_recognize_gpu_concurrency.py](packages/scanlation-server/tools/bench_recognize_gpu_concurrency.py) | GPU 멀티워커·캡·`--profile-decode` |

@@ -81,11 +81,10 @@
 - **위험/규모**: 낮음. 1파일 중심. 결과 불변(같은 크롭 산출).
 - **검증**: `run_report.py`의 detect/recognize 분해 + `region_stats`로 회전 많은 샘플 A/B.
 
-### 1-C. `torch.inference_mode` (detector)
-- **현황**: detector가 `torch.no_grad`(comic-text-and-bubble-detector `plugin.py`의 forward). recognizer의 `generate()`는 내부적으로 이미 no_grad이므로 대상 아님.
-- **변경**: detector forward를 `torch.inference_mode()`로 교체(autograd-view 부작용 없는지 확인).
-- **효과/위험/규모**: detect 소폭. 낮음. detector plugin 1곳.
-- **검증**: 검출 결과 동일 확인 + detect_ms 전/후.
+### ~~1-C. `torch.inference_mode` (detector)~~ — ❌ 실측 폐기 (2026-08-05)
+- **결과**: `no_grad` 225.8ms vs `inference_mode` 223.9ms = **0.8%, 노이즈**. 바꿀 이유가 없다.
+- **왜 안 나오나**: detect의 **98%가 forward**고(전처리 4.4ms + 후처리 0.4ms) autograd 부기는 그 안에서 잴 수 있는 몫이 아니다. 같은 측정에서 **스레드도 이미 최적**(8, 자동 감지값)이었다 — torch 안에 남은 CPU 레버가 없다는 뜻이다.
+- **대신 볼 것**: 런타임 교체. ONNX Runtime이 같은 페이지에서 **2.33x**다([BENCHMARKS.md](BENCHMARKS.md) detector 절, [bench_detect_runtime.py](packages/scanlation-server/tools/bench_detect_runtime.py)).
 
 ### 1-D. MutationObserver 디바운스
 - **현황**: [content.js:297](extension/src/content.js#L297) 콜백이 추가 노드마다 `scan(n)`→`querySelectorAll`를 스로틀 없이 실행 — SPA/광고 페이지에서 잦은 DOM 변동 시 오버헤드.
