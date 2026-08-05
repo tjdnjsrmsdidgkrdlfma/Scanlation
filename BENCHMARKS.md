@@ -138,7 +138,7 @@ detector 쪽만 커밋된 1차 자료가 없다 — 대결 산출물이 [.gitign
 | **crop 배치** | ❌ 폐기 | 공정 측정(같은 크롭·캡 대칭·`no_grad`)에서 per-crop보다 **1.3x 느리다**. B≥8에선 출력까지 조용히 깨진다 |
 | **LM 양자화 Q8_0** | ✅ 채택 — BF16 대비 **1.19~1.22x** | per-crop max 315 → 239ms. 출력은 **42개 중 41개가 BF16과 바이트 동일**(남은 1개도 2자 차)이고 VRAM도 417MB 덜 쓴다. 세 후보 중 **유일하게 대가가 없다.** 프로덕션이 2026-07-25부터 이 값이다 |
 | **LM을 Q4까지 내리기** | ❌ 실측 폐기 — 이득 **0** | 가중치를 40% 더 줄여도 0.6%(런 간 편차 이하)다 — decode가 Q8_0에서 **이미 대역폭 바운드를 벗어났다.** 그런데 출력은 16/42가 바뀐다 |
-| **mmproj 양자화** | ❌ 불가 + 무의미 | `llama-quantize`가 `architecture: 'clip'`을 거부한다. 뚫어도 mmproj weight read는 per-crop의 2.6%다 — prefill은 가중치를 한 번 읽고 400토큰을 계산해서 대역폭이 병목이 아니다 |
+| **mmproj 양자화** | ❌ 도구 경로 없음 + 상한이 낮다 | `llama-quantize`는 `architecture: 'clip'`을, `convert_hf_to_gguf.py --mmproj`는 `SiglipVisionModel`을 거부한다(원본 HF를 받아 실측). 뚫어도 mmproj weight read는 per-crop의 **2.6%**라 그게 상한이다 — prefill은 가중치를 한 번 읽고 400토큰을 계산해서 대역폭이 병목이 아니다 |
 | **`torch.compile` / HIP graph** | ❌ 실측 폐기 | 벽을 다 넘어도 1.11x뿐 + 출력 2/8 오독 + shape당 ~11s 컴파일이라 동적 해상도에서 상각 불가 |
 | **MI50로 recognize** | ❌ 폐기(torch 한정) | torch rocm7.0 rocBLAS에 gfx906 Tensile 라이브러리가 없어 첫 matmul에서 죽는다. llama.cpp는 gfx906에서 돈다 |
 | vLLM / SGLang / FastDeploy / ONNX / OpenVINO | ❌ 조사 단계 배제 | RDNA4 vLLM은 기동 버그 + 커널 부재(커뮤니티 실측 llama.cpp Vulkan이 29% 빠름), FastDeploy AMD 미지원, ONNX export 경로 없음, OpenVINO는 Intel 전용 |

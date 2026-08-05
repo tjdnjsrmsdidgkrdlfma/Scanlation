@@ -368,7 +368,16 @@ mmproj의 `clip.vision.image_min_pixels`는 **바닥**이다 — 이보다 작�
 
 게다가 Q4는 출력을 바꾼다 — 42개 중 **동일 20 · 표기만 6 · 문자가 다름 16**. **이득 0에 정확도 위험만 지므로 기각**이다. §6의 "Q4는 안 간다"와 결론은 같지만 이유가 다르다: 비용 대비가 나빠서가 아니라 **이득 자체가 없어서**다.
 
-**mmproj 양자화는 도구가 막는다.** `llama-quantize`는 `unsupported model architecture: 'clip'`으로 거부한다. 남은 길은 원본 HF에서 `convert_hf_to_gguf.py --mmproj`로 다시 뽑는 것뿐인데(호스트에 원본도 torch도 없다), **계산상 갈 이유가 없다.** mmproj 882MB를 9060 XT(~320 GB/s)에서 읽는 시간이 2.76ms인데 per-crop은 100~155ms다 — 반으로 줄여야 1.4ms(per-crop의 1.3%)로 노이즈에 묻힌다. **prefill은 가중치를 한 번 읽고 400토큰어치 연산을 하므로 decode와 달리 대역폭이 병목이 아니다.**
+**mmproj 양자화는 도구 경로가 둘 다 막혀 있다.** 실제로 시도한 결과다:
+
+| 경로 | 결과 |
+|---|---|
+| `llama-quantize` | `unsupported model architecture: 'clip'` |
+| `convert_hf_to_gguf.py --mmproj --outtype q8_0` | 원본 HF를 받아 돌려도 **`Model SiglipVisionModel is not supported`** |
+
+두 번째는 컨테이너의 torch(`PYTHONPATH=/plugins`)로 llama.cpp의 변환기·`gguf-py`·`conversion`을 돌린 것이다 — 즉 **환경 문제가 아니라 변환기가 이 vision 백본을 지원하지 않는다.** 프로덕션의 mmproj BF16이 어떤 경로로 만들어졌는지는 이 저장소에 기록이 없다. 남은 길은 `gguf-py`로 텐서를 직접 양자화해 GGUF를 재작성하는 것인데, `clip.cpp`에 양자화 타입을 다루는 코드가 **한 줄도 없어** 만들어도 로드가 거부될 수 있다.
+
+**그리고 이득의 상한이 애초에 낮다.** mmproj 882MB를 9060 XT(~320 GB/s)에서 읽는 시간이 2.76ms인데 per-crop은 100~155ms다 — 반으로 줄여야 1.4ms(1.3%)이고, **읽기를 통째로 0으로 만들어도 2.6%**다. **prefill은 가중치를 한 번 읽고 400토큰어치 연산을 하므로 decode처럼 토큰마다 다시 읽지 않는다** — 대역폭이 병목인 구조가 아니다.
 
 > per-crop을 위 `image_min_pixels` 표의 세 점으로 분해하면 **고정비 ≈ 38ms + 토큰당 0.37ms**다(min 기준: 188→107 / 64→68 / 32→50ms). mmproj weight read 2.76ms는 그 고정비의 7%에 불과하다.
 
