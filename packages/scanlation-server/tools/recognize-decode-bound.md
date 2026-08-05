@@ -373,11 +373,33 @@ mmproj의 `clip.vision.image_min_pixels`는 **바닥**이다 — 이보다 작�
 | 경로 | 결과 |
 |---|---|
 | `llama-quantize` | `unsupported model architecture: 'clip'` |
-| `convert_hf_to_gguf.py --mmproj --outtype q8_0` | 원본 HF를 받아 돌려도 **`Model SiglipVisionModel is not supported`** |
+| `convert_hf_to_gguf.py --mmproj --outtype q8_0` | `Model SiglipVisionModel is not supported` — **단 이건 config 표기 문제다(아래)** |
 
-두 번째는 컨테이너의 torch(`PYTHONPATH=/plugins`)로 llama.cpp의 변환기·`gguf-py`·`conversion`을 돌린 것이다 — 즉 **환경 문제가 아니라 변환기가 이 vision 백본을 지원하지 않는다.** 프로덕션의 mmproj BF16이 어떤 경로로 만들어졌는지는 이 저장소에 기록이 없다. 남은 길은 `gguf-py`로 텐서를 직접 양자화해 GGUF를 재작성하는 것인데, `clip.cpp`에 양자화 타입을 다루는 코드가 **한 줄도 없어** 만들어도 로드가 거부될 수 있다.
+두 번째는 컨테이너의 torch(`PYTHONPATH=/plugins`)로 llama.cpp의 변환기·`gguf-py`·`conversion`을 돌린 것이다. 그런데 **llama.cpp는 PaddleOCR-VL을 완전히 지원한다** — `conversion/ernie.py`가 `PaddleOCRVLForConditionalGeneration`(LM)과 `PaddleOCRVisionModel`(vision)을 등록하고, 주석에 "PaddleOCR-VL uses a modified version of Siglip"까지 적혀 있다. 막힌 건 **파인튜닝 저장소의 config 문자열**이다:
 
-**그리고 이득의 상한이 애초에 낮다.** mmproj 882MB를 9060 XT(~320 GB/s)에서 읽는 시간이 2.76ms인데 per-crop은 100~155ms다 — 반으로 줄여야 1.4ms(1.3%)이고, **읽기를 통째로 0으로 만들어도 2.6%**다. **prefill은 가중치를 한 번 읽고 400토큰어치 연산을 하므로 decode처럼 토큰마다 다시 읽지 않는다** — 대역폭이 병목인 구조가 아니다.
+| 저장소 | `vision_config.architectures` |
+|---|---|
+| `PaddlePaddle/PaddleOCR-VL` (원본) | `PaddleOCRVisionModel` ← 등록명과 일치 |
+| `jzhang533/PaddleOCR-VL-For-Manga` (프로덕션) | **`SiglipVisionModel`** ← 베이스 이름이 남아 있다 |
+
+최상위 `architectures`는 양쪽 다 `PaddleOCRVLForConditionalGeneration`으로 같고 vision 쪽만 다르다. **그 한 줄을 `PaddleOCRVisionModel`로 고치면 변환은 그냥 된다** — 882MB → **597MB**(f32 norm/bias는 그대로 남아 -32%), llama-server가 로드도 한다. 이건 **mmproj 재생성 경로가 있다는 뜻이기도 하다**(`/opt/models/**`는 백업 제외라 중요하다):
+
+```bash
+# config.json의 vision_config.architectures를 PaddleOCRVisionModel로 고친 뒤
+PYTHONPATH=/plugins:<llama.cpp>/gguf-py:<llama.cpp> \
+  python convert_hf_to_gguf.py --mmproj --outtype q8_0 --outfile mmproj-Q8_0.gguf <model-dir>
+```
+
+**그런데 실측 이득이 0이다.** 한 카드에 서버를 둘 띄우는 걸 피하려고 **순차로 각 3회**(서버 교체 사이 동일 조건, 42 crop, `--pad-uncached`):
+
+| mmproj | 크기 | 3회 crops/sec | 평균 | min / med / max ms |
+|---|--:|---|--:|---|
+| BF16 (프로덕션) | 882MB | 5.993 / 5.955 / 5.959 | **5.969** | 103~105 / 161~162 / 255~258 |
+| Q8_0 | 597MB | 6.017 / 5.950 / 6.059 | **6.009** | 104~105 / 158~164 / 242~252 |
+
+**+0.7%인데 구간이 겹친다**(Q8_0의 최저 5.950 < BF16의 최저 5.955). 출력은 **41/42가 동일**하고 갈린 1개도 LM Q8_0 비교에서 갈렸던 바로 그 crop이다 — 즉 **무해하지만 무익**이라 채택할 이유가 없다.
+
+**계산이 예측한 그대로다.** mmproj 882MB를 9060 XT(~320 GB/s)에서 읽는 시간이 2.76ms인데 per-crop은 100~155ms다 — 반으로 줄여야 1.4ms(1.3%)이고 **읽기를 통째로 0으로 만들어도 2.6%**다. **prefill은 가중치를 한 번 읽고 400토큰어치 연산을 하므로 decode처럼 토큰마다 다시 읽지 않는다.** Q4에서 틀렸던 같은 계산이 여기서는 맞았다(§11 교훈 9의 반대 사례).
 
 > per-crop을 위 `image_min_pixels` 표의 세 점으로 분해하면 **고정비 ≈ 38ms + 토큰당 0.37ms**다(min 기준: 188→107 / 64→68 / 32→50ms). mmproj weight read 2.76ms는 그 고정비의 7%에 불과하다.
 
