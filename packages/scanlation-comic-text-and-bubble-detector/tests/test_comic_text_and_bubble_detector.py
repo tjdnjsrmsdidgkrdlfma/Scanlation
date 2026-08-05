@@ -34,7 +34,27 @@ def test_comic_text_and_bubble_detector_runs_without_crashing():
         assert r.polygon.shape == (4, 2)
 
 
-TESTS = [test_comic_text_and_bubble_detector_runs_without_crashing]
+def test_size_floor_ships_off():
+    """min_area/min_side exist for the noise confidence cannot reach, but ship at 0
+    so detection is unchanged until someone turns them on. Schema-only — no weights."""
+    import os
+
+    if os.environ.get("SCANLATION_DETECT_MIN_AREA") or os.environ.get("SCANLATION_DETECT_MIN_SIDE"):
+        return "SKIP: size floor overridden by env"
+    from scanlation_comic_text_and_bubble_detector.plugin import ComicTextAndBubbleDetector
+
+    schema = ComicTextAndBubbleDetector.OPTION_SCHEMA
+    resolved = ComicTextAndBubbleDetector().resolve_options({})
+    for key in ("min_area", "min_side"):
+        assert schema[key]["type"] is int
+        assert schema[key]["default"] == 0
+        assert resolved[key] == 0
+
+
+TESTS = [
+    test_size_floor_ships_off,
+    test_comic_text_and_bubble_detector_runs_without_crashing,
+]
 
 if __name__ == "__main__":
     import sys

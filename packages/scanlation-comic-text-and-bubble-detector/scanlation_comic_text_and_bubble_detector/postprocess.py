@@ -49,6 +49,28 @@ def filter_labels(dets: list[Det], keep_labels: set[str] | None) -> list[Det]:
     return [d for d in dets if d.label in keep_labels]
 
 
+def filter_small(dets: list[Det], min_area: float | None, min_side: float | None) -> list[Det]:
+    """Drop boxes below an absolute size floor (0/None = that half off).
+
+    Confidence cannot do this job: some noise scores high at every threshold, so
+    raising ``conf`` loses real text before it loses that box. Size is the axis
+    that separates them — a speck of screentone is small no matter how sure the
+    model is. Applied before ``dedup`` so a high-scoring speck cannot suppress
+    the real box it overlaps."""
+    if not min_area and not min_side:
+        return list(dets)
+    kept: list[Det] = []
+    for d in dets:
+        x0, y0, x1, y1 = d.xyxy
+        w, h = x1 - x0, y1 - y0
+        if min_area and w * h < min_area:
+            continue
+        if min_side and min(w, h) < min_side:
+            continue
+        kept.append(d)
+    return kept
+
+
 def dedup(dets: list[Det], nms_iou: float | None, contain_thresh: float | None) -> list[Det]:
     """Greedy suppression, highest score first: drop a detection that overlaps an
     already-kept (higher-score) one past ``nms_iou`` (IoU, same-size duplicates)

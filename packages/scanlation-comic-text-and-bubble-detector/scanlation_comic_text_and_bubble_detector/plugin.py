@@ -38,6 +38,14 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
         "conf": {"type": float, "default": 0.6, "description": "Confidence threshold; raise to drop weak/noise boxes."},
         "nms_iou": {"type": float, "default": 0.6, "description": "Drop a box overlapping a kept one past this IoU (1.0 = off)."},
         "contain_thresh": {"type": float, "default": 0.85, "description": "Drop a box this fraction nested inside a kept one (IoS; 1.0 = off)."},
+        "min_area": {"type": int,
+                     "default": int(os.environ.get("SCANLATION_DETECT_MIN_AREA", "0")),
+                     "description": "Drop boxes under this area in pixels. 0 = off. Confidence cannot remove "
+                                    "high-scoring specks of noise; size can."},
+        "min_side": {"type": int,
+                     "default": int(os.environ.get("SCANLATION_DETECT_MIN_SIDE", "0")),
+                     "description": "Drop boxes whose shorter side is under this many pixels. 0 = off. Catches "
+                                    "thin slivers that pass an area floor."},
     }
     SUPPORTED_SRC = ["ja", "en", "zh", "ko"]
 
@@ -115,5 +123,8 @@ class ComicTextAndBubbleDetector(LocalModelEngineBase):
             for sc, lab, box in zip(r["scores"], r["labels"], r["boxes"])
         ]
         dets = postprocess.filter_labels(dets, self.KEEP_LABELS)  # drop bubble containers
+        # Size floor before dedup: a high-scoring speck would otherwise suppress the
+        # real box it overlaps, since dedup keeps whichever scored higher.
+        dets = postprocess.filter_small(dets, options["min_area"], options["min_side"])
         dets = postprocess.dedup(dets, nms_iou, contain_thresh)   # kill NMS-free overlaps
         return postprocess.to_regions(dets)

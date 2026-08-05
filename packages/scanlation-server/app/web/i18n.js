@@ -46,6 +46,8 @@ const I18N = {
     "opt.comic-text-and-bubble-detector.conf": "신뢰도 임계값 — 높이면 약한/노이즈 박스 제거",
     "opt.comic-text-and-bubble-detector.nms_iou": "겹침(IoU)이 이 값↑인 박스 제거 (1.0 = 끔)",
     "opt.comic-text-and-bubble-detector.contain_thresh": "작은 박스가 큰 박스에 이 비율↑ 포함되면 제거 (IoS; 1.0 = 끔)",
+    "opt.comic-text-and-bubble-detector.min_area": "넓이가 이 픽셀 수↓인 박스 제거 (0 = 끔). 신뢰도로는 못 거르는 고신뢰 노이즈를 크기로 거름",
+    "opt.comic-text-and-bubble-detector.min_side": "짧은 변이 이 픽셀↓인 박스 제거 (0 = 끔). 넓이 하한을 통과하는 가느다란 조각용",
     "opt.Ollama.model": "ollama 모델 태그 (예: gemma4:31b). 필수 — /admin에서 선택",
     "opt.Ollama.num_ctx": "KV 캐시 컨텍스트 창 (번역 입력은 짧음)",
     "opt.Ollama.num_predict": "요청당 생성 토큰 상한 — 위 penalty가 실패해도 폭주의 GPU 시간을 끊는 마지막 방어선. num_ctx보다 낮아야 작동. -1 = 무제한(비권장)",

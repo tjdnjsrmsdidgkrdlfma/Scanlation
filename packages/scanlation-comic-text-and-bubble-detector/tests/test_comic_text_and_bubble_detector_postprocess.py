@@ -1,7 +1,9 @@
 """RT-DETR post-processing — testable with no torch/transformers/weights."""
 from __future__ import annotations
 
-from scanlation_comic_text_and_bubble_detector.postprocess import Det, dedup, filter_labels, ios, iou, to_regions
+from scanlation_comic_text_and_bubble_detector.postprocess import (
+    Det, dedup, filter_labels, filter_small, ios, iou, to_regions,
+)
 
 
 def _det(x0, y0, x1, y1, label="text_free", score=0.9):
@@ -50,6 +52,28 @@ def test_dedup_off_when_thresholds_none():
     assert len(dedup(dets, None, None)) == 2
 
 
+def test_filter_small_drops_by_area_and_side():
+    text = _det(0, 0, 200, 40)          # 8000 px, shorter side 40
+    speck = _det(300, 300, 306, 306)    # 36 px, shorter side 6
+    sliver = _det(0, 100, 200, 102)     # 400 px, shorter side 2
+    assert filter_small([text, speck, sliver], min_area=100, min_side=None) == [text, sliver]
+    assert filter_small([text, speck, sliver], min_area=None, min_side=10) == [text]
+    assert filter_small([text, speck, sliver], min_area=100, min_side=10) == [text]
+
+
+def test_filter_small_off_by_default():
+    dets = [_det(0, 0, 2, 2), _det(0, 0, 200, 40)]
+    assert filter_small(dets, 0, 0) == dets          # 0 = off, the shipped default
+    assert filter_small(dets, None, None) == dets
+
+
+def test_filter_small_ignores_score():
+    """The point of a size floor: confidence cannot separate these, size can."""
+    speck = _det(0, 0, 5, 5, score=0.99)   # noise the model is sure about
+    text = _det(50, 50, 250, 90, score=0.61)
+    assert filter_small([speck, text], min_area=1000, min_side=None) == [text]
+
+
 def test_to_regions_axis_aligned_and_vertical_flag():
     regions = to_regions([_det(10, 20, 40, 90, score=0.7)])  # taller than wide -> vertical
     assert len(regions) == 1
@@ -71,6 +95,9 @@ TESTS = [
     test_dedup_removes_nested_small_box,
     test_dedup_keeps_disjoint,
     test_dedup_off_when_thresholds_none,
+    test_filter_small_drops_by_area_and_side,
+    test_filter_small_off_by_default,
+    test_filter_small_ignores_score,
     test_to_regions_axis_aligned_and_vertical_flag,
 ]
 
