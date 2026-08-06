@@ -22,7 +22,7 @@
 - **`Co-Authored-By` 트레일러 필수.** 커밋 메시지 끝에 `Co-Authored-By: Claude <모델명> <noreply@anthropic.com>`(예: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`)을 넣는다. 기기에 따라 자동으로 안 붙을 수 있으니 설정에 기대지 말고 메시지에 직접 쓴다.
 
 ## 배포 서버 접속
-- 리눅스 배포 서버(translate=MI50 / recognize=9060 XT) 자격증명은 저장소 루트의 **`key.txt`**(gitignore됨)에 둔다. **비밀번호를 이 CLAUDE.md나 커밋되는 어떤 파일에도 쓰지 않는다.** `key.txt`는 PC마다 따로 만드는 로컬 파일이라 저장소로 동기화되지 않는다 — 새 PC에서는 직접 만든다.
+- 리눅스 배포 서버(translate=MI50 / recognize=9060 XT) 자격증명은 **저장소 밖** 홈 디렉토리의 `~/.scanlation/key.txt`(Windows는 `%USERPROFILE%\.scanlation\key.txt`)에 둔다. **자격증명 파일을 이 저장소 안에 만들지 않는다** — gitignore로 가리는 것도 아니다. 비밀번호는 이 CLAUDE.md를 포함해 커밋되는 어떤 파일에도 쓰지 않는다. PC마다 따로 만드는 로컬 파일이라 새 PC에서는 직접 만든다.
 - Windows에서는 `plink`로 붙는다. **따옴표가 필요한 명령은 base64로 실어 보낸다** — PowerShell → plink → bash를 지나며 따옴표가 벗겨져 인자가 깨진다. git 커밋 메시지도 같은 이유로 `-m` 대신 `-F <파일>`로 넘긴다.
 - **GPU를 오래 돌리는 작업에는 온도 가드를 넣는다.** MI50는 온도 스로틀이 없어 완충이 없다 — junction(`temp2_input`, hwmon은 PCI `1002:66A1`로 판별)을 폴링해 95°C에 닿으면 작업을 중단한다.
 - 서버에서 무거운 측정을 할 때는 **프로덕션 유닛을 쓴다**(자원 경쟁·변인 오염 없음). 별도 인스턴스를 같은 카드에 얹으면 VRAM이 모자라 시스템 메모리로 밀려나고 PCIe 대역폭에 묶여 측정이 무의미해진다. 끝나면 원복은 `trap`으로 보장한다.
