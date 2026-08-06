@@ -1,0 +1,38 @@
+# MI50 fan curve -- copy to /etc/fancontrol, then `systemctl enable --now fancontrol`.
+#
+# Maps the ARCTIC fan on SYS_FAN2 (nct6687 pwm4) to the MI50's own junction
+# temperature. The board EC only sees CPU/board temps, so a BIOS fan curve
+# cannot cool this card -- see cooling-mi50-fans.md principle 1.
+#
+# Requires nct6687 loaded with msi_fan_brute_force=1 (/etc/modprobe.d/nct6687.conf):
+#   options nct6687 msi_fan_brute_force=1
+# Without it the EC overrides pwm4 within a second and the duty floor returns to
+# ~4,360 rpm. Confirm with `dmesg | grep "brute force"`.
+#
+# Measured duty->rpm, single bare fan, brute force mode:
+#   pwm    0    26    51    77   102   128
+#   rpm 1046  1587  3432  5154  7075  8823
+#
+# MINTEMP 60 keeps the fan flat at MINPWM through idle and light load; the fan
+# becomes audible around 5,000 rpm and clearly loud by 6,400. MINPWM 26
+# (1,587 rpm) is the floor -- the ARCTIC S4028-15K is rated 1,400-15,000 rpm.
+#
+# MAXPWM 74 (~4,983 rpm) is chosen by listening, not by cooling headroom: under
+# sustained full load a 7,075 rpm cap reached junction 96C in 50s while a
+# 5,208 rpm cap reached 97C in 46s -- a 36% faster fan bought 1C. Sustained load
+# must be solved by the power cap (150W -> 120W) or by fitting the shroud.
+#
+# DEVPATH/DEVNAME pin the chips by sysfs path because hwmon numbers move every
+# boot; fancontrol refuses to start on a mismatch rather than misbehaving quietly.
+# Both paths are host-specific -- regenerate them with pwmconfig on a new machine.
+INTERVAL=5
+DEVPATH=hwmon1=devices/pci0000:00/0000:00:01.1/0000:01:00.0/0000:02:00.0/0000:03:00.0 hwmon6=devices/platform/nct6687.2592
+DEVNAME=hwmon1=amdgpu hwmon6=nct6687
+FCTEMPS=hwmon6/pwm4=hwmon1/temp2_input
+FCFANS=hwmon6/pwm4=hwmon6/fan4_input
+MINTEMP=hwmon6/pwm4=60
+MAXTEMP=hwmon6/pwm4=80
+MINSTART=hwmon6/pwm4=40
+MINSTOP=hwmon6/pwm4=26
+MINPWM=hwmon6/pwm4=26
+MAXPWM=hwmon6/pwm4=74

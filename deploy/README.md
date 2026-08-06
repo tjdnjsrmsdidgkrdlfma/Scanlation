@@ -11,8 +11,9 @@
 | `llama.cpp-PaddleOCR-VL-For-Manga-proxy.service.example` | 유휴 종료 프록시 | ✗ (socket이 띄움) |
 | `llama.cpp-PaddleOCR-VL-For-Manga.service.example` | recognize llama-server (:8091) | ✗ (proxy가 띄움) |
 | `GPU-powercap.service.example` | 부팅 시 전력 캡 | ✅ |
-| `MI50-fan-duty.service.example` | 부팅 시 MI50 팬 duty 고정 (fancontrol 전 임시) | ✅ |
 | `ollama.service.example` | **미배포** — 기각 기록용 | ✗ |
+
+**MI50 팬**은 유닛이 아니라 설정 파일이다 — [`fancontrol.example`](fancontrol.example)을 `/etc/fancontrol`로 복사하고 `fancontrol.service`를 enable한다. `/etc/modprobe.d/nct6687.conf`의 `options nct6687 msi_fan_brute_force=1`이 **같이 있어야** 동작한다(없으면 보드 EC가 pwm을 되찾아가 CPU 온도로 팬을 돌린다). 커브 근거와 실측은 [cooling-mi50-fans.md](../packages/scanlation-server/tools/cooling-mi50-fans.md).
 
 **recognize는 온디맨드**다(socket activation): 유휴 5분에 프로세스가 내려가 VRAM을 놓고 카드가 D3까지 간다. 콜드 스타트 ~2초. 세 유닛이 필요한 이유와 함정은 각 파일 주석과 [translate-ollama-gfx906.md](../packages/scanlation-server/tools/translate-ollama-gfx906.md)에 있다.
 

@@ -257,7 +257,8 @@ MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지
 
 - **보드는 GPU 온도를 모른다** — SYS_FAN 헤더는 CPU/보드 온도로 돈다. BIOS 팬커브로는 해결 불가, `fancontrol`로 `amdgpu` 온도에 매핑해야 한다.
 - **판단 기준은 `junction`(temp2)과 `mem`(temp3)** — `edge`는 느긋하다. Vega20는 HBM2가 먼저 병목되는 경우가 많다.
-- 확정 하드웨어: ARCTIC S4028-15K + 3D 프린팅 쉬라우드, **소음 상한 8,000~9,000 rpm**(냉각 설계의 하드 제약). **당분간 운영은 맨팬 1개**(SYS_FAN2, `nct6687` 드라이버, 30% duty ≈ 6,100rpm 고정, 부팅 영속 `MI50-fan-duty.service`) — 이 상태로 포화 P1/P2/P4·파이프라인 conc4가 완주한다. 고정 duty라 온도 연동이 없지만 **온도 알람(Task 5)은 보류**했다 — 부하가 버스트성이고 유휴 복귀가 빨라(10초에 수십 °C 하강) 고정 duty로 충분하다고 봤다. 검증된 건 16~42초 버스트까지라, **수 분 지속 부하를 돌리게 되면 그때 온도를 함께 본다.** 쉬라우드 A/B·`fancontrol`(Task 2~4)은 장착 시점으로 이월([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md)).
+- 확정 하드웨어: ARCTIC S4028-15K + 3D 프린팅 쉬라우드, **소음 상한 8,000~9,000 rpm**(냉각 설계의 하드 제약). **운영은 맨팬 1개**(SYS_FAN2, `nct6687` + `msi_fan_brute_force=1`)이고 **`fancontrol`이 junction에 매핑**해 유휴 1,587rpm ~ 상한 4,983rpm으로 돈다. 이 상태로 포화 P1/P2/P4·파이프라인 conc4가 완주한다(16~42초 버스트, 피크 ≤89°C).
+- **수 분 지속 부하는 맨팬으로 못 잡는다.** 3분 풀로드에서 junction이 50초 만에 96°C에 닿고, 팬 상한을 5,208 → 7,075rpm으로 올려도 97 → 96°C로 1°C밖에 안 내려간다 — **팬 rpm은 레버가 아니다.** 쉬라우드 장착(Task 3) 또는 전력 캡 150→120W가 해법이다([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md)).
 
 ## ROCm 재도전 — 실험 완료: 된다, 그러나 빠르지는 않다
 

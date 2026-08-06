@@ -2,7 +2,9 @@
 
 작성 2026-07-20. MI50(패시브 서버 카드)를 데스크톱 섀시에서 능동 공랭하기 위한 팬/쉬라우드/`fancontrol` 설정 계획 + 실행 런북. 배경과 기존 쿨링 관측(무냉각 크래시·전력 캡·온도 임계값)은 [translate-gpu-mi50.md §MI50 쿨링](translate-gpu-mi50.md#mi50-쿨링--능동-냉각-필수)에 있고, 여기서 반복하지 않는다.
 
-> **상태 (2026-07-26):** 팬·쉬라우드 실물 도착, **당분간 운영은 맨팬 1개로 확정** — 쉬라우드 장착이 당장 어렵고 맨팬 1개로도 충분해서(포화 P1/P2/P4·파이프라인 conc4 전부 완주, 피크 ≤89°C — [translate-gpu-mi50.md §신냉각 1차 실측](translate-gpu-mi50.md)). 구성: SYS_FAN2 헤더, **30% duty 고정 ≈ 6,100rpm**, 부팅 영속은 `MI50-fan-duty.service`([deploy/](../../../deploy/README.md)). **Task 1 완료**(결과 아래). **Task 5(온도 알람·스로틀 가드)는 보류 결정** — 부하가 버스트성이고 유휴 복귀가 빨라(10초에 수십 °C 하강 실측) 고정 duty로 충분하다고 판단. 검증된 건 16~42초 버스트까지라, 수 분 지속 부하를 새로 돌리게 되면 그때는 온도를 함께 본다. Task 2(매핑)·3(2팬 vs 3팬 A/B)·4(fancontrol)는 쉬라우드 장착 시점으로 이월.
+> **상태 (2026-08-06):** 운영은 맨팬 1개, **`fancontrol`이 MI50 junction 온도로 `pwm4`를 제어한다.** 구성: SYS_FAN2 헤더, 커브 `MINTEMP 60 / MAXTEMP 80 / MINPWM 26(1,587rpm) / MAXPWM 74(4,983rpm)`, 부팅 영속은 `fancontrol.service` + `/etc/modprobe.d/nct6687.conf`([deploy/](../../../deploy/README.md)). **Task 1·2·4 완료**(결과 아래). **Task 3(2팬 vs 3팬 A/B)은 쉬라우드 장착 대기.** **Task 5(온도 알람)는 보류** — 유휴 복귀가 빠르고(10초에 수십 °C 하강 실측) 커브가 junction을 직접 보므로.
+>
+> **지속 부하는 맨팬으로 못 잡는다 (2026-08-06 실측).** 3분 연속 풀로드에서 junction이 50초 만에 96°C에 닿는다. 팬 상한 5,208rpm은 46초에 97°C, 7,075rpm은 50초에 96°C — **36% 빠른 팬이 1°C를 샀다.** 팬 rpm은 이 문제의 레버가 아니다. 쉬라우드 없는 정압 누설이 원인이므로 Task 3(쉬라우드) 또는 전력 캡 150→120W로 풀어야 한다. 실사용 패턴인 16~42초 버스트는 현재 커브로 여유가 있다(포화 P1/P2/P4·파이프라인 conc4 전부 완주, 피크 ≤89°C — [translate-gpu-mi50.md §신냉각 1차 실측](translate-gpu-mi50.md)).
 
 ## 하드웨어 확정 사항 (조사·실측 완료, 재논의 불필요)
 
@@ -42,16 +44,26 @@
 - **MI50** = PCI `0000:03:00.0`, amdgpu hwmon의 `temp1/2/3` 라벨 = **edge/junction/mem** (라벨 실측 확인).
 - **보드 팬 칩 = NCT6687D**(MSI PRO B850M-A WIFI). EL10 커널엔 드라이버가 없어(`nct6683` 모듈 미탑재) [Fred78290/nct6687d](https://github.com/Fred78290/nct6687d)를 빌드해 `/lib/modules/$(uname -r)/extra/` + `modules-load.d`로 영구 로드했다. **Secure Boot는 무서명 모듈을 거부하므로 꺼야 한다**(BIOS에서 Disabled 처리됨). **커널 업데이트 시 재빌드 필요.**
 - **ARCTIC 팬 채널 = `nct6687` hwmon의 ch4**(라벨 "System Fan #2"). 수동 제어: `pwm4_enable`에 1 → `pwm4`에 0~255.
-- **EC 특성 (Task 2/4에서 반드시 감안):**
-  - **duty 바닥 강제** — pwm 0을 써도 ~4,360rpm 아래로 안 내려간다.
-  - **맨팬 duty↔rpm 실측**: 0/5/10/20/30/35/40% → 4,360/4,437/5,033/5,681/6,097/6,465/6,976rpm. §하드웨어의 "50% = 8,000rpm 선형"보다 훨씬 평평하다 — 상단 구간과 8,500rpm duty 확정은 Task 2에서(쉬라우드 장착 후).
-  - **쓴 값을 EC가 서서히 수렴**시킨다(직후 readback이 목표값과 다름, rpm 반영도 수십 초 지연 가능). dmesg의 `MSI fan brute force mode: disabled` — fancontrol 배포 시 nct6687d의 brute-force 모듈 파라미터 활성화를 검토할 것.
+- **EC 특성:**
+  - **`msi_fan_brute_force=1`이 필수다.** 없으면 EC가 `pwm4`에 쓴 값을 1초 안에 자기 커브 값으로 되돌리고(readback이 목표와 다름), **duty 바닥이 강제**돼 pwm 0에도 ~4,360rpm 아래로 안 내려간다. 켜면 커브 7포인트를 전부 써서 EC를 밀어내므로 쓴 값이 그대로 유지되고 바닥도 사라진다(pwm 0 = 1,046rpm). `/etc/modprobe.d/nct6687.conf`에 고정한다 — dmesg의 `MSI fan brute force mode: enabled`로 확인.
+  - 값을 **내리는 방향은 EC가 수 초~수십 초에 걸쳐 수렴**시킨다(올리는 방향은 즉시). `fancontrol`은 `INTERVAL`마다 다시 쓰므로 결국 수렴한다.
+  - **자동 모드(`pwm4_enable=2`)는 CPU 온도 커브다.** MI50이 49°C로 놀아도 CPU가 48→75°C로 오르면 팬이 3,846→7,042rpm까지 따라 올라가고, 반대로 CPU가 놀고 MI50만 뜨거우면 팬이 안 올라간다 — §핵심 원칙 1의 실증이다.
 
 ## Task 2 — PWM↔rpm 매핑 측정 (새 ARCTIC 팬 장착 후)
 
 - 팬이 물린 `pwmX`에 값을 직접 write(수동 제어 활성화)하며 실제 rpm 측정, 표 작성:
   - PWM 듀티 **20/30/40/50/60/70/80/100%** → 실측 rpm
 - 목적: `fancontrol` 커브의 MINPWM/MAXPWM을 실측으로 넣기 위함. 특히 **8,500 rpm에 해당하는 PWM 듀티값**을 정확히 확보(MAXPWM 캡에 사용).
+
+**결과 (2026-08-06) — 완료** (맨팬 1개, `msi_fan_brute_force=1`, `pwm4_enable=1`):
+
+| pwm | 0 | 26 | 51 | 77 | 102 | 128 |
+|---|---|---|---|---|---|---|
+| rpm | 1,046 | 1,587 | 3,432 | 5,154 | 7,075 | 8,823 |
+
+- **소음 체감**: 5,000rpm부터 들리기 시작하고 6,400rpm이면 꽤 시끄럽다. 7,075rpm은 GPU 부하 중에만 나온다면 감수 가능한 수준.
+- **MINPWM 하한은 26**(1,587rpm)으로 잡는다 — pwm 0의 1,046rpm은 팬 정격(1,400~15,000rpm) 밖이라 회전이 불안정할 수 있다.
+- 쉬라우드 장착 후에는 정압이 달라지므로 이 표를 다시 뜬다.
 
 ## Task 3 — 쉬라우드 A/B 온도 비교 ★ (쉬라우드 도착 후에만)
 
@@ -76,6 +88,25 @@
 - 커브 값은 Task 2/3 실측 기반. **MAXPWM을 8,500 rpm 듀티로 캡**(15,000 rpm/100%로 두지 말 것 — 소음 상한). MAXTEMP는 junction ~85 부근.
 - **hwmon 번호는 재부팅마다 변동.** `fancontrol`이 생성하는 `DEVPATH`/`DEVNAME` 라인 유지(불일치 시 서비스 시작 거부 → 조용한 오작동보다 안전).
 - `systemctl enable --now fancontrol` 후 **재부팅 테스트까지** 확인.
+
+**결과 (2026-08-06) — 완료** (맨팬 기준. 쉬라우드 장착 시 Task 2/3 재측정 후 커브를 다시 잡는다). `/etc/fancontrol` 핵심:
+
+```
+FCTEMPS=hwmon6/pwm4=hwmon1/temp2_input     # MI50 junction
+INTERVAL=5
+MINTEMP=60   MAXTEMP=80
+MINPWM=26    MAXPWM=74
+MINSTART=40  MINSTOP=26
+```
+
+| junction | ≤60°C | 65°C | 70°C | 75°C | ≥80°C |
+|---|---|---|---|---|---|
+| rpm | 1,587 | ~2,700 | ~3,700 | ~4,300 | 4,983 |
+
+- **`MINTEMP 60`** — 유휴·경부하를 1,587rpm에 평탄하게 눕히려는 것이다. 소음이 들리기 시작하는 5,000rpm 구간을 junction 80°C 위로 밀어냈다.
+- **`MAXPWM 74`(~4,983rpm)는 청취 기준으로 고른 값이지 냉각 여유로 고른 값이 아니다.** 상한을 7,075rpm까지 올려도 지속 부하 온도가 1°C밖에 안 내려가므로(§상태) 소음만 손해다.
+- **`MI50-fan-duty.service`는 이 설정이 대체하므로 제거했다.** oneshot 고정 duty는 EC가 되찾아가 CPU 온도를 따라 진동했고, GPU 온도를 아예 보지 못했다.
+- hwmon 번호는 부팅마다 바뀌므로 `DEVPATH`/`DEVNAME` 줄을 유지한다.
 
 ## Task 5 — 온도 알람 (하드웨어 무관, 지금도 배포 가능)
 
