@@ -1,0 +1,29 @@
+[Unit]
+Description=Load nct6687 once the Super I/O EC answers
+# systemd-modules-load runs too early: the module probes the EC before its base
+# I/O port is configured and bails with "EC base I/O port unconfigured" ->
+# "Failed to insert module 'nct6687': No such device". The same modprobe works
+# seconds later, so retry instead of racing. Do NOT also list nct6687 in
+# /etc/modules-load.d -- that path always loses the race and only adds a failure
+# line to the boot log.
+#
+# fancontrol needs this module for pwm4. Without it fancontrol exits with
+# "Device path of hwmonN has changed" and the board EC drives the MI50 fan off
+# CPU temperature -- which is exactly what this whole setup exists to prevent
+# (cooling-mi50-fans.md principle 1).
+#
+# Pair with a fancontrol drop-in at
+# /etc/systemd/system/fancontrol.service.d/nct6687.conf:
+#   [Unit]
+#   Requires=nct6687-load.service
+#   After=nct6687-load.service
+Before=fancontrol.service
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for i in $(seq 15); do modprobe nct6687 && exit 0; sleep 2; done; echo "nct6687 did not load after 30s" >&2; exit 1'
+
+[Install]
+WantedBy=multi-user.target

@@ -108,6 +108,8 @@ MINSTART=40  MINSTOP=26
 - **`MI50-fan-duty.service`는 이 설정이 대체하므로 제거했다.** oneshot 고정 duty는 EC가 되찾아가 CPU 온도를 따라 진동했고, GPU 온도를 아예 보지 못했다.
 - hwmon 번호는 부팅마다 바뀌므로 `DEVPATH`/`DEVNAME` 줄을 유지한다.
 
+**부팅 함정 — `nct6687`은 `modules-load.d`로 못 올린다 (2026-08-06 실측).** 부팅 초기엔 Super I/O EC가 응답하지 않아 모듈이 `EC base I/O port unconfigured` → `Failed to insert module 'nct6687': No such device`로 죽는다. 같은 `modprobe`가 수십 초 뒤엔 성공하므로 **경합이 아니라 재시도로 풀어야 한다** — [`nct6687-load.service`](../../../deploy/nct6687-load.service.example)가 2초 간격 15회 재시도하고, `fancontrol`은 drop-in으로 이 유닛을 `Requires=`/`After=`에 건다. 이게 없으면 `fancontrol`이 `Device path of hwmonN has changed`로 종료하고 **팬이 조용히 EC 커브(CPU 온도)로 되돌아간다** — 재부팅 직후 MI50이 48°C인데 CPU 72°C를 따라 7,075rpm으로 돌던 상태가 그것이다.
+
 ## Task 5 — 온도 알람 (하드웨어 무관, 지금도 배포 가능)
 
 - junction 95°C 또는 mem 90°C 초과 시 경고하는 감시 스크립트/서비스 작성(로그 또는 알림). **rpm이 아니라 온도 감시.**

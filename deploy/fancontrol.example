@@ -4,10 +4,14 @@
 # temperature. The board EC only sees CPU/board temps, so a BIOS fan curve
 # cannot cool this card -- see cooling-mi50-fans.md principle 1.
 #
-# Requires nct6687 loaded with msi_fan_brute_force=1 (/etc/modprobe.d/nct6687.conf):
-#   options nct6687 msi_fan_brute_force=1
-# Without it the EC overrides pwm4 within a second and the duty floor returns to
-# ~4,360 rpm. Confirm with `dmesg | grep "brute force"`.
+# Requires nct6687, loaded two ways that both matter:
+#   - /etc/modprobe.d/nct6687.conf: options nct6687 msi_fan_brute_force=1
+#     Without it the EC overrides pwm4 within a second and the duty floor
+#     returns to ~4,360 rpm. Confirm with `dmesg | grep "brute force"`.
+#   - nct6687-load.service, because modules-load.d always loses the boot race
+#     ("EC base I/O port unconfigured"). Wire it into this service with a
+#     Requires=/After= drop-in, or fancontrol starts first, exits on the missing
+#     hwmon, and the fan silently falls back to the EC's CPU-temperature curve.
 #
 # Measured duty->rpm, single bare fan, brute force mode:
 #   pwm    0    26    51    77   102   128
