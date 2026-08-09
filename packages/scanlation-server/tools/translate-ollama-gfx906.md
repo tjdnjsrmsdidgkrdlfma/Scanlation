@@ -19,7 +19,7 @@
 - **idle 언로드.** translator는 서버 프로세스 밖의 HTTP 백엔드라 [registry.py](../app/registry.py)의 `idle_candidates`가 구조적으로 배제한다(`LOCAL_ROLES = ("detector", "recognizer")`). 즉 `model_idle_unload_minutes`는 torch 엔진 전용이고, translate LLM의 VRAM은 **서버가 회수할 수단이 없다.** systemd로 상주하는 llama-server는 MI50의 ~16GB를 24/7 붙잡는다. ollama는 `OLLAMA_KEEP_ALIVE`로 이 일을 대신한다.
 - **모델 스왑.** llama-server는 런치 시 `-hf`로 한 모델만 올리고 요청의 `model` 필드를 무시한다 — `/admin`의 모델 드롭다운이 사실상 장식이었다. ollama는 `/api/tags`가 설치된 전 모델을 반환하고 요청의 `model`이 실제로 스왑을 일으킨다.
 
-**단, 첫 번째 동기는 사후에 무너졌다** — idle 언로드는 **socket activation으로 llama.cpp에서도 얻을 수 있다**(§recognize에서 실증). 프로세스째 내려가니 오히려 상위집합이다. 그리고 MI50는 카드 특성상 어차피 D3에 못 가므로, translate 쪽에서 얻을 수 있었던 건 VRAM 회수뿐이었고 그 값이 아래 리스크를 정당화하지 못했다.
+**단, 첫 번째 동기는 사후에 무너졌다** — idle 언로드는 **socket activation으로 llama.cpp에서도 얻을 수 있다**(§recognize에서 실증). 프로세스째 내려가니 오히려 상위집합이다. 그리고 MI50는 어차피 D3에 못 가므로(드라이버가 이 카드엔 런타임 PM을 안 켠다 — §최종 절전 상태), translate 쪽에서 얻을 수 있었던 건 VRAM 회수뿐이었고 그 값이 아래 리스크를 정당화하지 못했다.
 
 ## 기각 사유 — ollama가 옆 카드의 recognize를 죽인다
 
@@ -140,7 +140,7 @@ t+300s  loaded_models=0  vram=0.01GB    ← KEEP_ALIVE 만료
 
 ## recognize도 유휴에 놓게 한다 — socket activation
 
-[recognize-decode-bound.md §5](recognize-decode-bound.md)가 llama.cpp 교체의 대가로 이미 지목한 항목이다: "llama-server는 프로세스 수명 동안 모델을 붙들어 9060 XT가 D3hot으로 못 내려가고 상시 ~15W를 먹는다 — 회수하려면 TTL 프록시가 필요하다(콜드스타트 ~1.9초라 싸다)." **그 처방을 실행한 기록**이 이 절이다. recognize를 ollama로 옮겨 해결하는 길은 막혀 있다(§아래).
+[recognize-decode-bound.md §5](recognize-decode-bound.md)가 llama.cpp 교체의 대가로 이미 지목한 항목이다: "llama-server는 프로세스 수명 동안 모델을 붙들어 9060 XT가 D3cold로 못 내려가고 상시 ~15W를 먹는다 — 회수하려면 TTL 프록시가 필요하다(콜드스타트 ~1.9초라 싸다)." **그 처방을 실행한 기록**이 이 절이다. recognize를 ollama로 옮겨 해결하는 길은 막혀 있다(§아래).
 
 llama-swap 대신 **systemd socket activation**을 골랐다 — recognize는 모델이 하나뿐이라 llama-swap의 강점(모델 스왑)을 쓸 데가 없고, 남는 이득인 health-wait는 `ExecStartPost` 한 줄로 대체되므로 새 의존성을 유지할 값을 하지 못한다. 유닛 셋:
 
@@ -176,10 +176,25 @@ ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf -o /dev/null http:/
 
 | | idle 언로드 | PCI D3 |
 |---|---|---|
-| **MI50** (translate) | ❌ **적용 안 함** — llama-server 상주, ~16GB 점유 | **불가** — 카드 특성상 런타임 PM이 안 된다(`power/control=on`), 그래서 VRAM만 회수해도 절전 이득이 없다 |
-| **9060 XT** (recognize) | ✅ 프록시 유휴 종료 → 3.74GB → 0.06GB | ✅ `ctrl=auto`, **D3cold 실측** |
+| **MI50** (translate) | ❌ **적용 안 함** — llama-server 상주, ~16GB 점유 | **안 간다** — amdgpu가 이 카드엔 런타임 PM을 안 켠다(`power/control=on`), 그래서 VRAM만 회수해도 절전 이득이 없다 |
+| **9060 XT** (recognize) | ✅ 프록시 유휴 종료 → 3.74GB → 0.06GB | ✅ `ctrl=auto`, **D3cold 실측**(BOCO) |
 
-**translate에 언로드를 걸지 않는 이유**: MI50가 D3에 못 가므로 VRAM을 놓아도 전력·발열이 그대로다. 유휴 후 첫 요청에 모델 재로드(~5초)만 새로 생긴다 — 얻는 것 없이 비용만 붙는다. 절전이 실이득인 쪽은 **D3가 되는 9060 XT**이고, 그쪽엔 적용했다.
+**왜 MI50만 안 되나 — 카드가 아니라 드라이버 기본값이다 (2026-08-09 확인).** 부팅 로그와 모듈 파라미터가 그대로 말한다:
+
+```
+amdgpu 0000:03:00.0: amdgpu: Runtime PM not available     # MI50 (VEGA20)
+amdgpu 0000:09:00.0: amdgpu: Using BOCO for runtime pm    # 9060 XT (Navi 44)
+$ cat /sys/module/amdgpu/parameters/runpm  →  -1          # auto
+$ modinfo amdgpu | grep runpm
+  runpm: PX runtime pm (2 = force enable with BAMACO, 1 = force enable with BACO,
+         0 = disable, -1 = auto, -2 = auto with displays)
+```
+
+9060 XT는 auto에서 **BOCO**(슬롯 전원까지 끊는 쪽)를 받아 D3cold까지 간다. MI50에게 열려 있는 길은 **BACO**(버스만 살리고 칩을 끔)인데 그건 `runpm=1`로 **명시 opt-in해야** 켜지므로, auto에서는 드라이버가 probe에 `Runtime PM not available`을 찍고 `control=on`으로 고정한다. Vega20이 BACO를 못 하는 게 아니라 auto가 대상에서 빼는 것이다. `amdgpu.runpm=1`(부팅 파라미터 → 재부팅 필요)로 실제로 내려가는지는 **미검증**이다.
+
+**렌더 노드를 연 프로세스는 D3를 막지 않는다.** translate llama-server(Vulkan/RADV)는 자기 카드뿐 아니라 `renderD128/129/130`을 **셋 다 열어 두는데**, 그 상태에서도 9060 XT는 D3cold에 들어가 있었다. 카드를 깨우는 건 열린 fd가 아니라 실제 제출이다.
+
+**translate에 언로드를 걸지 않는 이유**: 위 상태에서 MI50는 D3에 못 가므로 VRAM을 놓아도 전력·발열이 그대로다. 유휴 후 첫 요청에 모델 재로드(~5초)만 새로 생긴다 — 얻는 것 없이 비용만 붙는다. 절전이 실이득인 쪽은 **D3가 되는 9060 XT**이고, 그쪽엔 적용했다.
 
 ## 함정 둘 (이번에 밟은 것)
 

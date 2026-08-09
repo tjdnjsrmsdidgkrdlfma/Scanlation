@@ -163,7 +163,7 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 
 - ~~**`image_min_pixels`**~~ **측정 완료 → 기각 (2026-08-05)** — 속도는 실재했다(+20~25%, mmproj 바닥 147,384 → 50,176 → 25,088). 대가가 크다: 42 크롭 중 프로덕션과 바이트 일치가 12개뿐이고, 표기 흔들림을 정규화해도 **20~21개에서 문자가 다르다.** 64토큰과 32토큰의 오독 집합이 거의 같아 **중간값 타협이 안 된다** — 문제는 얼마나 낮췄나가 아니라 바닥을 건드렸는가다. 되살리려면 106 크롭 인간 채점이 선행돼야 한다. [decode-bound §10](packages/scanlation-server/tools/recognize-decode-bound.md)
 - **recognize에서 살 수 있는 속도는 남지 않았다** — 캡·동시성·`-c`·`image_min_pixels`·양자화가 전부 닫혔다(2026-08-05). prefill은 per-crop의 2/3인데 연산이고, decode는 Q8_0에서 이미 대역폭 바운드를 벗어났다. **다음 이득은 recognize 안이 아니라 translate(62%)·detect(14.4%)에 있다.**
-- ~~**llama-swap으로 유휴 전력 회수**~~ **불필요해졌다** — systemd socket activation이 같은 일을 한다(유휴 5분에 프로세스가 내려가고 VRAM 3.74GB → 0.06GB, 카드는 low-power로, 콜드 스타트 ~2초). [translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md) · [deploy/](deploy/). ※ [TODO](TODO.md)의 llama-swap 항목은 목적이 다르다(`/admin`에서 여러 모델 스왑) — 그건 아직 열려 있다.
+- ~~**llama-swap으로 유휴 전력 회수**~~ **불필요해졌다** — systemd socket activation이 같은 일을 한다(유휴 5분에 프로세스가 내려가고 VRAM 3.74GB → 0.06GB, 카드는 D3cold로, 콜드 스타트 ~2초). [translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md) · [deploy/](deploy/). ※ [TODO](TODO.md)의 llama-swap 항목은 목적이 다르다(`/admin`에서 여러 모델 스왑) — 그건 아직 열려 있다.
 - **모델 배포가 서버 관리자 몫**이 됐다(GGUF 교체·GPU 선택 = `llama-server` 커맨드라인). mmproj를 다시 뽑아야 하면 config의 `vision_config.architectures`를 고쳐야 한다 — 레시피는 [decode-bound §10](packages/scanlation-server/tools/recognize-decode-bound.md).
 
 ---
@@ -177,7 +177,7 @@ llama.cpp로 옮긴 뒤 구성이 뒤집혀 **이제 vision prefill이 per-crop�
 | 백엔드 | **llama.cpp + Vulkan(RADV)**. ROCm도 되지만(§ROCm 재도전) 빠르지 않고, **ollama는 시도 후 기각**했다 — 옆 카드의 recognize를 죽인다([translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md)) |
 | 모델 | **`unsloth/gemma-4-26B-A4B-it-qat-GGUF`** — MoE(active 4B)라 26B인데도 빠르고 32GB에 넉넉, QAT quant |
 | 실측 | decode **89.3 t/s**(`--parallel 4` 기준선. 초기 raw 검증 89.88) · 대안 백엔드는 HIP 88.1 / ollama 83.4 |
-| idle 언로드 | **적용 안 함** — MI50는 카드 특성상 D3에 못 가므로 VRAM을 놓아도 전력 이득이 없고, 첫 요청 재로드(~5초)만 붙는다. 절전이 실이득인 recognize(9060 XT)에는 socket activation으로 적용했다 |
+| idle 언로드 | **적용 안 함** — amdgpu가 MI50엔 런타임 PM을 안 켜서(`control=on`, auto는 Vega20의 BACO를 대상에서 뺀다) D3에 못 가므로 VRAM을 놓아도 전력 이득이 없고, 첫 요청 재로드(~5초)만 붙는다. 절전이 실이득인 recognize(9060 XT)에는 socket activation으로 적용했다 |
 | 파이프라인 효과 | 이전 GPU(ollama) 대비 translate **1.62x**(1509 → 933ms 평균) |
 | thinking | **off가 필수** — 플러그인 `think` 기본 False. 켜면 같은 페이지가 958ms → 26.6초 |
 | 폭주 방어 | 플러그인 `dry_multiplier` 0.8(근본) + 유닛 `--n-predict 1024`(백스톱) |
@@ -277,7 +277,7 @@ MI50는 패시브 서버 카드라 **능동 공랭이 필수**다. 무냉각 지
 - ~~다음 레버(파이프라인의 62%)~~ **실측 완료 (2026-07-26)** — 공급 교체(recognize GPU)의 몫이 파이프라인에서 확인됐다: conc1 0.494 → 0.628, conc4 1.05 → **1.309 p/s**. 남은 격차(천장 1.64의 20%)는 prefill 고정비와 d+r 직렬 구간의 몫이다.
 - ~~**`-c` 하향 스윕**~~ — ❌ **실측 폐기 (2026-08-06).** 요청은 페이지 단위 배치라 크기가 리전 수를 따라가는데 **상한이 없다.** 프로덕션 캐시 824페이지의 최대(64리전)를 프로덕션 모델로 토크나이즈하면 **프롬프트 849 + 출력 870 = 1719 토큰**이고, 이는 `-c 8192`(슬롯당 2048)의 **84%**다. 초과하면 서버가 프롬프트를 자르지 않고 HTTP 400으로 거절해 배치가 per-text로 폴백하므로 결과는 정확하지만 그 페이지가 N회 순차 요청이 된다. **스텝의 8%를 사자고 열 경로가 아니다** — 내리려면 배치 상한이 먼저다([translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md)).
 - ~~**디스패치 프로파일 (가설 확증)**~~ **완료 (2026-08-06) — 가설 기각.** 커널 밖 갭은 5.5%뿐이고 스텝의 94.5%가 커널 안이다. 범인은 디스패치가 아니라 **잔 커널**(`RMS_NORM_MUL` 211회 = 16.4%)이고, 굵은 커널은 603GB/s로 정상이다. "모델을 바꿔야 하나"의 답은 **구조**다 — hidden 2816에 레이어당 norm이 여럿인 형태가 이 카드에서 비싸다. 다만 교체가 곧 이득은 아니다: 같은 카드에서 dense gemma-2-9b는 효율이 28%로 높아도 절대 속도는 53.6 t/s로 더 느리다. 설정으로 살 수 있는 몫은 5.5%가 상한이고, 남은 레버는 상류 llama.cpp의 커널 융합이다.
-- **translate에 idle 언로드는 두지 않는다** — MI50가 D3에 못 가서 VRAM 회수의 절전 이득이 0이고, 첫 요청 재로드(~5초)만 붙는다. 카드가 바뀌면(D3 되는 GPU) 다시 볼 항목이다.
+- **translate에 idle 언로드는 두지 않는다** — MI50가 D3에 못 가서 VRAM 회수의 절전 이득이 0이고, 첫 요청 재로드(~5초)만 붙는다. 다만 못 가는 이유는 **카드 능력이 아니라 amdgpu 기본값**이다(2026-08-09 확인): `runpm=-1`(auto)이 Vega20의 BACO를 대상에서 빼서 `Runtime PM not available` → `control=on`이 된다. `amdgpu.runpm=1`로 여는 길은 **미검증**이고(부팅 파라미터 = 재부팅, 서스펜드마다 ~16GB VRAM eviction) 지금은 열 이유가 없다. 근거는 [translate-ollama-gfx906.md](packages/scanlation-server/tools/translate-ollama-gfx906.md) §최종 절전 상태.
 - ~~냉각 보강 → 포화·파이프라인 동시성 재평가~~ **완료 (2026-07-26)** — 맨팬 1개(~6,500rpm)로 포화 P1/P2/P4 완주(천장 1.49 → **1.64 req/s**), 파이프라인 conc4 **1.309 p/s**(피크 74°C, crit 해소). 남은 것: 쉬라우드 A/B·`fancontrol`([cooling-mi50-fans.md](packages/scanlation-server/tools/cooling-mi50-fans.md) Task 2~5), **수 분 지속 부하 검증**(지금까지는 16~42초 버스트).
 - ~~**recognize를 온디맨드로**~~ **완료** — systemd socket activation(socket + `systemd-socket-proxyd --exit-idle-time=5min` + `StopWhenUnneeded`)으로 8090을 온디맨드화했다. 유휴 시 3.74GB → 0.06GB, 콜드 스타트 2.0초. 공개 포트가 그대로라 플러그인 설정은 안 바뀐다. ※ **recognize를 ollama로 옮기는 건 불가** — ollama 변환기가 `PaddleOCRVLForConditionalGeneration`을 지원하지 않고, 이미 있는 mmproj GGUF를 붙일 Modelfile 지시자도 없다(bare GGUF는 `model does not support multimodal requests`).
 

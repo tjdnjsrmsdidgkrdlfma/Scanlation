@@ -22,9 +22,9 @@
 
 `fancontrol.service.d/nct6687.conf` drop-in으로 2번을 `Requires=`/`After=`에 걸어야 순서가 보장된다. 커브 근거와 실측은 [cooling-mi50-fans.md](../packages/scanlation-server/tools/cooling-mi50-fans.md).
 
-**recognize는 온디맨드**다(socket activation): 유휴 5분에 프로세스가 내려가 VRAM을 놓고 카드가 D3까지 간다. 콜드 스타트 ~2초. 세 유닛이 필요한 이유와 함정은 각 파일 주석과 [translate-ollama-gfx906.md](../packages/scanlation-server/tools/translate-ollama-gfx906.md)에 있다.
+**recognize는 온디맨드**다(socket activation): 유휴 5분에 프로세스가 내려가 VRAM을 놓고 카드가 D3cold까지 간다(amdgpu가 이 카드엔 BOCO 런타임 PM을 켠다). 콜드 스타트 ~2초. 세 유닛이 필요한 이유와 함정은 각 파일 주석과 [translate-ollama-gfx906.md](../packages/scanlation-server/tools/translate-ollama-gfx906.md)에 있다.
 
-**translate는 상주**다. 그 카드(MI50)는 런타임 PM을 못 하므로 VRAM을 놓아도 절전 이득이 없고, 첫 요청 재로드(~5초)만 붙는다.
+**translate는 상주**다. amdgpu가 그 카드(MI50)엔 런타임 PM을 안 켜므로(`control=on` — auto는 Vega20의 BACO를 대상에서 뺀다) VRAM을 놓아도 절전 이득이 없고, 첫 요청 재로드(~5초)만 붙는다. 자세한 근거는 [translate-ollama-gfx906.md](../packages/scanlation-server/tools/translate-ollama-gfx906.md) §최종 절전 상태.
 
 ## 모델 레이아웃 — `/opt/models` 한 뿌리
 

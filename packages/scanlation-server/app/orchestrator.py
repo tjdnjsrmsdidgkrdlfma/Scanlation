@@ -100,7 +100,7 @@ def _recognize_sync(img, regions, plan: RunPlan):
     floor 1): a page's crops fan out across processes and the recognizer is NOT
     registry-loaded here, so its VRAM lives only in the workers, never in this process.
     That isolation is what lets idle-unload tear the workers down and the GPU reach
-    D3hot (~0W) — an in-process load would pin THIS process's GPU context for its whole
+    D3cold (~0W) — an in-process load would pin THIS process's GPU context for its whole
     life, so 0W would be impossible. workers=1 is a 1-worker pool (isolation, no
     parallelism); >1 fans a page's crops across processes. A pool that stays broken
     after its own rebuild+retry propagates — the request fails rather than doubling the
