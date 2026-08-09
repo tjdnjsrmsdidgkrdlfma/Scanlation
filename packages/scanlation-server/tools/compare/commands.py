@@ -1,7 +1,8 @@
 """The compare_models subcommands (list/detect/ocr/ocrbatch/consolidate/boxhtml/
-batch/ba) and their shared helpers."""
+batch/ba/translate/translatehtml) and their shared helpers."""
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from pathlib import Path
@@ -13,8 +14,12 @@ from compare.registry import all_adapters, _select
 from compare.render import render_panel, montage
 from compare.report import (
     _write_ocr_report, _write_ocr_summary, _consolidate_images, _write_ocr_md,
+    _write_translate_summary,
 )
-from compare.html import _write_ocr_html, _consolidate_box_images, _write_box_html
+from compare.html import (
+    _write_ocr_html, _consolidate_box_images, _write_box_html,
+    _consolidate_translate_pages, _write_translate_html,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -468,6 +473,167 @@ def cmd_consolidate(args) -> None:
         _write_ocr_html(out_root / f"{args.name}.html", images, args.ref, out_root, embed=not args.link)
         made.append(f"{args.name}.html")
     print(f"wrote {out_root}/{{{', '.join(made)}}}  ({len(images)} images)", file=sys.stderr)
+
+
+# --------------------------------------------------------------------------- #
+# translate
+# --------------------------------------------------------------------------- #
+class _FallbackCounter(logging.Handler):
+    """Counts the translator's "batch of N failed" warnings while one model runs.
+
+    That failure is a quality signal in its own right, not just plumbing: it means the
+    model broke the batch JSON — usually by locking into a repetition loop on an SFX —
+    and the page had to be redone one text at a time. A model that needs it often is
+    worse in production even if its prose reads well. Every warning is echoed too,
+    since attaching any handler is what stops logging's last-resort one from printing."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.n = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg = record.getMessage()
+        if "batch of" in msg:
+            self.n += 1
+        print(f"      {msg}", file=sys.stderr)
+
+
+def _translate_pages(out_root, source_engine: str) -> list[tuple[str, object, list[str]]]:
+    """(rel, dir, texts) per page, read from the recognizer batch's ocr.json.
+
+    The source text is NOT re-recognized here: every translator reads the exact same
+    input, so a recognizer slip is identical across models instead of adding noise to
+    the comparison. Pages whose ocr.json never ran that engine are skipped aloud."""
+    import json
+    pages = []
+    for jf in sorted(out_root.rglob("ocr.json")):
+        rel = jf.parent.relative_to(out_root).as_posix()
+        try:
+            data = json.loads(jf.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  note: {rel}: unreadable ocr.json ({exc}) — skipped", file=sys.stderr)
+            continue
+        eng = (data.get("engines") or {}).get(source_engine) or {}
+        texts = eng.get("texts")
+        if not texts:
+            print(f"  note: {rel}: no '{source_engine}' texts in ocr.json — skipped", file=sys.stderr)
+            continue
+        pages.append((rel, jf.parent, list(texts)))
+    return pages
+
+
+def cmd_translate(args) -> None:
+    """Translate every page's recognized text with each available LLM, model-outer.
+
+    A page goes to the model as ONE batch call — the production path — so the model
+    sees a page's lines together and the run also exercises the batch JSON schema and
+    its per-text fallback. Output lands beside the recognizer's as
+    <out>/<category>/<image>/translate.json and, like ocrbatch, ACCUMULATES: because
+    llama-server hosts one -hf at a time, each model is a separate pass (restart the
+    server, re-run) and merges into what the earlier passes left."""
+    import json
+    import logging
+    import os
+    out_root = Path(args.out)
+    # Bound per-request wait generously: the SDK default (10s) is tuned for a warm
+    # production translator, and tripping it here would silently score the fallback
+    # path instead of the model.
+    os.environ["SCANLATION_HTTP_TIMEOUT"] = str(args.timeout)
+
+    pages = _translate_pages(out_root, args.source_engine)
+    if not pages:
+        sys.exit(f"no pages with '{args.source_engine}' text under {out_root} (run ocrbatch first)")
+    total_texts = sum(len(t) for _r, _d, t in pages)
+    print(f"{len(pages)} pages / {total_texts} texts from '{args.source_engine}' "
+          f"({args.src} -> {args.dst}); timeout {args.timeout:.0f}s\n", file=sys.stderr)
+
+    this_run: dict[str, dict[str, dict]] = {}  # rel -> model -> {"texts", "ms", "fallbacks"}
+    for a, ok, _ in _run_available(_select("translate", args.only, args.exclude), _explicit_ids(args.only)):
+        if not ok:
+            continue
+        try:
+            a.load()
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {a.id}: LOAD ERROR {type(exc).__name__}: {exc} — skipping", file=sys.stderr)
+            continue
+        counter = _FallbackCounter()
+        logging.getLogger("scanlation").addHandler(counter)
+        run_ms, run_n = 0.0, 0
+        try:
+            for rel, _d, texts in pages:
+                before = counter.n
+                try:
+                    t0 = time.perf_counter()
+                    out = a.translate_page(texts, args.src, args.dst)
+                    ms = (time.perf_counter() - t0) * 1000
+                except Exception as exc:  # noqa: BLE001 - one bad page must not kill the pass
+                    print(f"    {rel} {a.id}: ERROR {type(exc).__name__}: {exc}", file=sys.stderr)
+                    continue
+                this_run.setdefault(rel, {})[a.id] = {
+                    "texts": out, "ms": ms, "fallbacks": counter.n - before,
+                }
+                run_ms += ms
+                run_n += len(texts)
+        finally:
+            logging.getLogger("scanlation").removeHandler(counter)
+        if run_n:
+            print(f"  {a.id}: {run_ms / 1000:.1f}s over {len(pages)} pages / {run_n} texts "
+                  f"({run_ms / len(pages):.0f}ms/page, {run_ms / run_n:.0f}ms/text)"
+                  + (f", {counter.n} batch fallback(s)" if counter.n else ""), file=sys.stderr)
+
+    # merge each page's prior models with this pass's, then rewrite translate.json.
+    # Prior results survive only when they answer the same question (same source
+    # engine, same language pair, same text count).
+    canon = [a.id for a in all_adapters() if a.kind == "translate"]  # stable column order
+    agg: dict[str, list] = {}  # model -> [sum_ms, n_texts, n_pages, fallbacks]
+    for rel, d, texts in pages:
+        jf = d / "translate.json"
+        prev: dict[str, dict] = {}
+        if jf.exists():
+            try:
+                old = json.loads(jf.read_text(encoding="utf-8"))
+                if (old.get("source_engine") == args.source_engine and old.get("src") == args.src
+                        and old.get("dst") == args.dst and old.get("n") == len(texts)):
+                    prev = old.get("models", {})
+                else:
+                    print(f"  note: {rel}: prior translate.json dropped (source/langs/count changed)",
+                          file=sys.stderr)
+            except Exception:  # noqa: BLE001
+                pass
+        merged = {**prev, **this_run.get(rel, {})}  # this pass's models win
+        if not merged:
+            continue
+        jf.write_text(json.dumps({
+            "source_engine": args.source_engine, "src": args.src, "dst": args.dst,
+            "n": len(texts), "source": texts,
+            "models": {m: merged[m] for m in canon if m in merged},
+        }, ensure_ascii=False, indent=1), encoding="utf-8")
+        for m, r in merged.items():
+            row = agg.setdefault(m, [0.0, 0, 0, 0])
+            row[0] += r.get("ms", 0.0)
+            row[1] += len(texts)
+            row[2] += 1
+            row[3] += r.get("fallbacks", 0)
+
+    _write_translate_summary(out_root / "_translate_summary.md", args.source_engine,
+                             args.src, args.dst, [m for m in canon if m in agg], agg)
+    print(f"\nwrote {out_root}/<category>/<image>/translate.json  +  {out_root}/_translate_summary.md",
+          file=sys.stderr)
+
+
+def cmd_translatehtml(args) -> None:
+    """Gather every page's translate.json into ONE scoring HTML: rows are the shared
+    crops (image + the recognized source), columns the candidate models, each cell
+    clickable to vote 'this model translated this line best'. Sibling of consolidate
+    (recognizers) and boxhtml (detectors), with its own vote namespace, so the three
+    scorings never share tallies."""
+    out_root = Path(args.out)
+    pages = _consolidate_translate_pages(out_root)
+    if not pages:
+        sys.exit(f"no translate.json under {out_root} (run `translate` first)")
+    dest = out_root / f"{args.name}.html"
+    _write_translate_html(dest, pages, out_root, embed=not args.link)
+    print(f"wrote {dest}  ({len(pages)} pages)", file=sys.stderr)
 
 
 def cmd_boxhtml(args) -> None:

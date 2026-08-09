@@ -49,6 +49,25 @@ def _write_ocr_report(out_path, crops: list[Image.Image], order: list[str],
         print("\n" + report)
 
 
+def _write_translate_summary(out_path: Path, source_engine: str, src: str, dst: str,
+                             order: list[str], agg: dict[str, list]) -> None:
+    """The cost side of the translator comparison: per model the total time, ms/page
+    and ms/text, plus how many pages fell back to per-text calls. Quality is NOT here
+    — that is the human vote in the translatehtml page. Page counts are per model on
+    purpose: passes accumulate, so a model added later may have covered fewer pages.
+    agg[model] = [sum_ms, n_texts, n_pages, fallbacks]."""
+    models = [m for m in order if m in agg]
+    L = [f"# Translation comparison — source text from `{source_engine}`, {src} -> {dst}\n",
+         "One batch call per page (the production path), warm server.\n",
+         "| model | pages | texts | total | ms/page | ms/text | batch fallbacks |",
+         "|---|---|---|---|---|---|---|"]
+    for m in models:
+        ms, n_texts, n_pages, fb = agg[m]
+        L.append(f"| {m} | {n_pages} | {n_texts} | {ms / 1000:.1f}s | "
+                 f"{ms / max(1, n_pages):.0f} | {ms / max(1, n_texts):.0f} | {fb} |")
+    Path(out_path).write_text("\n".join(L) + "\n", encoding="utf-8")
+
+
 def _write_ocr_summary(out_path: Path, n_images: int, total_crops: int,
                        order: list[str], agg: dict[str, dict[str, list]]) -> None:
     """Top-level CPU-vs-GPU speed table for the batch: total + ms/crop per engine

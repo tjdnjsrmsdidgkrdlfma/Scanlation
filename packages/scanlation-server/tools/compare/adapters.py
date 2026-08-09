@@ -1,6 +1,6 @@
-"""Detection and Japanese-OCR model adapters for the compare_models harness.
-Each lazy-imports its framework and reports (skip, reason) when deps/weights are
-absent, so candidates can be enabled one at a time."""
+"""Detection, Japanese-OCR and translator model adapters for the compare_models
+harness. Each lazy-imports its framework and reports (skip, reason) when
+deps/weights are absent, so candidates can be enabled one at a time."""
 from __future__ import annotations
 
 import base64
@@ -272,3 +272,69 @@ class MitOcrAdapter(Adapter):
     def recognize(self, crop: Image.Image) -> str:
         import numpy as np
         return self._m.recognize(np.array(crop.convert("RGB")))
+
+
+# --------------------------------------------------------------------------- #
+# TRANSLATE adapters
+# --------------------------------------------------------------------------- #
+class LlamaCppTranslateAdapter(Adapter):
+    """An LLM translator candidate hosted by llama-server, driven through the REAL
+    plugin (scanlation_llama_cpp): same system prompt, same batch JSON schema, same
+    repetition brake and per-text fallback the pipeline uses. So a score here is the
+    model's, not a re-implementation's.
+
+    llama-server serves only the model it was launched with (-hf), so the candidates
+    cannot all run in one pass — and a 32GB card could not hold them at once anyway.
+    ``available()`` asks the live server which model it holds and the adapter runs
+    only when that is its own; restart llama-server with the next -hf and re-run,
+    since per-image results accumulate the way the recognizer batch's do.
+    """
+    kind = "translate"
+    device_switchable = False  # the llama-server process owns the device
+    cpu_ok = False             # nobody would deploy a 27B translator on CPU
+
+    def __init__(self, id_: str, repo: str, label: str, *, quant: str = "UD-Q4_K_XL"):
+        self.id, self.repo, self.label = id_, repo, label
+        self.endpoint = os.getenv("LLAMACPP_ENDPOINT", "http://127.0.0.1:8080").rstrip("/")
+        # The deployed flags (deploy/llama.cpp-*.service.example), so the eval reads
+        # the model under the same context/slot budget production gives it.
+        self.serve_cmd = (f"llama-server -hf {repo}:{quant} -ngl 99 -c 16384 --parallel 4 "
+                          f"--n-predict 1024 --host 0.0.0.0 --port 8080")
+        self.install_hint = f"{self.serve_cmd}   (endpoint LLAMACPP_ENDPOINT={self.endpoint})"
+
+    @staticmethod
+    def _key(s: str) -> str:
+        """Normalize a model name for matching: llama-server reports the cached
+        .gguf PATH, not the -hf slug, and the two differ in case and separators."""
+        return "".join(c for c in s.lower() if c.isalnum())
+
+    def _served(self) -> list[str]:
+        import httpx
+        data = httpx.get(f"{self.endpoint}/v1/models", timeout=4.0).json()
+        return [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+
+    def available(self) -> tuple[bool, str]:
+        ok, why = _imports_ok("httpx", "scanlation_sdk", "scanlation_llama_cpp")
+        if not ok:
+            return False, why
+        try:
+            served = self._served()
+        except Exception as exc:  # noqa: BLE001
+            return False, f"llama-server unreachable at {self.endpoint} ({exc})"
+        want = self._key(self.repo.split("/")[-1].removesuffix("-GGUF"))
+        if not any(want in self._key(s) for s in served):
+            return False, (f"llama-server holds {served or ['nothing']} — restart it "
+                           f"with:  {self.serve_cmd}")
+        return True, ""
+
+    def load(self) -> None:
+        from scanlation_llama_cpp.plugin import LlamaCppTranslator
+        self._eng = LlamaCppTranslator()
+        self._eng.load()
+        self._model = next(iter(self._served()), self.repo)  # the id llama-server answers to
+
+    def translate_page(self, texts: list[str], src: str, dst: str) -> list[str]:
+        """A whole page's texts in ONE call — the production batch path, so a page
+        is translated with its own lines as context (blank texts pass through, and
+        a batch that fails to parse falls back to per-text calls)."""
+        return self._eng.translate_batch(texts, src, dst, {"model": self._model})

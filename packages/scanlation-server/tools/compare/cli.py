@@ -1,18 +1,23 @@
-"""Compare candidate DETECTION and Japanese-OCR models on the same manga page.
+"""Compare candidate DETECTION, Japanese-OCR and TRANSLATOR models on the same pages.
 
 This is a RESEARCH harness, deliberately separate from the plugin system: each
 candidate model is wrapped in a small adapter that lazy-imports its framework and
 is *skipped with a clear reason* if its deps/weights aren't installed. So you can
-enable models one at a time (pip install ..., pull an ollama tag) and re-run.
+enable models one at a time (pip install ..., pull an ollama tag, restart
+llama-server on the next -hf) and re-run.
 
-  * detect : every available detector draws its boxes on the page; the panels are
-             tiled into ONE side-by-side montage (boxes + count + ms per model).
-  * ocr    : one reference detector makes the deskewed crops, then every available
-             OCR model reads the SAME crops; the text is printed aligned per crop.
+  * detect    : every available detector draws its boxes on the page; the panels are
+                tiled into ONE side-by-side montage (boxes + count + ms per model).
+  * ocr       : one reference detector makes the deskewed crops, then every available
+                OCR model reads the SAME crops; the text is printed aligned per crop.
+  * translate : every available LLM translates the SAME recognized text (from the
+                ocr batch's ocr.json), one batch call per page like the pipeline does.
 
     ../../venv/Scripts/python tools/compare_models.py list
     ../../venv/Scripts/python tools/compare_models.py detect page.png [--only ogkalu_rtdetr,kiuyha_yolo]   # -> compare_out/
     ../../venv/Scripts/python tools/compare_models.py ocr page.png [--ref-detector ogkalu_rtdetr] [--device both] [--only mangaocr,qwen3vl]
+    ../../venv/Scripts/python tools/compare_models.py translate [--source-engine paddleocr_manga] [--only gemma-4-31B]
+    ../../venv/Scripts/python tools/compare_models.py translatehtml   # -> compare_out/_compare_translate.html
 
 Once a winner is clear, promote just that model to a real scanlation-<name>
 plugin (EngineBase + entry_points). This script stays throwaway research tooling,
@@ -25,11 +30,12 @@ import argparse
 
 from compare.commands import (
     cmd_list, cmd_detect, cmd_ocr, cmd_ocrbatch, cmd_consolidate, cmd_boxhtml,
-    cmd_batch, cmd_ba,
+    cmd_batch, cmd_ba, cmd_translate, cmd_translatehtml,
 )
 
 DEFAULT_OUT = "compare_out"    # output root every subcommand writes under
 DEFAULT_REF = "ogkalu_rtdetr"  # the decided detector model — makes the crops for the OCR commands
+DEFAULT_SOURCE = "paddleocr_manga"  # the decided recognizer — its text is what gets translated
 
 
 def main() -> None:
@@ -82,6 +88,26 @@ def main() -> None:
     cs.add_argument("--link", action="store_true",
                     help="html: reference crop images by relative path instead of base64-embedding (smaller file)")
     cs.set_defaults(fn=cmd_consolidate)
+
+    tr = sub.add_parser("translate", help="translate every page's recognized text with each available LLM")
+    tr.add_argument("--out", default=DEFAULT_OUT, help="tree with per-image ocr.json (default: compare_out)")
+    tr.add_argument("--source-engine", dest="source_engine", default=DEFAULT_SOURCE,
+                    help="recognizer whose ocr.json text every model translates (the decided OCR model)")
+    tr.add_argument("--src", default="ja", help="source language (iso1)")
+    tr.add_argument("--dst", default="ko", help="target language (iso1)")
+    tr.add_argument("--only", default=None, help="comma ids, e.g. gemma-4-31B,Qwen3.6-27B")
+    tr.add_argument("--exclude", default=None, help="comma ids to drop")
+    tr.add_argument("--timeout", type=float, default=180.0,
+                    help="per-request budget in seconds; a page batch on a big model far outlasts "
+                         "the SDK's production default, and tripping it would score the fallback path")
+    tr.set_defaults(fn=cmd_translate)
+
+    th = sub.add_parser("translatehtml", help="gather translate.json into one translation-scoring HTML (click-to-vote)")
+    th.add_argument("--out", default=DEFAULT_OUT, help="tree with per-image translate.json (default: compare_out)")
+    th.add_argument("--name", default="_compare_translate", help="output file stem under --out")
+    th.add_argument("--link", action="store_true",
+                    help="reference crop images by relative path instead of base64-embedding (smaller file)")
+    th.set_defaults(fn=cmd_translatehtml)
 
     bh = sub.add_parser("boxhtml", help="gather detector <model>.png overlays into one detector-scoring HTML (click-to-vote)")
     bh.add_argument("--out", default=DEFAULT_OUT, help="tree with per-image <model>.png overlays (default: compare_out)")

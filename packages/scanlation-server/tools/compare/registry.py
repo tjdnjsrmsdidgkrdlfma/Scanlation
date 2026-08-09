@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from compare.adapters import (
-    HfCausalVlmAdapter, HfVlmAdapter, MangaOcrAdapter, MitOcrAdapter,
-    OllamaVlmAdapter, TransformersDetAdapter, UltralyticsDetAdapter,
+    HfCausalVlmAdapter, HfVlmAdapter, LlamaCppTranslateAdapter, MangaOcrAdapter,
+    MitOcrAdapter, OllamaVlmAdapter, TransformersDetAdapter, UltralyticsDetAdapter,
 )
 from compare.core import Adapter
 
@@ -39,6 +39,21 @@ def all_adapters() -> list[Adapter]:
                      processor_repo="PaddlePaddle/PaddleOCR-VL"),  # native weights + base processor (its own is 4.x-format)
         MitOcrAdapter("mit_48px_ctc", "ctc", "48px_ctc (manga-image-translator, CTC)"),
         MitOcrAdapter("mit_48px", "48px", "48px (manga-image-translator, attention)"),
+        # --- translate ---
+        # Two families x (MoE, dense), so a win can be read as the family's rather
+        # than the architecture's. Only one can be up at a time — llama-server hosts a
+        # single -hf, and 32GB holds one of these at Q4 anyway — so they run in
+        # separate passes and accumulate. Quant is the best Q4 each publisher ships:
+        # Gemma 4's QAT build (trained at 4 bits, so it loses less than a post-hoc
+        # quant), and for Qwen3.6 — which has no QAT — unsloth's dynamic UD quant.
+        LlamaCppTranslateAdapter("gemma-4-26B-A4B", "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+                                 "Gemma 4 26B-A4B MoE, 4B active (Q4 QAT)"),
+        LlamaCppTranslateAdapter("gemma-4-31B", "unsloth/gemma-4-31B-it-qat-GGUF",
+                                 "Gemma 4 31B dense (Q4 QAT)"),
+        LlamaCppTranslateAdapter("Qwen3.6-27B", "unsloth/Qwen3.6-27B-GGUF",
+                                 "Qwen3.6 27B dense (UD-Q4_K_XL)"),
+        LlamaCppTranslateAdapter("Qwen3.6-35B-A3B", "unsloth/Qwen3.6-35B-A3B-GGUF",
+                                 "Qwen3.6 35B-A3B MoE, 3B active (UD-Q4_K_XL)"),
     ]
 
 

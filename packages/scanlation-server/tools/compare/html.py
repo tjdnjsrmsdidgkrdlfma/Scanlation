@@ -1,5 +1,6 @@
-"""HTML vote pages for the compare_models harness: the crop-OCR diff table and
-the detector box-overlay grid, each with a click-to-tally scoring UI."""
+"""HTML vote pages for the compare_models harness: the crop-OCR diff table, the
+detector box-overlay grid, and the translation table — each with a click-to-tally
+scoring UI, each in its own vote namespace."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -105,13 +106,25 @@ def render_vote_page(dest, *, title, css, legend, catwrap_summary, body,
     dest.write_text("".join(P), encoding="utf-8")
 
 
+def _crop_cell(out_root: Path, rel: str, i: int, embed: bool) -> str:
+    """The <img> for one crop of one page, shared by the recognizer and translator
+    tables (both judge a text against the picture it came from). base64-embedded so
+    the page is portable, unless embed=False (relative src, much smaller file)."""
+    import base64
+    p = out_root / rel / "crops" / f"crop_{i:02d}.png"
+    if not p.exists():
+        return "<span style='color:#777'>—</span>"
+    src = ("data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()) if embed \
+        else f"{rel}/crops/crop_{i:02d}.png"
+    return f"<img src='{src}' loading='lazy'>"
+
+
 def _write_ocr_html(dest: Path, images, ref_id: str, out_root: Path, *, embed: bool = True, cap: int = 400) -> None:
     """Self-contained HTML: per image a table of crop rows — the crop image, then each
     engine's text with only the runs that DIFFER from ref_id highlighted red. Engine
     cells are clickable to tally a manual "who read this crop best" vote per model (live
     count in the sticky bar, persisted in localStorage). Crop images are base64-embedded
     (portable) unless embed=False (relative <img src>)."""
-    import base64
     import html
     css = ("body{font-family:'Segoe UI',system-ui,sans-serif;margin:14px;background:#1e1e1e;color:#d4d4d4}"
            "h2{margin:22px 0 4px;font-size:14px;color:#e0e0e0;border-bottom:1px solid #3a3a3a}"
@@ -133,14 +146,6 @@ def _write_ocr_html(dest: Path, images, ref_id: str, out_root: Path, *, embed: b
            "table.cb tr.tot td{border-top:2px solid #5a5a5a;font-weight:600}")
     clip = lambda t: t if len(t) <= cap else t[:cap] + f" …(+{len(t) - cap})"  # noqa: E731
     esc_attr = lambda t: html.escape(t, quote=True)  # noqa: E731
-
-    def crop_cell(rel: str, i: int) -> str:
-        p = out_root / rel / "crops" / f"crop_{i:02d}.png"
-        if not p.exists():
-            return "<span style='color:#777'>—</span>"
-        src = ("data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()) if embed \
-            else f"{rel}/crops/crop_{i:02d}.png"
-        return f"<img src='{src}' loading='lazy'>"
 
     engs = []  # union of engines in encounter order, for the tally
     for _rel, cols, _rows in images:
@@ -167,7 +172,8 @@ def _write_ocr_html(dest: Path, images, ref_id: str, out_root: Path, *, embed: b
                 cls = "eng ref" if j == ri else "eng"
                 tds.append(f"<td class='{cls}' data-eng='{esc_attr(cols[j])}' data-cat='{esc_attr(cat)}' "
                            f"data-key='{esc_attr(f'{rel}|{i:02d}|{cols[j]}')}'>{inner}</td>")
-            body.append(f"<tr><td class='idx'>{i:02d}</td><td class='im'>{crop_cell(rel, i)}</td>" + "".join(tds) + "</tr>")
+            body.append(f"<tr><td class='idx'>{i:02d}</td><td class='im'>{_crop_cell(out_root, rel, i, embed)}</td>"
+                        + "".join(tds) + "</tr>")
         body.append("</table>")
     render_vote_page(
         dest, title="OCR compare", css=css,
@@ -175,6 +181,92 @@ def _write_ocr_html(dest: Path, images, ref_id: str, out_root: Path, *, embed: b
                 f"(공백 무시) · 칸 클릭 = 득표 <span id='tally'></span><button id='reset'>초기화</button></div>"),
         catwrap_summary="분류별 채택률 (분류 × 엔진 — 득표수 · %)",
         body=body, engs=engs, cat_list=cat_list, cat_n=cat_n, vote_ns="ocrsel:",
+    )
+
+
+def _consolidate_translate_pages(out_root: Path):
+    """(rel, models, source_texts, {model: texts}) per page, from the translate.json
+    that `translate` writes under out_root/<cat>/<img>/. Models kept in canonical
+    order so the columns line up across pages even when passes accumulated."""
+    import json
+    ids = [a.id for a in all_adapters() if a.kind == "translate"]
+    pages = []
+    for jf in sorted(out_root.rglob("translate.json")):
+        try:
+            d = json.loads(jf.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        models = [m for m in ids if m in (d.get("models") or {})]
+        source = d.get("source") or []
+        if models and source:
+            texts = {m: d["models"][m].get("texts") or [] for m in models}
+            pages.append((jf.parent.relative_to(out_root).as_posix(), models, list(source), texts))
+    return pages
+
+
+def _write_translate_html(dest: Path, pages, out_root: Path, *, embed: bool = True, cap: int = 400) -> None:
+    """Self-contained HTML to score TRANSLATORS (sibling of _write_ocr_html): per page
+    one row per text — the crop, the recognized source, then each model's translation,
+    every model cell clickable to vote 'this one read best here'. No diff highlighting:
+    two good translations of the same line legitimately share almost no characters, so
+    marking the difference would only add noise. Votes live in the trsel: namespace,
+    separate from the recognizer and detector tallies."""
+    import html
+    css = ("body{font-family:'Segoe UI',system-ui,sans-serif;margin:14px;background:#1e1e1e;color:#d4d4d4}"
+           "h2{margin:22px 0 4px;font-size:14px;color:#e0e0e0;border-bottom:1px solid #3a3a3a}"
+           ".legend{position:sticky;top:0;background:#1e1e1e;padding:8px 0;border-bottom:1px solid #444;font-size:13px;z-index:3}"
+           "#tally{margin-left:6px;color:#cfe8ff}#reset{margin-left:10px;font-size:12px;cursor:pointer;background:#333;color:#ddd;border:1px solid #555;border-radius:3px;padding:1px 8px}"
+           "table{border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:6px}"
+           "th,td{border:1px solid #3a3a3a;padding:4px 6px;vertical-align:top;font-size:13px;word-break:break-word;line-height:1.55}"
+           "th{background:#2d2d2d;color:#e0e0e0;position:sticky;top:36px}"
+           "td.idx,th.idx{width:30px;text-align:center;color:#888}"
+           "td.src,th.src{width:190px}td.src{background:#262626;color:#bfae8e}"
+           "td.eng{cursor:pointer}td.eng:hover{outline:1px solid #4a5a6a}td.sel{box-shadow:inset 0 0 0 2px #4fc3f7;background:#1e3a5f !important}"
+           "td.im,th.im{width:210px}img{max-width:200px;max-height:170px;object-fit:contain;display:block;background:#f5f5f5;border:1px solid #555}"
+           "details#catwrap{margin:6px 0 2px}summary{cursor:pointer;color:#cfe8ff;font-size:13px}"
+           "table.cb{width:auto;border-collapse:collapse;margin:6px 0 10px;font-size:12px;table-layout:auto}"
+           "table.cb th,table.cb td{border:1px solid #3a3a3a;padding:3px 9px;text-align:center;position:static}"
+           "table.cb td.cn{text-align:left;color:#e0e0e0}table.cb td.cc{color:#888}"
+           "table.cb td.win{background:#4a3b12;color:#ffe9a8;font-weight:700}"
+           "table.cb i{color:#7f93a6;font-style:normal;font-size:10px;margin-left:4px}"
+           "table.cb tr.tot td{border-top:2px solid #5a5a5a;font-weight:600}")
+    clip = lambda t: t if len(t) <= cap else t[:cap] + f" …(+{len(t) - cap})"  # noqa: E731
+    esc_a = lambda t: html.escape(t, quote=True)  # noqa: E731
+
+    engs = []  # union of models in encounter order, for the tally
+    for _rel, models, _src, _texts in pages:
+        for m in models:
+            if m not in engs:
+                engs.append(m)
+    cat_n, cat_list = {}, []  # texts per category (denominator for per-category acceptance %)
+    for rel, _m, source, _t in pages:
+        c = rel.split("/")[0]
+        if c not in cat_list:
+            cat_list.append(c)
+        cat_n[c] = cat_n.get(c, 0) + len(source)
+
+    body = []
+    for rel, models, source, texts in pages:
+        cat = rel.split("/")[0]  # category = first path segment, per-cell for the tally
+        body.append(f"<h2>{html.escape(rel)}</h2><table><tr><th class='idx'>#</th><th class='im'>crop</th>"
+                    "<th class='src'>source</th>"
+                    + "".join(f"<th>{html.escape(m)}</th>" for m in models) + "</tr>")
+        for i, s in enumerate(source):
+            tds = []
+            for m in models:
+                col = texts[m]
+                tds.append(f"<td class='eng' data-eng='{esc_a(m)}' data-cat='{esc_a(cat)}' "
+                           f"data-key='{esc_a(f'{rel}|{i:02d}|{m}')}'>"
+                           f"{html.escape(clip(col[i] if i < len(col) else ''))}</td>")
+            body.append(f"<tr><td class='idx'>{i:02d}</td><td class='im'>{_crop_cell(out_root, rel, i, embed)}</td>"
+                        f"<td class='src'>{html.escape(clip(s))}</td>" + "".join(tds) + "</tr>")
+        body.append("</table>")
+    render_vote_page(
+        dest, title="translate compare", css=css,
+        legend=("<div class='legend'>번역 채점 · 같은 원문·같은 크롭 기준 · 칸 클릭 = 득표 "
+                "<span id='tally'></span><button id='reset'>초기화</button></div>"),
+        catwrap_summary="분류별 채택률 (분류 × 모델 — 득표수 · %)",
+        body=body, engs=engs, cat_list=cat_list, cat_n=cat_n, vote_ns="trsel:",
     )
 
 
