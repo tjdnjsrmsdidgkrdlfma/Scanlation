@@ -641,14 +641,18 @@ def cmd_translate(args) -> None:
             for rel, _d, texts in todo:
                 before = counter.n
                 try:
-                    t0 = time.perf_counter()
+                    # Time the model, not the thermostat: the cool gate can block for
+                    # minutes, and folding that into ms/page would report a model as
+                    # orders of magnitude slower than it runs.
                     out = [""] * len(texts)
+                    ms = 0.0
                     for grp in _chunk_texts(texts, args.max_chars):
                         _cool_gate(args.cool_cmd)
+                        t0 = time.perf_counter()
                         sub = a.translate_page([texts[i] for i in grp], args.src, args.dst)
+                        ms += (time.perf_counter() - t0) * 1000
                         for i, tr in zip(grp, sub):
                             out[i] = tr
-                    ms = (time.perf_counter() - t0) * 1000
                 except Exception as exc:  # noqa: BLE001 - one bad page must not kill the pass
                     print(f"    {rel} {a.id}: ERROR {type(exc).__name__}: {exc}", file=sys.stderr)
                     continue
