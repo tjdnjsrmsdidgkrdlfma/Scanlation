@@ -498,6 +498,76 @@ class _FallbackCounter(logging.Handler):
         print(f"      {msg}", file=sys.stderr)
 
 
+def _cool_gate(cmd: str) -> None:
+    """Block on an external readiness command before sending more work.
+
+    A blind pause cannot pace a backend whose limit is thermal: too short and the
+    card still climbs, too long and the run crawls. The one thing that actually
+    knows when to continue is the machine holding the card, so let it decide --
+    the command blocks while the GPU is too hot and returns when it is not.
+
+    Deliberately opaque: the harness must not learn how to reach the GPU host.
+    Failures are ignored so a broken probe degrades to no pacing rather than
+    stopping a run mid-corpus."""
+    if not cmd:
+        return
+    import subprocess
+    try:
+        subprocess.run(cmd, shell=True, timeout=900, capture_output=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"      cool-cmd failed ({type(exc).__name__}: {exc}) — continuing unpaced",
+              file=sys.stderr)
+
+
+def _chunk_texts(texts: list[str], max_chars: int) -> list[list[int]]:
+    """Group a page's text indices into sub-batches of at most max_chars of source.
+
+    One call per page is the production shape, but it is also one long uninterrupted
+    generation -- on a backend that can be cut off mid-request (a temperature stop,
+    a restart) a page that takes 20s never lands, and the pass makes no progress at
+    all. Splitting bounds how much work a single interruption can throw away.
+
+    A single text is never split: these are speech bubbles, and half a bubble asks
+    the model to translate a fragment. 0 = off, one call per page."""
+    if max_chars <= 0:
+        return [list(range(len(texts)))]
+    groups: list[list[int]] = []
+    cur: list[int] = []
+    n = 0
+    for i, t in enumerate(texts):
+        if cur and n + len(t) > max_chars:
+            groups.append(cur)
+            cur, n = [], 0
+        cur.append(i)
+        n += len(t)
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def _prior_translations(pages, source_engine: str, src: str, dst: str) -> dict[str, dict]:
+    """rel -> {model: result} already on disk, keeping only what still answers the
+    same question (same source engine, language pair and text count). Read once, up
+    front, so a pass can both SKIP pages it already has and merge onto them after."""
+    import json
+    prev: dict[str, dict] = {}
+    for rel, d, texts in pages:
+        jf = d / "translate.json"
+        if not jf.exists():
+            continue
+        try:
+            old = json.loads(jf.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if (old.get("source_engine") == source_engine and old.get("src") == src
+                and old.get("dst") == dst and old.get("n") == len(texts)):
+            prev[rel] = old.get("models", {})
+        else:
+            print(f"  note: {rel}: prior translate.json dropped (source/langs/count changed)",
+                  file=sys.stderr)
+    return prev
+
+
 def _translate_pages(out_root, source_engine: str) -> list[tuple[str, object, list[str]]]:
     """(rel, dir, texts) per page, read from the recognizer batch's ocr.json.
 
@@ -547,6 +617,8 @@ def cmd_translate(args) -> None:
     print(f"{len(pages)} pages / {total_texts} texts from '{args.source_engine}' "
           f"({args.src} -> {args.dst}); timeout {args.timeout:.0f}s\n", file=sys.stderr)
 
+    prev_by_rel = _prior_translations(pages, args.source_engine, args.src, args.dst)
+
     this_run: dict[str, dict[str, dict]] = {}  # rel -> model -> {"texts", "ms", "fallbacks"}
     for a, ok, _ in _run_available(_select("translate", args.only, args.exclude), _explicit_ids(args.only)):
         if not ok:
@@ -556,15 +628,26 @@ def cmd_translate(args) -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"  {a.id}: LOAD ERROR {type(exc).__name__}: {exc} — skipping", file=sys.stderr)
             continue
+        todo = [p for p in pages if not (args.resume and a.id in prev_by_rel.get(p[0], {}))]
+        if args.resume and len(todo) < len(pages):
+            print(f"  {a.id}: resuming — {len(pages) - len(todo)} page(s) already done, "
+                  f"{len(todo)} to go", file=sys.stderr)
+        if not todo:
+            continue
         counter = _FallbackCounter()
         logging.getLogger("scanlation").addHandler(counter)
         run_ms, run_n = 0.0, 0
         try:
-            for rel, _d, texts in pages:
+            for rel, _d, texts in todo:
                 before = counter.n
                 try:
                     t0 = time.perf_counter()
-                    out = a.translate_page(texts, args.src, args.dst)
+                    out = [""] * len(texts)
+                    for grp in _chunk_texts(texts, args.max_chars):
+                        _cool_gate(args.cool_cmd)
+                        sub = a.translate_page([texts[i] for i in grp], args.src, args.dst)
+                        for i, tr in zip(grp, sub):
+                            out[i] = tr
                     ms = (time.perf_counter() - t0) * 1000
                 except Exception as exc:  # noqa: BLE001 - one bad page must not kill the pass
                     print(f"    {rel} {a.id}: ERROR {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -574,11 +657,19 @@ def cmd_translate(args) -> None:
                 }
                 run_ms += ms
                 run_n += len(texts)
+                # Rest in proportion to the work just done. The MI50 has no thermal
+                # throttle, and a dense 27B+ decodes slowly enough to sit under load
+                # for minutes and reach the junction cut mid-corpus -- which ends the
+                # pass with a partial model. Scaling the pause to the page's own time
+                # bounds the duty cycle without a per-model constant: a fast MoE page
+                # barely pauses, a slow dense one rests as long as it ran.
+                if args.cool_ratio > 0:
+                    time.sleep(ms / 1000 * args.cool_ratio)
         finally:
             logging.getLogger("scanlation").removeHandler(counter)
         if run_n:
-            print(f"  {a.id}: {run_ms / 1000:.1f}s over {len(pages)} pages / {run_n} texts "
-                  f"({run_ms / len(pages):.0f}ms/page, {run_ms / run_n:.0f}ms/text)"
+            print(f"  {a.id}: {run_ms / 1000:.1f}s over {len(todo)} pages / {run_n} texts "
+                  f"({run_ms / len(todo):.0f}ms/page, {run_ms / run_n:.0f}ms/text)"
                   + (f", {counter.n} batch fallback(s)" if counter.n else ""), file=sys.stderr)
 
     # merge each page's prior models with this pass's, then rewrite translate.json.
@@ -588,19 +679,7 @@ def cmd_translate(args) -> None:
     agg: dict[str, list] = {}  # model -> [sum_ms, n_texts, n_pages, fallbacks]
     for rel, d, texts in pages:
         jf = d / "translate.json"
-        prev: dict[str, dict] = {}
-        if jf.exists():
-            try:
-                old = json.loads(jf.read_text(encoding="utf-8"))
-                if (old.get("source_engine") == args.source_engine and old.get("src") == args.src
-                        and old.get("dst") == args.dst and old.get("n") == len(texts)):
-                    prev = old.get("models", {})
-                else:
-                    print(f"  note: {rel}: prior translate.json dropped (source/langs/count changed)",
-                          file=sys.stderr)
-            except Exception:  # noqa: BLE001
-                pass
-        merged = {**prev, **this_run.get(rel, {})}  # this pass's models win
+        merged = {**prev_by_rel.get(rel, {}), **this_run.get(rel, {})}  # this pass's models win
         if not merged:
             continue
         jf.write_text(json.dumps({

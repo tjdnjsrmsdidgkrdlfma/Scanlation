@@ -97,6 +97,23 @@ def main() -> None:
     tr.add_argument("--dst", default="ko", help="target language (iso1)")
     tr.add_argument("--only", default=None, help="comma ids, e.g. gemma-4-31B,Qwen3.6-27B")
     tr.add_argument("--exclude", default=None, help="comma ids to drop")
+    tr.add_argument("--cool-cmd", dest="cool_cmd", default="",
+                    help="shell command run before each request that should BLOCK while the "
+                         "backend's GPU is too hot (e.g. an ssh one-liner polling the junction "
+                         "sensor). Paces the run by the card's real state instead of a guessed "
+                         "delay, so a thermal cut never fires mid-page")
+    tr.add_argument("--max-chars", dest="max_chars", type=int, default=0,
+                    help="split a page into sub-batches of at most this many source characters "
+                         "(0 = one call per page, the production shape). Bounds how much work one "
+                         "interrupted request throws away; never splits a single text")
+    tr.add_argument("--resume", action="store_true",
+                    help="skip pages this model already translated, so a pass cut short (a "
+                         "temperature stop, a backend restart) picks up where it left off "
+                         "instead of redoing the pages it already has")
+    tr.add_argument("--cool-ratio", dest="cool_ratio", type=float, default=0.0,
+                    help="rest this multiple of each page's own generation time before the next "
+                         "one (1.0 = 50%% duty cycle). For cards without a thermal throttle, where "
+                         "a slow dense model would otherwise run into the temperature cut mid-corpus")
     tr.add_argument("--timeout", type=float, default=180.0,
                     help="per-request budget in seconds; a page batch on a big model far outlasts "
                          "the SDK's production default, and tripping it would score the fallback path")
