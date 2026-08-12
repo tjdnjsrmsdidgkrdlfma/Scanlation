@@ -300,6 +300,44 @@ class FixedFan:
               flush=True)
 
 
+class PowerCap:
+    """Temporarily lowers the GPU power cap, restoring it unconditionally.
+
+    The point of lowering it is to make a steady state exist. At 150W the card
+    has no equilibrium inside the safe range, so R_th can only be inferred
+    through a model; at 60W it settles, and R_th = (junction - intake)/P is read
+    straight off the card with no heat capacity and no curve fitting involved.
+    """
+
+    def __init__(self, gpu_dir: str, watts: float):
+        self.gpu = gpu_dir
+        self.watts = watts
+        self.prev: int | None = None
+        self.restored = False
+
+    def __enter__(self) -> "PowerCap":
+        self.prev = _read_int(self.gpu + "power1_cap")
+        lo = _read_int(self.gpu + "power1_cap_min") or 0
+        hi = _read_int(self.gpu + "power1_cap_max") or 0
+        target = int(self.watts * 1_000_000)
+        if hi and target > hi or (lo and target < lo):
+            sys.exit(f"cap {self.watts}W is outside the card's range "
+                     f"{lo / 1e6:.0f}-{hi / 1e6:.0f}W")
+        _write_sysfs(self.gpu + "power1_cap", target)
+        print(f"power cap {(self.prev or 0) / 1e6:.0f}W -> {self.watts:.0f}W", flush=True)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.restore()
+
+    def restore(self) -> None:
+        if self.restored or self.prev is None:
+            return
+        self.restored = True
+        _write_sysfs(self.gpu + "power1_cap", self.prev)
+        print(f"power cap restored to {self.prev / 1e6:.0f}W", flush=True)
+
+
 class Loader:
     """Keeps `concurrency` requests in flight, cycling the chapter's pages."""
 
@@ -512,6 +550,82 @@ def run_rep(rep: int, args, guard, url, bodies) -> dict | None:
     return row
 
 
+def run_steady(duty: int, rpm, args, guard, url, bodies) -> dict | None:
+    """Hold the load until junction stops moving, then read R_th off the card.
+
+    No lumped model here: at a cap the card can actually shed, junction settles
+    and R_th = (junction - intake) / P falls out of two measured numbers. This is
+    the arbiter for the disagreement between tau and the modelled R_th.
+    """
+    loader = Loader(url, bodies, args.concurrency, args.timeout, guard)
+    t0 = time.monotonic()
+    loader.start()
+    deadline = t0 + args.steady_timeout
+    flat_since = None
+    print(f"  holding load until flat within {args.steady_rate:.3f} C/s over "
+          f"{args.steady_window:.0f}s ...", flush=True)
+    try:
+        while time.monotonic() < deadline and not guard.tripped.is_set():
+            time.sleep(5.0)
+            now = time.monotonic()
+            if now - t0 < args.steady_window:
+                continue
+            # _slope, not _slope_any: the card is under load here, so hwmon's
+            # idle-time blocks are identifiable and have to go. _slope_any exists
+            # for the cooldown, where a low power reading is genuine.
+            rate = _slope(guard.samples, now - args.steady_window, now)
+            d = _latest(guard)
+            if rate is None or d is None or d["junction"] is None:
+                continue
+            print(f"    {now - t0:5.0f}s  junction {d['junction']:5.1f}C  "
+                  f"{rate:+.3f} C/s  {d['power'] or 0:5.1f}W", flush=True)
+            # A rate threshold alone declares victory too early: junction wobbles
+            # about 1.5C sample to sample, and one low reading at the end of the
+            # window can drag the regression under the threshold while the card is
+            # still climbing. Require real time under load as well -- an
+            # exponential approach cannot be flat at half a time constant.
+            if abs(rate) <= args.steady_rate and now - t0 >= args.steady_min_s:
+                flat_since = now
+                break
+    finally:
+        loader.drain()
+
+    if guard.tripped.is_set():
+        print(f"  backstop fired before settling — this duty's equilibrium is above "
+              f"the cut at {args.steady_watts:.0f}W", flush=True)
+        return None
+    if flat_since is None:
+        print(f"  did not settle within {args.steady_timeout:.0f}s", flush=True)
+        return None
+
+    # Every average here takes the same power filter. An idle-time block reads
+    # junction 10-20C low as well as power low, so averaging temperature over
+    # unfiltered samples drags the equilibrium down and R_th with it.
+    win = [d for t, d in guard.samples
+           if flat_since - args.steady_window <= t <= flat_since
+           and (d["power"] or 0) >= LOAD_POWER_FLOOR]
+    js = [d["junction"] for d in win if d["junction"] is not None]
+    ps = [d["power"] for d in win if d["power"] is not None]
+    ms = [d["mem"] for d in win if d["mem"] is not None]
+    if not js or not ps:
+        return None
+    j_ss, p_ss = sum(js) / len(js), sum(ps) / len(ps)
+    r_th = (j_ss - args.intake) / p_ss
+    row = {
+        "pwm": duty,
+        "fan_rpm": _mean_rpm(guard.samples, flat_since - args.steady_window, flat_since),
+        "settle_s": round(flat_since - t0, 1),
+        "junction_ss": round(j_ss, 2),
+        "mem_ss": round(sum(ms) / len(ms), 1) if ms else None,
+        "power_ss": round(p_ss, 1),
+        "intake_assumed": args.intake,
+        "r_th_c_w": round(r_th, 4),
+    }
+    print(f"  settled in {row['settle_s']:.0f}s: junction {j_ss:.1f}C at {p_ss:.1f}W "
+          f"-> R_th {r_th:.3f} C/W  (mem {row['mem_ss']}C)", flush=True)
+    return row
+
+
 MEDIAN_KEYS = ("heat_s", "slope_c_s", "cool_s", "j_plus10", "j_plus30", "power_w",
                "fan_rpm_meas", "tau_s", "t_amb_c", "heat_capacity_j_c", "r_th_c_w",
                "q_out_w")
@@ -604,6 +718,25 @@ def main() -> int:
                          "triples, the air is bypassing the fins")
     ap.add_argument("--reps", type=int, default=None,
                     help="repetitions per duty (default 1 when sweeping, else 3)")
+    ap.add_argument("--steady", action="store_true",
+                    help="lower the power cap until a steady state exists, hold the load "
+                         "until junction stops moving, and read R_th directly. Settles the "
+                         "tau-vs-R_th disagreement without a lumped model")
+    ap.add_argument("--steady-watts", type=float, default=60.0,
+                    help="power cap for --steady (default 60). Pick one whose equilibrium "
+                         "clears the backstop at every duty tested")
+    ap.add_argument("--steady-rate", type=float, default=0.01,
+                    help="C/s that counts as settled (default 0.01, about 3 tau)")
+    ap.add_argument("--steady-window", type=float, default=60.0,
+                    help="window the rate is measured over (default 60)")
+    ap.add_argument("--steady-min-s", type=float, default=400.0,
+                    help="hold the load at least this long before believing the rate "
+                         "threshold, roughly 2 tau (default 400)")
+    ap.add_argument("--steady-timeout", type=float, default=1200.0,
+                    help="give up on a duty after this long (default 1200)")
+    ap.add_argument("--intake", type=float, default=31.0,
+                    help="intake temperature for R_th, recovered from idle equilibrium "
+                         "rather than from the cooldown asymptote (default 31)")
     ap.add_argument("-P", "--concurrency", type=int, default=4,
                     help="in-flight requests, matching the production gate (default 4)")
     ap.add_argument("--gate-lo", type=float, default=70.0, help="slope window start (default 70)")
@@ -652,6 +785,12 @@ def main() -> int:
         sys.exit("pwm duties must be 0-255")
     if args.reps is None:
         args.reps = 1 if args.sweep else 3
+    if args.steady:
+        # The floor exists to drop hwmon's idle-time blocks, which read ~23W. A
+        # 60W cap puts real load samples right at the default, so scale it to the
+        # cap or the filter would throw the whole run away.
+        global LOAD_POWER_FLOOR
+        LOAD_POWER_FLOOR = min(LOAD_POWER_FLOOR, args.steady_watts * 0.5)
 
     out = Path(args.out or f"cooling_{args.label}.json")
     log = Path(args.log or f"cooling_{args.label}.csv")
@@ -670,7 +809,8 @@ def main() -> int:
     lim = sensors.limits()
     print(f"MI50 hwmon {sensors.gpu}")
     print(f"  limits: junction crit {lim['junction_crit']:.0f}C · mem crit {lim['mem_crit']:.0f}C "
-          f"· power cap {lim['power_cap']:.0f}W (untouched)")
+          f"· power cap {lim['power_cap']:.0f}W"
+          f"{f' (lowered to {args.steady_watts:.0f}W for this run)' if args.steady else ' (untouched)'}")
     print(f"  config: {args.label} · pwm4 {','.join(str(d) for d in duties)} · gates "
           f"{args.gate_lo:.0f}->{args.gate_hi:.0f}C · cool to {args.cool_to:.0f}C · "
           f"{args.reps} rep(s) each · P={args.concurrency}")
@@ -688,35 +828,54 @@ def main() -> int:
             pass
 
     levels: list[dict] = []
+    steady: list[dict] = []
+    cap = PowerCap(sensors.gpu, args.steady_watts) if args.steady else None
     try:
         with fan:
-            for duty in duties:
-                rpm = fan.set_duty(duty, settle=args.fan_settle)
-                print(f"pwm4 = {duty} -> {rpm} rpm", flush=True)
-                reps: list[dict] = []
-                for rep in range(1, args.reps + 1):
+            if cap:
+                with cap:
+                    for duty in duties:
+                        rpm = fan.set_duty(duty, settle=args.fan_settle)
+                        print(f"pwm4 = {duty} -> {rpm} rpm", flush=True)
+                        row = run_steady(duty, rpm, args, guard, url, bodies)
+                        if row:
+                            steady.append(row)
+                        if guard.tripped.is_set():
+                            # The Event cannot be cleared, so the remaining duties
+                            # would be skipped silently. Stop and say so instead.
+                            print("backstop latched — rerun the remaining duties",
+                                  flush=True)
+                            break
+            else:
+                for duty in duties:
+                    rpm = fan.set_duty(duty, settle=args.fan_settle)
+                    print(f"pwm4 = {duty} -> {rpm} rpm", flush=True)
+                    reps: list[dict] = []
+                    for rep in range(1, args.reps + 1):
+                        if guard.tripped.is_set():
+                            break
+                        row = run_rep(rep, args, guard, url, bodies)
+                        if row:
+                            reps.append(row)
+                    med = {k: _median([r[k] for r in reps]) for k in MEDIAN_KEYS}
+                    levels.append({
+                        "pwm": duty,
+                        # Prefer the speed held during the measurement; the settle
+                        # reading is only a fallback for a rep that produced nothing.
+                        "fan_rpm": round(med["fan_rpm_meas"]) if med["fan_rpm_meas"] else rpm,
+                        "fan_rpm_at_settle": rpm,
+                        "reps": reps,
+                        "median": med,
+                    })
                     if guard.tripped.is_set():
                         break
-                    row = run_rep(rep, args, guard, url, bodies)
-                    if row:
-                        reps.append(row)
-                med = {k: _median([r[k] for r in reps]) for k in MEDIAN_KEYS}
-                levels.append({
-                    "pwm": duty,
-                    # Prefer the speed held during the measurement; the settle
-                    # reading is only a fallback for a rep that produced nothing.
-                    "fan_rpm": round(med["fan_rpm_meas"]) if med["fan_rpm_meas"] else rpm,
-                    "fan_rpm_at_settle": rpm,
-                    "reps": reps,
-                    "median": med,
-                })
-                if guard.tripped.is_set():
-                    break
     except KeyboardInterrupt:
         print("\ninterrupted — stopping submission", flush=True)
     finally:
         guard.stop_flag.set()
         guard.join(timeout=5)
+        if cap:
+            cap.restore()
         fan.restore()
 
     first = levels[0] if levels else {"pwm": duties[0], "fan_rpm": None, "reps": [],
@@ -730,6 +889,8 @@ def main() -> int:
         "power_cap_w": round(lim["power_cap"]),
         "pages_per_chapter": len(bodies),
         "levels": levels,
+        "steady_watts": args.steady_watts if args.steady else None,
+        "steady": steady,
         # Mirrors of the first duty, so a single-configuration run stays directly
         # comparable with --compare without unwrapping the sweep.
         "pwm": first["pwm"],
@@ -749,7 +910,23 @@ def main() -> int:
     if guard.tripped.is_set():
         print(f"BACKSTOP FIRED ({guard.reason}) — this configuration heats faster than the "
               f"gates assume; treat its numbers as a lower bound.")
-    if len(duties) > 1:
+    if args.steady:
+        print(f"\nsteady state at {args.steady_watts:.0f}W, intake {args.intake:.0f}C "
+              f"(no model, no heat capacity):")
+        print(f"{'pwm':>5}{'rpm':>8}{'settle s':>10}{'junction':>10}{'mem':>7}"
+              f"{'W':>7}{'R_th C/W':>11}")
+        for r in steady:
+            print(f"{r['pwm']:>5}{r['fan_rpm'] or '?':>8}{r['settle_s']:>10.0f}"
+                  f"{r['junction_ss']:>10.1f}{r['mem_ss'] or 0:>7.0f}"
+                  f"{r['power_ss']:>7.1f}{r['r_th_c_w']:>11.3f}")
+        if len(steady) >= 2:
+            lo, hi = steady[0], steady[-1]
+            print(f"\nfan {lo['fan_rpm']} -> {hi['fan_rpm']} rpm: R_th "
+                  f"{lo['r_th_c_w']:.3f} -> {hi['r_th_c_w']:.3f} C/W "
+                  f"({(hi['r_th_c_w'] / lo['r_th_c_w'] - 1) * 100:+.0f}%). "
+                  f"These are read off the card -- where they disagree with the "
+                  f"modelled R_th, these win.")
+    elif len(duties) > 1:
         print_sweep(levels, args)
     elif first["median"]["slope_c_s"] is not None:
         m = first["median"]
