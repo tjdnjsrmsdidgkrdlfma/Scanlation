@@ -234,7 +234,27 @@ cmake --build build-vulkan -j --config Release -t llama-server
 ```
 
 - 로드 로그에서 **어떤 Vulkan 디바이스를 잡았는지 확인**. MI50(RADV, VEGA20/gfx906)가 아니라 iGPU나 `llvmpipe`(CPU)를 잡으면 `GGML_VK_VISIBLE_DEVICES=<MI50인덱스>`로 핀. (기본값이 discrete를 우선하는 편.)
+- **`GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM=1`을 반드시 넣는다** — 아래 참조. 없으면 16GB 넘는 모델이 조용히 시스템 메모리로 샌다.
 - 포트 충돌 주의: 같은 8080에 다른 서버(도커 등)가 떠 있으면 `couldn't bind ... port 8080`으로 즉사하니 먼저 비운다.
+
+### 32GB 카드가 16GB만 쓰던 문제 (2026-08-12, 해결)
+
+**증상.** 17.3GB 모델(`gemma-4-31B-it-qat-UD-Q4_K_XL`)을 올리면 VRAM 16.1GB / **GTT 6.0GB**로 갈리고 디코드가 16 t/s로 주저앉는다. VRAM 16GB가 비어 있는데도 그렇다. 컨텍스트를 절반으로 줄여도, `--no-mmap`을 줘도, `GGML_VK_ENABLE_MEMORY_PRIORITY=1`을 줘도 VRAM은 계속 ~16.2GB에서 멈춘다.
+
+**원인.** ggml-vulkan이 모델 일부를 **host-visible device memory**로 요청한다. 이 카드는 Resizable BAR가 없어 그 힙이 작으므로, 드라이버가 해당 할당을 시스템 메모리(GTT)에서 대신 처리한다. `GGML_VK_ALLOW_SYSMEM_FALLBACK=0`으로 폴백을 꺼도 증상이 같은 것이 결정적 단서였다 — ggml은 21.58 GiB를 정상적으로 "device"로 할당했다고 보고하는데(`GGML_VK_MEMORY_LOGGER=1`) 커널은 그중 6GB를 GTT에 앉혀 놓는다. **llama.cpp가 포기한 게 아니라 메모리 타입 선택이 문제**다.
+
+**해결.** `GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM=1`.
+
+| 설정 | VRAM | GTT | decode |
+|---|--:|--:|--:|
+| 기본 | 16,148MB | 6,006MB | 16.4 t/s |
+| `GGML_VK_ENABLE_MEMORY_PRIORITY=1` | 16,148MB | 6,006MB | 16.4 t/s |
+| **`GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM=1`** | **22,111MB** | **798MB** | **25.4 t/s** |
+| priority + 512MB 블록 | 16,323MB | 5,831MB | 16.9 t/s |
+
+**현재 운영 MoE(14.25GB)는 이 천장 아래라 증상이 없다** — GTT 188MB로 깨끗하다. 그래서 지금까지 드러나지 않았다. 하지만 **그보다 큰 모델은 무조건 샌다.**
+
+**진단법.** 모델을 올린 뒤 `/sys/bus/pci/devices/0000:03:00.0/mem_info_gtt_used`를 본다. 정상은 200MB 안팎이고, GB 단위면 새고 있는 것이다. 온도나 로그만 보면 안 보인다 — 서버는 정상적으로 뜨고 health도 200이며, 느려질 뿐이다.
 
 ## 파이프라인 통합 시도 (2026-07-14) — 미완 + GPU hang 사고
 
