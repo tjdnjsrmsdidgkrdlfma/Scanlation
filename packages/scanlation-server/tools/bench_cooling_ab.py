@@ -734,6 +734,18 @@ def main() -> int:
                          "threshold, roughly 2 tau (default 400)")
     ap.add_argument("--steady-timeout", type=float, default=1200.0,
                     help="give up on a duty after this long (default 1200)")
+    # The defaults suit a run that climbs past the gate and must be stopped short.
+    # A steady-state run at a cap whose equilibrium sits near a default would trip
+    # on the equilibrium itself, so the cuts have to move with the target -- while
+    # staying under the 95C ceiling, which is checked below.
+    ap.add_argument("--cut", type=float, default=GUARD["cut"],
+                    help=f"sustained cut, 2 samples (default {GUARD['cut']:.0f})")
+    ap.add_argument("--cut-hard", type=float, default=GUARD["cut_hard"],
+                    help=f"single-sample cut (default {GUARD['cut_hard']:.0f})")
+    ap.add_argument("--cut-project", type=float, default=GUARD["cut_project"],
+                    help=f"projected-temperature cut (default {GUARD['cut_project']:.0f})")
+    ap.add_argument("--cut-mem", type=float, default=GUARD["cut_mem"],
+                    help=f"mem cut, 2 samples (default {GUARD['cut_mem']:.0f})")
     ap.add_argument("--intake", type=float, default=31.0,
                     help="intake temperature for R_th, recovered from idle equilibrium "
                          "rather than from the cooldown asymptote (default 31)")
@@ -775,8 +787,16 @@ def main() -> int:
         return compare(args.compare)
     if not args.report or not args.label:
         sys.exit("need REPORT and --label (or --compare)")
-    if args.gate_hi >= GUARD["cut"]:
-        sys.exit(f"--gate-hi must stay below the {GUARD['cut']}C backstop cut")
+    guard_cfg = dict(GUARD, cut=args.cut, cut_hard=args.cut_hard,
+                     cut_project=args.cut_project, cut_mem=args.cut_mem)
+    if max(args.cut, args.cut_hard, args.cut_project) >= 95 or args.cut_mem >= 90:
+        sys.exit("refusing to run: every cut must sit below the 95C junction ceiling "
+                 "and the 90C mem ceiling")
+    if not args.steady and args.gate_hi >= args.cut:
+        sys.exit(f"--gate-hi must stay below the {args.cut}C backstop cut")
+    if args.steady and args.cut <= 31 + args.steady_watts * 0.4:
+        print(f"warning: a cut of {args.cut:.0f}C may sit at or under the equilibrium "
+              f"this cap is aiming for — the run would trip on success", flush=True)
     try:
         duties = [int(x) for x in args.sweep.split(",")] if args.sweep else [args.pwm]
     except ValueError:
@@ -814,10 +834,11 @@ def main() -> int:
     print(f"  config: {args.label} · pwm4 {','.join(str(d) for d in duties)} · gates "
           f"{args.gate_lo:.0f}->{args.gate_hi:.0f}C · cool to {args.cool_to:.0f}C · "
           f"{args.reps} rep(s) each · P={args.concurrency}")
-    print(f"  backstop: sustained {GUARD['cut']}C · spike {GUARD['cut_hard']}C · "
-          f"projected {GUARD['cut_project']}C · mem {GUARD['cut_mem']}C (ceiling 95C)\n")
+    print(f"  backstop: sustained {guard_cfg['cut']:.0f}C · spike {guard_cfg['cut_hard']:.0f}C · "
+          f"projected {guard_cfg['cut_project']:.0f}C · mem {guard_cfg['cut_mem']:.0f}C "
+          f"(ceiling 95C)\n")
 
-    guard = bts.Guard(sensors, types.SimpleNamespace(**GUARD), log)
+    guard = bts.Guard(sensors, types.SimpleNamespace(**guard_cfg), log)
     guard.start()
 
     fan = FixedFan(sensors.fan, duties[0])
