@@ -83,7 +83,12 @@ def recognize_temperature() -> float:
 
 class LlamaCppRecognizer(HttpEngineBase):
     name = "llama.cpp"
-    display_name = "llama.cpp"
+    # The id stays "llama.cpp" (registry key + persisted selection), but the LABEL
+    # says which kind of server this is: the plugin's two engines otherwise render
+    # as the same word in /admin's role dropdowns and the popup, and every sibling
+    # recognizer is named after its MODEL, which llama.cpp can't be (the GGUF is
+    # picked by the llama-server command line).
+    display_name = "llama.cpp (vision)"
     homepage = "https://github.com/ggml-org/llama.cpp"
     description = ("Text recognition via an OpenAI-compatible /v1 vision server (llama.cpp, vllm…; "
                    "must be running with a VLM + its mmproj). ~10x faster and ~1/4 the VRAM of the "

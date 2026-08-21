@@ -19,7 +19,7 @@ from scanlation_sdk.http_translator import COMMON_LLM_OPTIONS, HttpTranslatorBas
 
 class LlamaCppTranslator(HttpTranslatorBase):
     name = "llama.cpp"
-    display_name = "llama.cpp"
+    display_name = "llama.cpp (LLM)"  # vs the same plugin's vision engine — see recognizer.py
     homepage = "https://github.com/ggml-org/llama.cpp"
     description = "LLM translation via an OpenAI-compatible /v1 server (llama.cpp, vllm, LM Studio…; must be running). llama-server serves the one model it was launched with (-hf)."
     ENDPOINT_ENV = "LLAMACPP_ENDPOINT"

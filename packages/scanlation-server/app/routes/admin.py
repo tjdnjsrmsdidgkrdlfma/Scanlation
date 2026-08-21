@@ -112,6 +112,12 @@ def get_settings() -> dict:
         "gpu_vendor": detect_gpu_vendor(),  # amd/nvidia/both/None from device nodes (torch backend auto-pick)
         "torch_build": installed_torch_build(),  # cpu/cuda/rocm/None — for the backend-mismatch warning
         "engines": {role: _engine_entries(role) for role in ROLE_NAMES},
+        # Plugin-level (install-unit) labels for the plugin tab, keyed by name. A
+        # plugin can carry several engines (llama.cpp: a translator + a recognizer),
+        # each with its own engine label, so the card needs the plugin's own text
+        # rather than one engine's standing in for the whole install.
+        "plugins": {n: {"display_name": c.display_name, "description": c.description}
+                    for n, c in catalog().items()},
         "installing": installing_names(),   # plugins whose install is running now
 
         "prompts": {

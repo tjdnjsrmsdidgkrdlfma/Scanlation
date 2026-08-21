@@ -140,7 +140,10 @@ async function pollInstalls() {
 
 function engineOption(e) {
   const mark = e.installed ? "●" : "○";
-  return `<option value="${e.name}">${mark} ${e.display_name} (${e.name})</option>`;
+  // The raw id is worth showing only when the label doesn't already carry it
+  // ("Manga OCR (manga-ocr)"); otherwise it just doubles the name.
+  const id = e.display_name.includes(e.name) ? "" : ` (${e.name})`;
+  return `<option value="${e.name}">${mark} ${e.display_name}${id}</option>`;
 }
 
 function renderModels() {
@@ -372,6 +375,13 @@ function renderPlugins() {
   // streaming request) show as "설치 중…" even on a fresh page load / other tab.
   const serverInstalling = new Set(DATA.installing || []);
   const rows = Object.values(byName).map((e) => {
+    // Name/describe the PLUGIN (the install unit), not whichever of its engines
+    // the dedupe above happened to keep: llama.cpp ships two, and either one's
+    // text describes half the card. Falls back to the engine for anything the
+    // catalog doesn't list.
+    const pmeta = (DATA.plugins || {})[e.name] || {};
+    const pname = pmeta.display_name || e.display_name;
+    const pdesc = pmeta.description || e.description || "";
     // One-shot install: the button pip-installs the package (if missing) AND
     // downloads the weights in a single action; the live log shows both phases as
     // they run. `installed` (weights present, which implies the package) is the
@@ -388,8 +398,8 @@ function renderPlugins() {
     const warn = e.warning ? `<div class="pwarn">⚠ ${e.warning}</div>` : "";
     return `<div class="plugin" data-name="${e.name}">
         <div class="meta">
-          <div class="pname">${e.display_name} <span class="proles">${e.roles.join(", ")}</span></div>
-          <div class="pdesc">${e.description || ""}</div>
+          <div class="pname">${pname} <span class="proles">${e.roles.join(", ")}</span></div>
+          <div class="pdesc">${pdesc}</div>
           ${warn}
         </div>
         ${action}
