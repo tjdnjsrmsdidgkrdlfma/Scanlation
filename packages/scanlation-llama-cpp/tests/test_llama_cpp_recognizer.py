@@ -51,19 +51,34 @@ def test_builds_vision_request():
     assert text_part["text"] == "OCR:"
 
 
-def test_model_included_only_when_set():
-    rec = _rec()
-    rec.recognize(_crop(10, 10), Region.from_bbox(0, 0, 10, 10), {"model": "vl-test"})
-    assert rec._captured["model"] == "vl-test"
+def test_admin_options_are_crop_reading_only():
+    """A recognizer's admin surface is how the CROP is read. Which model serves it, the
+    prompt that model wants, the token ceiling and the decode temperature describe the
+    llama-server, so they must not show up as /admin fields."""
+    assert set(LlamaCppRecognizer.OPTION_SCHEMA) == {"max_pixels", "downscale_mode"}
 
 
-def test_options_override_defaults():
-    rec = _rec()
-    rec.recognize(_crop(10, 10), Region.from_bbox(0, 0, 10, 10),
-                  {"prompt": "READ:", "max_tokens": 32, "temperature": 0.5})
-    b = rec._captured
-    assert b["messages"][0]["content"][1]["text"] == "READ:"
-    assert b["max_tokens"] == 32 and b["temperature"] == 0.5
+def test_serving_details_come_from_env():
+    """...and are settable, per deployment, through their env vars."""
+    import os
+
+    env = {
+        "LLAMACPP_RECOGNIZE_MODEL": "vl-test",
+        "SCANLATION_RECOGNIZE_PROMPT": "READ:",
+        "SCANLATION_RECOGNIZE_MAX_TOKENS": "32",
+        "SCANLATION_RECOGNIZE_TEMPERATURE": "0.5",
+    }
+    os.environ.update(env)
+    try:
+        rec = _rec()
+        rec.recognize(_crop(10, 10), Region.from_bbox(0, 0, 10, 10), {})
+        b = rec._captured
+        assert b["model"] == "vl-test"
+        assert b["messages"][0]["content"][1]["text"] == "READ:"
+        assert b["max_tokens"] == 32 and b["temperature"] == 0.5
+    finally:
+        for k in env:
+            os.environ.pop(k, None)
 
 
 def test_cap_downscales_before_upload():
@@ -112,8 +127,8 @@ def test_endpoint_from_env(monkeypatch=None):
 
 TESTS = [
     test_builds_vision_request,
-    test_model_included_only_when_set,
-    test_options_override_defaults,
+    test_admin_options_are_crop_reading_only,
+    test_serving_details_come_from_env,
     test_cap_downscales_before_upload,
     test_cap_off_uploads_full_size,
     test_empty_content_is_empty_string,

@@ -23,9 +23,14 @@ was only ever timed on a mis-pinned server, so the old "c>1 buys nothing" number
 does not describe this configuration.
 
 Model-agnostic by design: it sends an image + prompt to /v1/chat/completions, so
-any OpenAI-compatible vision server works (llama.cpp, vLLM, SGLang…). WHICH model
-is served is a deployment choice (the llama-server command line), not a plugin
-setting — mirroring how the translator half already works.
+any OpenAI-compatible vision server works (llama.cpp, vLLM, SGLang…).
+
+What ``/admin`` exposes is deliberately narrow. A recognizer's contract is crop in ->
+text out, so ``OPTION_SCHEMA`` carries only what changes how the CROP is read
+(``max_pixels``, ``downscale_mode``). The serving details — which model, the prompt it
+was trained on, the token ceiling, the decode temperature — belong to whoever runs the
+llama-server, so they are env-settable (the functions below) and stay off the operator's
+form, the same way the per-crop timeout does.
 """
 from __future__ import annotations
 
@@ -49,6 +54,33 @@ def recognize_http_timeout() -> float:
     return float(os.getenv("SCANLATION_RECOGNIZE_HTTP_TIMEOUT", "120"))
 
 
+def recognize_model() -> str:
+    """Model id sent with each crop — LLAMACPP_RECOGNIZE_MODEL (default unset, and then
+    omitted from the request entirely). llama-server serves the one model it was launched
+    with (-hf) and ignores the field; other OpenAI servers require it. It names a
+    server-side deployment, so it rides with the endpoint env, not the admin form."""
+    return os.getenv("LLAMACPP_RECOGNIZE_MODEL", "")
+
+
+def recognize_prompt() -> str:
+    """Instruction sent with the crop — SCANLATION_RECOGNIZE_PROMPT (default "OCR:", what
+    PaddleOCR-VL is trained on). It is a property of WHICH model the server holds, so it
+    moves with that deployment; a differently-prompted model needs it changed there."""
+    return os.getenv("SCANLATION_RECOGNIZE_PROMPT", "OCR:")
+
+
+def recognize_max_tokens() -> int:
+    """Output-token ceiling per crop — SCANLATION_RECOGNIZE_MAX_TOKENS (default 1024).
+    A runaway brake on generation, not a quality knob."""
+    return int(os.getenv("SCANLATION_RECOGNIZE_MAX_TOKENS", "1024"))
+
+
+def recognize_temperature() -> float:
+    """Decode temperature — SCANLATION_RECOGNIZE_TEMPERATURE (default 0 = greedy).
+    Recognition wants one deterministic reading of the pixels."""
+    return float(os.getenv("SCANLATION_RECOGNIZE_TEMPERATURE", "0"))
+
+
 class LlamaCppRecognizer(HttpEngineBase):
     name = "llama.cpp"
     display_name = "llama.cpp"
@@ -61,17 +93,8 @@ class LlamaCppRecognizer(HttpEngineBase):
     ENDPOINT_ENV = "LLAMACPP_RECOGNIZE_ENDPOINT"
     DEFAULT_ENDPOINT = "http://127.0.0.1:8090"
     ROLE_LABEL = "recognizer"
+    # Only the crop-reading knobs — the serving details are env (module top).
     OPTION_SCHEMA = {
-        "model": {"type": str, "default": "",
-                  "description": "Model id (from the server's /v1/models). Optional — llama-server serves "
-                                 "whatever it was started with and ignores this; other OpenAI servers require it."},
-        "prompt": {"type": str, "default": "OCR:",
-                   "description": "Instruction sent with the crop. 'OCR:' is what PaddleOCR-VL is trained on — "
-                                  "change only for a differently-prompted model."},
-        "max_tokens": {"type": int, "default": 1024,
-                       "description": "Max output tokens per crop; lower to cap runaway generation."},
-        "temperature": {"type": float, "default": 0.0,
-                        "description": "0 = greedy/deterministic, which is what OCR wants."},
         # 300k/box, not the in-process engine's 150k/pow2: pow2 only halves, so a crop
         # just over the cap drops to a QUARTER of it — a 302k crop read at 75k lost 3 of
         # its 4 lines. box lands on the cap exactly, and the cap stays as the guard rail
@@ -95,7 +118,7 @@ class LlamaCppRecognizer(HttpEngineBase):
     def _parse_models(self, payload: dict) -> list[str]:
         return [m["id"] for m in payload.get("data", []) if m.get("id")]
 
-    def _body(self, crop: Image.Image, options: dict) -> dict:
+    def _body(self, crop: Image.Image) -> dict:
         """The vision chat-completions body: one user message carrying the crop as a
         data: URI plus the instruction. PNG (lossless) because a JPEG's ringing lands
         exactly on the thin strokes and small kana this model is read on."""
@@ -105,14 +128,15 @@ class LlamaCppRecognizer(HttpEngineBase):
         body: dict[str, Any] = {
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                {"type": "text", "text": options["prompt"]},
+                {"type": "text", "text": recognize_prompt()},
             ]}],
-            "temperature": options["temperature"],
-            "max_tokens": options["max_tokens"],
+            "temperature": recognize_temperature(),
+            "max_tokens": recognize_max_tokens(),
             "stream": False,
         }
-        if options["model"]:  # omit entirely rather than send "" — llama-server ignores it anyway
-            body["model"] = options["model"]
+        model = recognize_model()
+        if model:  # omit entirely rather than send "" — llama-server ignores it anyway
+            body["model"] = model
         return body
 
     def _extract(self, data: dict) -> str:
@@ -124,4 +148,4 @@ class LlamaCppRecognizer(HttpEngineBase):
         is applied HERE, before upload, so it also shrinks what goes over the wire."""
         options = self.resolve_options(options)
         crop = downscale_to_cap(to_rgb(crop), options["max_pixels"], options["downscale_mode"])
-        return self._extract(self._post("/v1/chat/completions", self._body(crop, options)))
+        return self._extract(self._post("/v1/chat/completions", self._body(crop)))

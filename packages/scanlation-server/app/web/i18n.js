@@ -55,8 +55,6 @@ const I18N = {
     "opt.Ollama.repeat_penalty": "반복 억제 (flat, ollama 기본 1.1). 점수를 한 번만 나눠서 강한 SFX 루프는 못 끊는 경우가 많음 — 그건 frequency_penalty로.",
     "opt.Ollama.frequency_penalty": "반복 횟수에 비례해 점수를 깎음(escalating). repeat_penalty로 안 잡히는 SFX·의성어 무한반복(으으으…)을 끊음. ~1.0~2.0 권장, 0 = 끔.",
     "opt.translator.llama.cpp.model": "모델 id (서버 /v1/models). 필수 — /admin에서 선택. 단 llama-server는 이 값을 무시하고 런치 시 -hf로 올린 모델 하나만 서비스 — 모델을 바꾸려면 -hf 수정 후 llama-server 재기동. 다른 OpenAI 호환 서버는 이 id가 필요.",
-    "opt.recognizer.llama.cpp.model": "모델 id (서버 /v1/models). 선택 — llama-server는 런치 시 -hf로 올린 모델을 서비스하며 이 값은 무시. 다른 OpenAI 호환 서버는 이 id가 필요.",
-    "opt.llama.cpp.max_tokens": "생성 최대 토큰 수",
     "plugins.h2": "플러그인 설치",
     "plugins.hint": "패키지 + 가중치 원클릭 설치",
     "plugins.installed": "설치됨",
