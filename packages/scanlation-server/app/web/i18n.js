@@ -39,6 +39,7 @@ const I18N = {
     "options.hint": "선택된 플러그인의 옵션 (예: 번역 모델 태그)",
     "options.none": "설정 가능한 옵션이 없습니다.",
     "options.notInstalled": "이 플러그인은 설치되어 있지 않습니다. 「플러그인 설치」 탭에서 설치하세요.",
+    "options.served": "이 백엔드가 서빙 중인 모델: {model}",
     // engine option descriptions (ko override of the server's English schema desc)
     "opt.temperature": "샘플링 온도 (0 = 결정적)",
     "opt.seed": "난수 시드",
@@ -175,6 +176,7 @@ const I18N = {
     "options.hint": "Options for the selected plugins (e.g. translation model tag)",
     "options.none": "No configurable options.",
     "options.notInstalled": "This plugin isn't installed. Install it in the Install plugins tab.",
+    "options.served": "Serving: {model}",
     "plugins.h2": "Plugin installation",
     "plugins.hint": "One-click install of package + weights",
     "plugins.installed": "Installed",

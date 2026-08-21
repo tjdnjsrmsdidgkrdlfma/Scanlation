@@ -36,13 +36,17 @@ def test_get_settings_merges_catalog():
         assert name in names, name
 
 
-def test_get_translator_models_shape():
+def test_get_engine_models_shape():
     c = client()
     # active translator is dummy (no backend) -> empty list, never errors
-    d = c.get("/get_translator_models/").json()
+    d = c.get("/get_engine_models/").json()
     assert isinstance(d["models"], list) and d["models"] == []
-    # unknown engine -> empty, not a 4xx
-    assert c.get("/get_translator_models/", params={"engine": "nope"}).json()["models"] == []
+    # unknown engine / unknown role -> empty, not a 4xx
+    assert c.get("/get_engine_models/", params={"engine": "nope"}).json()["models"] == []
+    assert c.get("/get_engine_models/", params={"role": "nope"}).json()["models"] == []
+    # every role is askable; a local engine has no backend to ask -> empty
+    for role in ("detector", "recognizer", "translator"):
+        assert c.get("/get_engine_models/", params={"role": role}).json()["models"] == []
 
 
 def test_set_options_persists_and_clears():
@@ -196,7 +200,7 @@ def test_client_config_model_idle_unload_minutes():
 TESTS = [
     test_get_settings_shape,
     test_get_settings_merges_catalog,
-    test_get_translator_models_shape,
+    test_get_engine_models_shape,
     test_set_options_persists_and_clears,
     test_schema_serialization_keeps_choices,
     test_prompt_select_save_delete,

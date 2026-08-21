@@ -304,6 +304,7 @@ function optBlock(role, e) {
   return `<div class="opt-block" data-role="${role}" data-engine="${e.name}">
       <span class="role">${t("role." + role)}</span>
       <h3>${e.display_name}</h3>
+      <p class="note served" data-served hidden></p>
       ${dev}${conc}${fieldsHtml}${saveBtn}
     </div>`;
 }
@@ -316,27 +317,51 @@ function renderEngineOptions() {
     .map((role) => { const e = findEngine(role, sel[role]); return e ? optBlock(role, e) : ""; })
     .filter(Boolean);
   $("engine-options").innerHTML = blocks.join("");
-  setupModelPicker();  // async: swap the translator 'model' text field for a <select>
+  enrichFromBackends();  // async: name the served model, and offer a translator picker
 }
 
+// What an engine's BACKEND reports, folded back into its options block. One query
+// per role that has a backend to ask (`serves_models`), used two ways below.
+async function enrichFromBackends() {
+  for (const role of ROLES) {
+    const sel = DATA.selection[role];
+    const e = findEngine(role, sel);
+    if (!e || !e.serves_models) continue;
+    // by role, not by engine name: one name can serve two roles (llama.cpp is both
+    // translator and recognizer), and matching on the name alone would rewrite the
+    // wrong block with the other role's list.
+    const block = document.querySelector(`.opt-block[data-role="${role}"]`);
+    if (!block) continue;
+    let models = [];
+    try {
+      models = (await api(`/get_engine_models/?role=${role}&engine=${encodeURIComponent(sel)}`)).models || [];
+    } catch (_) { continue; }
+    if (!models.length) continue;  // backend down -> leave the block as rendered
+    if (models.length === 1) showServed(block, models[0]);
+    if (role === "translator") swapModelPicker(block, models);
+  }
+}
+// A backend offering exactly ONE model is serving that one: llama-server holds the
+// model its command line named, and no admin field chooses it. State it, because the
+// engine label names the RUNTIME that serves the crop, not the model that reads it.
+// A backend offering several (ollama's tag list) is chosen from by the field instead.
+function showServed(block, id) {
+  const slot = block.querySelector("[data-served]");
+  if (!slot) return;
+  slot.textContent = t("options.served", { model: servedName(id) });
+  slot.hidden = false;
+}
+// llama-server reports whatever named the model — an --alias if the unit set one,
+// else the -m path, which would render as one long absolute line. Keep the stem.
+function servedName(id) {
+  return String(id).split(/[\\/]/).pop().replace(/\.gguf$/i, "");
+}
 // Replace the active translator's free-text 'model' field with a <select> of the
-// backend's installed models, plus a "(default — env)" option (value "") that
-// clears the override. A saved value not in the list is kept as an option. If the
-// backend is unreachable (empty list) the plain text input is left untouched, so
-// a tag can still be typed.
-async function setupModelPicker() {
-  const engine = DATA.selection.translator;
-  // by role, not by engine name: the same name can also be the selected recognizer,
-  // and that block renders first — matching on the name alone would rewrite ITS
-  // model field with the translator's model list.
-  const block = document.querySelector('.opt-block[data-role="translator"]');
-  const input = block && block.querySelector('input[data-opt="model"]');
+// backend's models, plus a "(pick one)" option (value "") that clears the override.
+// A saved value not in the list is kept as an option.
+function swapModelPicker(block, models) {
+  const input = block.querySelector('input[data-opt="model"]');
   if (!input) return;  // dummy translator has no model option
-  let models = [];
-  try {
-    models = (await api(`/get_translator_models/?engine=${encodeURIComponent(engine)}`)).models || [];
-  } catch (_) { return; }
-  if (!models.length) return;  // backend down -> keep the text input
   const current = input.value;
   const opts = [`<option value="">${t("field.pickModel")}</option>`];
   if (current && !models.includes(current)) {

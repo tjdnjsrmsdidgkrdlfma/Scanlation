@@ -52,6 +52,9 @@ def _engine_entries(role: str) -> list[dict]:
             "installed": safe_is_installed(cls),
             "installed_package": True,
             "schema": serialize_schema(cls),
+            # duck-typed like uses_device: an engine backed by a server can be asked
+            # what it holds, an in-process one cannot (see /get_engine_models/)
+            "serves_models": hasattr(cls, "list_models"),
             "options": dict(state.selection.options.get(opt_key(role, name), {})),
             "device": state.selection.devices.get(name, ""),
             # per-engine recognize worker-pool override ("" = the global default),
@@ -74,6 +77,7 @@ def _engine_entries(role: str) -> list[dict]:
             "installed": False,
             "installed_package": False,
             "schema": {},
+            "serves_models": False,
             "options": {},
             "device": "",
             "recognize_concurrency": "",
@@ -128,16 +132,22 @@ def get_settings() -> dict:
     }
 
 
-@router.get("/get_translator_models/")
-def get_translator_models(engine: str | None = None) -> dict:
-    """Model tags installed on a translator's backend (ollama /api/tags,
-    llama.cpp /v1/models), so the admin 'model' field can offer a picker.
-    Defaults to the active translator; [] if unreachable or not applicable."""
-    name = engine or state.selection.translator
-    if not registry.has("translator", name):
+@router.get("/get_engine_models/")
+def get_engine_models(role: str = "translator", engine: str | None = None) -> dict:
+    """Model ids an engine's backend reports (ollama /api/tags, llama.cpp /v1/models).
+    Two admin uses: a translator's 'model' field offers them as a picker, and a backend
+    reporting exactly ONE is serving that one, which the page states outright. [] if
+    unreachable, unknown, or the engine has no backend to ask (local torch engines)."""
+    if role not in ROLE_NAMES:
+        return {"models": []}
+    name = engine or getattr(state.selection, role)
+    if not registry.has(role, name):
+        return {"models": []}
+    cls = registry.get_class(role, name)
+    if not hasattr(cls, "list_models"):  # in-process engine: nothing to ask
         return {"models": []}
     try:
-        models = registry.get_class("translator", name)().list_models()
+        models = cls().list_models()
     except Exception:  # noqa: BLE001
         models = []
     return {"models": models}
