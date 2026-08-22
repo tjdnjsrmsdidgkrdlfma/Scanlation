@@ -2,6 +2,58 @@
 
 미뤄둔 작업 모음. translate/MI50 관련 상세·완료분은 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md), 설계는 [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md).
 
+## 9060 XT compute ring 행 — 원인 미규명 (2026-08-23)
+
+인식 llama-server가 간헐적으로 GPU를 wedge시키고 죽는다. 7일간 21회 기동 중 4회 실패(~20%).
+번역(MI50)은 같은 기간 0회 — 9060 XT 쪽만의 문제다.
+
+서명은 3건 모두 동일하다:
+
+```
+radv/amdgpu: The CS has been cancelled because the context is lost.
+             This context is guilty of a hard recovery.
+amdgpu 09:00.0: ring comp_1.1.0 timeout → reset compute queue → device wedged, but recovered through reset
+llama-server: terminate called after throwing an instance of 'vk::DeviceLostError'
+```
+
+llama.cpp가 `vk::DeviceLostError`를 잡지 않아 `ggml_uncaught_exception` → `std::terminate` → abort로 끝난다.
+GPU가 아직 복구 중일 때 systemd가 재시작하면 그 프로세스는 **로드 중에** 또 죽는다 — 이쪽 백트레이스를
+1차 사고로 오독하기 쉬우니 주의(실제로 한 번 그랬다).
+
+**로드 문제가 아니다.** 모델은 0.9초에 뜨고 크롭을 정상 처리하다가 특정 task에서 멈춘다:
+
+| | 직전 SMU 복귀 | 행 | 간격 | 그 사이 |
+|---|---|---|---|---|
+| 08-09 | 23:07:17 | 23:09:14 | 117초 | 연속 처리 중 (task 1203, `graphs reused=1069`) |
+| 08-22 | 14:49:10 | 14:49:49 | 39초 | 38초 유휴 후 |
+| 08-23 | 01:05:43 | 01:05:45 | 2초 | 연속 처리 중 |
+
+행 감지까지 걸리는 시간은 0초/61초/317초로 들쭉날쭉하다. 317초짜리는 유닛이 5분 넘게 `activating`으로
+보이므로 "기동이 느리다"로 오해하기 쉽다.
+
+배제된 것:
+
+- **크롭 내용** — 뻗게 한 이미지를 재번역하면 성공한다
+- **유휴 길이** — 최장 유휴(2797·2602·2215분) 기동은 전부 정상, 실패는 113·403·919분으로 중간값
+- **열·VRAM·경합** — junction 37°C, VRAM 57MB/16GB, 카드를 쓰는 다른 프로세스 없음
+
+**서스펜드 복귀 가설은 판별력이 없다.** 카드가 20일 중 15.96일을 서스펜드라(`autosuspend_delay_ms=5000`)
+인식 세션은 예외 없이 복귀 직후 시작한다 — 20일간 복귀 149회에 행 3회니 정상 세션 146회에도 똑같이
+"복귀 직후"가 참이다. 08-09은 복귀 117초 뒤 연속 처리 중에 죽어서 아예 안 맞는다.
+
+- [ ] **실험 — `power_dpm_force_performance_level=high`.** 남은 후보는 서스펜드가 아니라 **작업 중 DPM
+  클럭/전압 전환**(지금 `auto`)이다. 크롭 단위로 부하가 붙었다 빠지는 워크로드라 전환이 잦고, 3건 전부와
+  "재시도하면 됨"이 설명된다. 클럭을 고정하되 유휴 서스펜드는 남기므로 소켓 활성화 설계와 충돌하지 않는다.
+  빈도가 세션당 ~20%라 판정에 며칠 걸린다. 효과가 확인되면 udev 규칙으로 재부팅 생존시킨다.
+- [ ] 그래도 재현되면 `power/control=on`(서스펜드 자체 차단)을 다음 변수로. 08-09을 설명 못 하므로 후순위.
+
+다음에 걸렸을 때 볼 곳 — 유닛 저널은 코어덤프·gdb 출력이 대부분이라 llama-server 자체 로그가 묻힌다.
+`journalctl -u llama.cpp-PaddleOCR-VL-For-Manga.service -o json`에서 `_COMM=llama-server`로 거를 것.
+커널의 카드 복귀는 `SMU is resumed successfully!`로 남는다. 앱 쪽은 `003acbc` 이후 실제 원인을
+`EngineTaskError: HTTPStatusError: ...`로 남긴다(그 전엔 `BrokenProcessPool`로 묻혔다).
+
+환경: Navi 44 gfx1200, mesa 26.1.1 radv, kernel 6.12.0-233.el10.
+
 ## llama.cpp recognizer — 로컬 실행 시 재설치
 
 새 PC에서 로컬로 띄워 볼 때: venv의 `scanlation-llama-cpp` dist-info에 `scanlation.recognizers`
