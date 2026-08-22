@@ -39,8 +39,10 @@ the main process (and re-importing it in a spawned worker) stays cheap.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import multiprocessing as mp
+import pickle
 import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -85,6 +87,51 @@ def _worker_init(group: str, name: str, device: str | None) -> None:
     _ENGINE = eng
 
 
+class EngineTaskError(RuntimeError):
+    """What a worker's exception becomes when the original can't survive the trip home.
+
+    A worker reports failure by pickling the exception for the parent to re-raise, and
+    some exceptions pickle but do NOT unpickle: httpx's ``HTTPStatusError`` takes
+    ``request``/``response`` keyword-only, while pickle rebuilds an exception by
+    calling the class with ``args`` positionally. The parent then fails while READING
+    the result, which ``ProcessPoolExecutor`` can only take for a worker that died
+    mid-answer -- so it raises ``BrokenProcessPool``, which buries the real cause (the
+    recognizer's backend answered an error) under a wrong one and throws away a pool
+    whose every worker holds a loaded model.
+
+    A plain ``RuntimeError`` subclass carrying one string round-trips, so the worker
+    restates the offender as this and the parent gets to see the actual failure."""
+
+
+def _survives_pickle(exc: BaseException) -> bool:
+    """Whether ``exc`` can be pickled AND unpickled again. Both halves are checked
+    because the failure this guards against pickles cleanly and only breaks on the way
+    back."""
+    try:
+        pickle.loads(pickle.dumps(exc))
+    except Exception:  # noqa: BLE001 - any failure here means "this one can't be sent"
+        return False
+    return True
+
+
+def _sendable(fn):
+    """Wrap a worker task so whatever it raises can reach the parent. Exceptions that
+    round-trip are re-raised untouched, so callers keep matching on their real types;
+    only the rest are restated, as ``EngineTaskError`` carrying the original class name
+    and message. Not chained: ``__cause__`` is dropped by pickling too, so the original
+    rides in the message or not at all."""
+    @functools.wraps(fn)
+    def task(item):
+        try:
+            return fn(item)
+        except Exception as exc:  # noqa: BLE001 - re-raised; restated only when it must be
+            if _survives_pickle(exc):
+                raise
+            raise EngineTaskError(f"{type(exc).__name__}: {exc}") from None
+    return task
+
+
+@_sendable
 def _recognize_one(item) -> tuple[str, float, float, float]:
     """One B=1 recognize in the worker. ``item`` is ``(crop, options)``; the crop is
     already deskewed upright by the caller. Returns ``(text, elapsed_ms, t_start,
@@ -104,6 +151,7 @@ def _recognize_one(item) -> tuple[str, float, float, float]:
     return text, ms, t_start, time.time()
 
 
+@_sendable
 def _detect_one(item) -> list:
     """One page's detect in the worker. ``item`` is ``(image, options)``; returns the
     raw ``list[Region]``. Reading order is assigned by the CALLER (pipeline), not here

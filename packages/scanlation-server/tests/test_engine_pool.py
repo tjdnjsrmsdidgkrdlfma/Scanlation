@@ -7,11 +7,18 @@ bench-validated separately. Role-agnostic: both singletons are this one class.
 """
 from __future__ import annotations
 
+import pickle
 import threading
 import time
 from concurrent.futures.process import BrokenProcessPool
 
-from app.engine_pool import EnginePool
+from app.engine_pool import (
+    EnginePool,
+    EngineTaskError,
+    _detect_one,
+    _recognize_one,
+    _sendable,
+)
 
 from tests.helpers import run
 
@@ -141,6 +148,77 @@ def test_idle_seconds_tracks_last_run_and_teardown():
     assert pool.idle_seconds(100.0) is None
 
 
+
+class _KwOnlyError(Exception):
+    """Shaped like httpx's ``HTTPStatusError``: the extra state is keyword-only, so
+    the ``(cls, args)`` pickle reduces to a call the class won't accept. Pickles;
+    won't unpickle. A local stand-in keeps this test off the plugins' httpx."""
+    def __init__(self, message, *, request, response):
+        super().__init__(message)
+        self.request = request
+        self.response = response
+
+
+def test_kwonly_exception_would_break_the_pool_unguarded():
+    """The premise: this exception really does pickle and really does fail coming back.
+    Without it the guard below would be testing nothing."""
+    exc = _KwOnlyError("Server error '503'", request="req", response="resp")
+    blob = pickle.dumps(exc)              # the worker's send succeeds...
+    try:
+        pickle.loads(blob)                # ...and the parent's read is what fails
+    except TypeError:
+        return
+    raise AssertionError("expected the round trip to fail")
+
+
+def test_sendable_restates_an_exception_that_cannot_come_back():
+    """A task raising the un-unpicklable one yields EngineTaskError instead, naming the
+    original class and message — and that replacement survives the trip."""
+    @_sendable
+    def boom(item):
+        raise _KwOnlyError("Server error '503'", request="req", response="resp")
+
+    try:
+        boom(("crop", {}))
+    except EngineTaskError as exc:
+        assert "_KwOnlyError" in str(exc), str(exc)
+        assert "503" in str(exc), str(exc)
+        assert str(pickle.loads(pickle.dumps(exc))) == str(exc)   # now round-trips
+        return
+    raise AssertionError("expected EngineTaskError")
+
+
+def test_sendable_leaves_a_normal_exception_alone():
+    """An exception that round-trips is re-raised untouched, so callers that match on
+    its type keep working."""
+    @_sendable
+    def boom(item):
+        raise ValueError("plain")
+
+    try:
+        boom(("crop", {}))
+    except EngineTaskError:
+        raise AssertionError("a picklable exception must not be restated")
+    except ValueError as exc:
+        assert str(exc) == "plain"
+
+
+def test_sendable_passes_results_through():
+    """The wrapper is transparent on the success path."""
+    @_sendable
+    def ok(item):
+        return ("text", 1.0, 2.0, 3.0)
+
+    assert ok(("crop", {})) == ("text", 1.0, 2.0, 3.0)
+
+
+def test_worker_tasks_stay_picklable_by_reference():
+    """The spawn executor ships the task function by module+qualname, so wrapping must
+    not shadow the module attribute the pickle resolves back to."""
+    for fn in (_recognize_one, _detect_one):
+        assert pickle.loads(pickle.dumps(fn)) is fn
+
+
 TESTS = [
     test_single_run_returns_ordered,
     test_teardown_waits_for_inflight_run,
@@ -148,6 +226,11 @@ TESTS = [
     test_broken_pool_rebuild_no_selfdeadlock,
     test_broken_retry_also_breaks_drops_and_raises,
     test_idle_seconds_tracks_last_run_and_teardown,
+    test_kwonly_exception_would_break_the_pool_unguarded,
+    test_sendable_restates_an_exception_that_cannot_come_back,
+    test_sendable_leaves_a_normal_exception_alone,
+    test_sendable_passes_results_through,
+    test_worker_tasks_stay_picklable_by_reference,
 ]
 
 if __name__ == "__main__":
