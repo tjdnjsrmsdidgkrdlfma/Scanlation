@@ -2,22 +2,7 @@
 
 미뤄둔 작업 모음. translate/MI50 관련 상세·완료분은 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md), 설계는 [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md).
 
-## llama.cpp recognizer — 배포 반영 남음 (2026-08-21)
-
-recognizer 어드민 표면 정리(`91b8047`)·엔진 라벨 분리(`89708a4`)·서빙 모델 표시(`6314f66`)는
-**레포에만 올라갔고 배포 서버엔 아무것도 반영 안 됐다.** `deploy/`는 `.example`이라 실제 유닛은
-서버에 따로 있다 — 파일이 바뀐 게 서버가 바뀐 게 아니다.
-
-- [ ] **플러그인 재설치 + 서버 재시작** — `/admin` 플러그인 탭에서 llama.cpp **재설치**(이미 설치돼
-  있으면 그냥 "설치"는 pip를 건너뛴다). 재시작해야 새 모듈을 문다. recognizer 옵션 정리·엔진 라벨이
-  여기 실려 있다.
-- [ ] **서버 이미지 갱신** — `git pull` + `docker compose up -d --build`. 서빙 모델 표시·드롭다운·
-  플러그인 카드는 `app/web`·`app/routes` 쪽이라 플러그인 재설치로는 안 따라온다.
-- [ ] **llama-server 인식 유닛에 `--alias PaddleOCR-VL-For-Manga`** — 없으면 `/v1/models`가 `-m`
-  경로 전체를 보고해 `/admin`에 그 경로가 그대로 뜬다. 번역용 유닛은 건드리지 말 것: 그 id가
-  `model` 옵션에 저장된 값이라 이름을 바꾸면 저장된 선택이 깨진다.
-- [ ] **실제 `/admin`으로 확인** — 지금 green인 건 단위 테스트뿐이고 화면은 아직 아무도 안 봤다.
-  인식기 블록에 `max_pixels`·`downscale_mode`만 남는지, 그 위에 서빙 모델 줄이 뜨는지.
+## llama.cpp recognizer — 로컬 실행 시 재설치
 
 새 PC에서 로컬로 띄워 볼 때: venv의 `scanlation-llama-cpp` dist-info에 `scanlation.recognizers`
 entry point가 없으면(설치가 recognizer 추가 이전) llama.cpp가 인식기 후보로 안 뜬다 → 재설치.
