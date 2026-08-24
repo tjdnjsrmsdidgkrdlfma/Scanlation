@@ -11,6 +11,12 @@ StopWhenUnneeded=yes
 # way: --device leaves the vision encoder (mtmd) free to pick another card, and
 # anything that hides a render node (InaccessiblePaths=) renumbers the survivors.
 Environment="GGML_VK_VISIBLE_DEVICES=2"
+# Cap how many graph nodes ggml packs into one vkQueueSubmit (default 100). A submit
+# that outruns the compute ring's 10s lockup_timeout gets the ring reset under it,
+# which surfaces as vk::DeviceLostError and takes llama-server with it. 8 bounds a
+# submit far below that. Set while chasing an intermittent hang on this card -- drop
+# it first when checking whether the hang is gone for some other reason.
+Environment="GGML_VK_MAX_NODES_PER_SUBMIT=8"
 # Bind the BACKEND port here; the proxy fronts it on the public one.
 # -c 8192 = 2048 per slot. Without it llama-server takes the model's trained context
 # (131072, unified across slots) for requests that are ~250 tokens. It buys no speed
