@@ -23,4 +23,10 @@ ExecStart=/opt/llama/llama.cpp/build-vulkan/bin/llama-server --alias PaddleOCR-V
 # llama-server has no sd_notify, so systemd would call it "started" before it binds
 # and the proxy would forward into a refused port. Hold readiness until /health.
 ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf -o /dev/null http://127.0.0.1:8091/health && exit 0; sleep 1; done; exit 1'
+# A GPU hang takes the process down, and the card needs the ring reset to finish
+# before it can take work again. Restarting at the default ~100ms just feeds the
+# recovering card another submission, which re-wedges it -- one hang looped that way
+# for five minutes and only stopped when the unit was stopped by hand. 30s clears the
+# reset (they recur every ~10s) so the retry lands on a card that can answer.
 Restart=on-failure
+RestartSec=30
