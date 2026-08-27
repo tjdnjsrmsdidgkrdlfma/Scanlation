@@ -289,6 +289,38 @@ button.pa-install:hover { background: rgba(110, 168, 254, .18); border-color: rg
 .plog-progress { color: var(--accent); }
 .plog-err { color: var(--danger); }
 
+/* stats tables — a metric per row, a statistic per column. The borders and the
+   tinted header row are what make it read as a table at all; numbers are tabular
+   so digits line up down each column. The table is wider than the card on a narrow
+   screen, so it scrolls in its own box instead of stretching the page. */
+[data-view="stats"] h3 { margin: 20px 0 0; font-size: 13px; font-weight: 600; }
+.stats-wrap { overflow-x: auto; margin-top: 8px; }
+table.stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+table.stats th, table.stats td {
+  border: 1px solid var(--line);
+  padding: 7px 10px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+table.stats thead th {
+  background: var(--card2);
+  color: var(--muted);
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+/* first column names the metric — a raw server key, so monospace and left-aligned */
+table.stats th:first-child, table.stats td:first-child {
+  text-align: left;
+  font-family: "Cascadia Code", Consolas, monospace;
+  color: var(--txt);
+}
+table.stats tbody tr:hover td { background: var(--card2); }
+
 .toast {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
   background: var(--card2); border: 1px solid var(--line);

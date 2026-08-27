@@ -780,10 +780,21 @@ async function clearCache() {
 // --- stats tab ------------------------------------------------------------
 async function renderStats() {
   try {
-    const s = await api("/get_stats/");
+    const eng = $("stats-engines").value;
+    const s = await api("/get_stats/" + (eng ? "?engines=" + encodeURIComponent(eng) : ""));
+    fillStatsEngines(s.combos, eng);
     $("stats-pages").innerHTML = statsTable(s.pages);
     $("stats-regions").innerHTML = statsTable(s.regions);
   } catch (e) { toast(t("toast.fail", { msg: e.message }), "err"); }
+}
+// The combo list arrives unfiltered, so picking one doesn't shrink the picker to
+// itself. Rebuilt on every render because a new combo appears as soon as it runs once.
+function fillStatsEngines(combos, selected) {
+  const sel = $("stats-engines");
+  sel.innerHTML = [`<option value="">${t("stats.filter.all")}</option>`].concat(
+    (combos || []).map((c) => `<option value="${c.engines}">${c.engines} — ${c.pages}</option>`),
+  ).join("");
+  sel.value = selected;   // survives the rebuild; falls back to "all" if it's gone
 }
 // summary = {count, metrics: {colName: {mean,median,min,max,p90,p99}}}. Metric names
 // are the raw server keys (recognize_ms, crop_w, …). Empty -> a friendly note.
@@ -794,7 +805,7 @@ function statsTable(summary) {
   const body = Object.entries(summary.metrics).map(([name, m]) =>
     `<tr><td>${name}</td>` + cols.map((c) => `<td>${m[c] ?? "—"}</td>`).join("") + "</tr>").join("");
   return `<p class="note">${t("stats.count")}: ${summary.count}</p>`
-    + `<table class="stats"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    + `<div class="stats-wrap"><table class="stats"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 async function clearStats() {
   if (!confirm(t("confirm.clearStats"))) return;
@@ -868,6 +879,7 @@ $("plugins").addEventListener("click", (ev) => {
 });
 $("clear-cache").addEventListener("click", clearCache);
 $("clear-stats").addEventListener("click", clearStats);
+$("stats-engines").addEventListener("change", renderStats);
 $("save-behavior").addEventListener("click", saveBehavior);
 $("torch-backend").addEventListener("change", syncTorchRows);
 // Custom −/+ number steppers (native spinners are hidden in CSS). Each .stepper

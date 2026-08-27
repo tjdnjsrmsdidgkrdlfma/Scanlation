@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 import statistics
 import threading
@@ -46,6 +47,21 @@ CREATE TABLE IF NOT EXISTS region_stats (
 _PAGE_COLS = ("regions", "raw_regions", "decode_ms", "lockwait_ms", "detect_ms",
               "recognize_ms", "semwait_ms", "translate_ms", "total_ms")
 _REGION_COLS = ("crop_w", "crop_h", "score", "source_len", "dest_len", "recognize_ms")
+
+# Display precision for a summary row. Every statistic in the row is rounded the same
+# way, at the row's own scale — one fixed decimal count can't serve both milliseconds
+# (2308.6) and a 0-1 detector score: it flattens every score to 0.9 and rounds a p90 of
+# 0.96 up to 1.0, i.e. above the row's own max.
+_SUMMARY_SIG_DIGITS = 4
+
+
+def _decimals(hi: float) -> int:
+    """Decimals giving ~_SUMMARY_SIG_DIGITS significant digits for a column topping out
+    at ``hi``. Uniform within a row, so rounding stays monotonic: min <= p90 <= max holds
+    after rounding exactly as it did before."""
+    if hi <= 0:
+        return 0
+    return max(0, _SUMMARY_SIG_DIGITS - 1 - math.floor(math.log10(hi)))
 
 
 def opt_hash(*option_dicts: dict) -> str:
@@ -115,12 +131,21 @@ class Cache:
 
     def stats_summary(self, engines: str | None = None) -> dict:
         """Per-page and per-crop summaries: count + {mean,min,max,median,p90,p99} per
-        numeric column. Benchmark (skip_translate) pages excluded. Empty -> count 0."""
+        numeric column. Benchmark (skip_translate) pages excluded. Empty -> count 0.
+
+        ``combos`` lists the engine combos the stats hold, page-heaviest first, and is
+        deliberately NOT filtered — it's the caller's picker, so choosing one combo must
+        not shrink the list to that one. Read the summary one combo at a time: pooling
+        them averages a 20ms recognizer with a 200s one and represents neither."""
         where, params = "skip_translate=0", []
         if engines:
             where += " AND engines=?"
             params.append(engines)
         with self._lock:
+            combos = self._conn.execute(
+                "SELECT engines, count(*) FROM page_stats WHERE skip_translate=0 "
+                "GROUP BY engines ORDER BY 2 DESC"
+            ).fetchall()
             pages = self._conn.execute(
                 f"SELECT {','.join(_PAGE_COLS)} FROM page_stats WHERE {where}", params
             ).fetchall()
@@ -129,7 +154,8 @@ class Cache:
                 f"WHERE page_id IN (SELECT id FROM page_stats WHERE {where})", params
             ).fetchall()
         return {"pages": self._summarize(pages, _PAGE_COLS),
-                "regions": self._summarize(regions, _REGION_COLS)}
+                "regions": self._summarize(regions, _REGION_COLS),
+                "combos": [{"engines": e, "pages": n} for e, n in combos]}
 
     @staticmethod
     def _summarize(rows: list, cols: tuple) -> dict:
@@ -140,11 +166,16 @@ class Cache:
             vals = [r[i] for r in rows if r[i] is not None]
             if not vals:
                 continue
-            m = {"mean": round(statistics.mean(vals), 1), "min": min(vals),
-                 "max": max(vals), "median": round(statistics.median(vals), 1)}
+            nd = _decimals(max(vals))
+            m = {"mean": round(statistics.mean(vals), nd), "min": round(min(vals), nd),
+                 "max": round(max(vals), nd), "median": round(statistics.median(vals), nd)}
             if len(vals) >= 2:
-                q = statistics.quantiles(vals, n=100)   # 99 cut points: p90=q[89], p99=q[98]
-                m["p90"], m["p99"] = round(q[89], 1), round(q[98], 1)
+                # 99 cut points: p90=q[89], p99=q[98]. method="inclusive" because these
+                # rows ARE the whole record, not a sample of some larger population --
+                # and the default "exclusive" extrapolates past the data on a small
+                # column, putting p99 above the max right next to it in the table.
+                q = statistics.quantiles(vals, n=100, method="inclusive")
+                m["p90"], m["p99"] = round(q[89], nd), round(q[98], nd)
             metrics[name] = m
         return {"count": len(rows), "metrics": metrics}
 

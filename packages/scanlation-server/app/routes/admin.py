@@ -226,7 +226,8 @@ def clear_cache() -> dict:
 def get_stats(engines: str | None = None) -> dict:
     """Per-page + per-crop processing stats: count + mean/min/max/median/p90/p99 per
     numeric column, for the 통계 tab. Benchmark (skip_translate) pages are excluded.
-    Optional ``?engines=`` filters to one pipeline config."""
+    Optional ``?engines=`` filters to one pipeline config; the response's ``combos``
+    lists every combo on record (unfiltered) to populate that picker."""
     return cache.stats_summary(engines)
 
 
