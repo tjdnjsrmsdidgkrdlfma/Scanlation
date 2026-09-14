@@ -1,0 +1,13 @@
+# Park the MI50 fan at its lowest duty when fancontrol stops.
+# Copy to /etc/systemd/system/fancontrol.service.d/quiet-stop.conf.
+#
+# fancontrol hands the fan back at full speed when it exits. nct6687 in brute-force
+# mode keeps pwm4_enable at 1, so fancontrol falls back to writing pwm 255 (the journal
+# shows "pwm4_enable stuck to 1" / "Verify fans have returned to full speed"), and the
+# fan ramps up for as long as shutdown takes. Park it instead: pwm 0 still spins the
+# ARCTIC S4028-15K at ~1,046 rpm (cooling-mi50-fans.md), and shutdown has no GPU load.
+#
+# hwmon numbers move across boots, so find the chip by name. "$$" is systemd's escape
+# for a literal "$"; without it systemd expands $H itself and the shell gets "".
+[Service]
+ExecStopPost=-/bin/sh -c 'H=$$(dirname $$(grep -l nct6687 /sys/class/hwmon/*/name 2>/dev/null)); [ -e "$$H/pwm4" ] && { echo 1 > $$H/pwm4_enable; echo 0 > $$H/pwm4; }'

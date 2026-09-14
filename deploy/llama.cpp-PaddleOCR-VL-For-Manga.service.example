@@ -36,3 +36,7 @@ ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf -o /dev/null http:/
 # reset (they recur every ~10s) so the retry lands on a card that can answer.
 Restart=on-failure
 RestartSec=30
+# A hang can leave llama-server in the kernel waiting on fences that advance only on
+# each ~10s ring reset, so a graceful stop never finishes and shutdown spends the
+# default 90s TimeoutStopSec in full before SIGKILL. Get to SIGKILL early.
+TimeoutStopSec=15

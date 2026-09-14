@@ -22,6 +22,10 @@
 
 `fancontrol.service.d/nct6687.conf` drop-in으로 2번을 `Requires=`/`After=`에 걸어야 순서가 보장된다. 커브 근거와 실측은 [cooling-mi50-fans.md](../packages/scanlation-server/tools/cooling-mi50-fans.md).
 
+`nct6687`은 커널에 없는 out-of-tree 모듈([Fred78290/nct6687d](https://github.com/Fred78290/nct6687d))이라 **커널마다 빌드해야 한다.** DKMS에 등록하지 않았다면 커널을 올리기 전에 새 커널용으로 빌드해 둘 것 — 없으면 1번이 hwmon을 못 찾고 EC가 팬을 가져간다.
+
+**종료 소음.** `fancontrol`은 종료할 때 팬을 최대로 돌려놓고 나가서, 종료가 길어지는 만큼 팬이 계속 올라간다. [`fancontrol-quiet-stop.conf.example`](fancontrol-quiet-stop.conf.example)을 `fancontrol.service.d/quiet-stop.conf`로 두면 최저 duty로 주차한다. 부팅 직후 `fancontrol`이 붙기 전 몇 초는 EC가 팬을 쥐고 있어 이걸로는 줄지 않는다.
+
 **recognize는 온디맨드**다(socket activation): 유휴 5분에 프로세스가 내려가 VRAM을 놓고 카드가 D3cold까지 간다(amdgpu가 이 카드엔 BOCO 런타임 PM을 켠다). 콜드 스타트 ~2초. 세 유닛이 필요한 이유와 함정은 각 파일 주석과 [translate-ollama-gfx906.md](../packages/scanlation-server/tools/translate-ollama-gfx906.md)에 있다.
 
 **translate는 상주**다. amdgpu가 그 카드(MI50)엔 런타임 PM을 안 켜므로(`control=on` — auto는 Vega20의 BACO를 대상에서 뺀다) VRAM을 놓아도 절전 이득이 없고, 첫 요청 재로드(~5초)만 붙는다. 자세한 근거는 [translate-ollama-gfx906.md](../packages/scanlation-server/tools/translate-ollama-gfx906.md) §최종 절전 상태.
