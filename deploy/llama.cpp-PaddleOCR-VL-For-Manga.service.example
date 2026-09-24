@@ -5,6 +5,7 @@ Description=recognize llama-server (PaddleOCR-VL, 9060 XT)
 # lets it go when the proxy idles out, which is what frees VRAM and lets the card
 # suspend (llama-server otherwise holds the model for its whole process lifetime).
 StopWhenUnneeded=yes
+Wants=llama.cpp-PaddleOCR-VL-For-Manga-watchdog.service
 
 [Service]
 # Index is from `llama-server --list-devices` run WITHOUT this env. Pin only this

@@ -10,6 +10,7 @@
 | `llama.cpp-PaddleOCR-VL-For-Manga.socket.example` | recognize 진입점 (:8090) | ✅ **이것만** |
 | `llama.cpp-PaddleOCR-VL-For-Manga-proxy.service.example` | 유휴 종료 프록시 | ✗ (socket이 띄움) |
 | `llama.cpp-PaddleOCR-VL-For-Manga.service.example` | recognize llama-server (:8091) | ✗ (proxy가 띄움) |
+| `llama.cpp-PaddleOCR-VL-For-Manga-watchdog.service.example` | 9060 XT 컴퓨트 링 행 시 llama-server SIGKILL | ✗ (recognize 서버가 띄움) |
 | `GPU-powercap.service.example` | 부팅 시 전력 캡 | ✅ |
 | `nct6687-load.service.example` | MI50 팬 제어용 `nct6687` 로드(재시도) | ✅ |
 | `ollama.service.example` | **미배포** — 기각 기록용 | ✗ |

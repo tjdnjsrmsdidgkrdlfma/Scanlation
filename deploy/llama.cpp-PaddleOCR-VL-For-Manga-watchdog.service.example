@@ -1,0 +1,12 @@
+[Unit]
+Description=recognize llama-server hang watchdog
+# PartOf, not BindsTo/Requires: those count as using the server, so StopWhenUnneeded
+# would never stop it. The server pulls this in with Wants= instead.
+PartOf=llama.cpp-PaddleOCR-VL-For-Manga.service
+After=llama.cpp-PaddleOCR-VL-For-Manga.service
+
+[Service]
+# Every compute ring timeout on the 9060 XT (0000:09:00.0) has been a hang, and a hang
+# can leave llama-server alive with /health at 200 for as long as the ring takes to
+# drain. Kill on the first one and let Restart=on-failure bring it back.
+ExecStart=/bin/sh -c 'journalctl -k -f -n0 -o cat | grep -q "^amdgpu 0000:09:00.0: amdgpu: ring comp_.* timeout" && systemctl kill -s KILL llama.cpp-PaddleOCR-VL-For-Manga.service'

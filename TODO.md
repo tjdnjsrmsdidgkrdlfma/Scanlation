@@ -31,8 +31,8 @@ amdgpu_fence_info  comp_1.1.0  signaled 0x84a97 / emitted 0x84a9b   (다른 링�
 ```
 
 리셋은 "succeeded"인데 밀린 fence 4개가 정리되지 않는다. 링은 10초마다 다시 리셋되고 fence는 2씩만 전진해서,
-슬롯 하나가 `is_processing: true`로 남는다. **아무것도 이걸 잡지 못한다** — 프로세스가 살아 있으니
-`Restart=on-failure`가 안 걸리고, HTTP 스레드는 멀쩡해서 `/health`가 200이다. 앱은 `httpx.ReadTimeout`만 받는다.
+슬롯 하나가 `is_processing: true`로 남는다. 프로세스가 살아 있으니 `Restart=on-failure`가 안 걸리고,
+HTTP 스레드는 멀쩡해서 `/health`가 200이다. 앱은 `httpx.ReadTimeout`만 받는다 — 그래서 감시 유닛이 커널 로그로 잡는다(아래).
 종료도 graceful stop이 끝나지 않아 `TimeoutStopSec`을 다 쓴다. 이 건은 warm reboot이 이 유닛에서 멈춰 강제로
 전원을 내렸고, 콜드 부팅 뒤엔 깨끗했다.
 
@@ -111,18 +111,20 @@ HTTP 클라이언트일 뿐이라 다른 프로세스의 GPU 링을 wedge시킬 
   재부팅 후 팬 제어를 잃는다(설치된 212·218 커널에도 이미 없다). 순서: `dkms` + 새 커널 `kernel-devel` 설치 →
   [Fred78290/nct6687d](https://github.com/Fred78290/nct6687d) 등록 → 새 커널 설치 → **재부팅 전에** `dkms status`에서
   새 커널이 `installed`인지 확인. 무서명 모듈이라 Secure Boot는 꺼진 채여야 한다.
-- [ ] **매달림 감지.** `/health`가 200이라 쓸 수 없다. `/slots`에 `is_processing`인 슬롯이 오래 남으면 유닛을 kill하는
-  감시가 필요하다. SIGKILL이 언제 먹는지는 아직 확인 못 했다(fence가 리셋마다 전진하니 10초 안쪽일 것으로 본다).
-  09-24로 보면 목적은 복구가 아니라 **단축**이다 — 어차피 13분 반이면 스스로 풀리므로, 얻는 건 그 13분이다.
-  커널의 `ring comp_.* timeout`을 N회 연속 보는 쪽도 된다. `/slots`와 달리 정상 부하와 헷갈릴 여지가 없고,
-  유닛이 안 돌 때는 로그도 없어서 `StopWhenUnneeded=yes`와 그냥 맞는다.
+- [x] ~~**매달림 감지.**~~ **배포 (2026-09-24)** — [감시 유닛](deploy/llama.cpp-PaddleOCR-VL-For-Manga-watchdog.service.example)이
+  이 카드의 `ring comp_.* timeout` 첫 줄에서 llama-server를 SIGKILL하고 `Restart=on-failure`(30초)에 넘긴다.
+  이 카드의 timeout은 지금까지 전부 행이라 횟수를 세지 않는다. 목적은 복구가 아니라 **단축**이다(13분 반 → 1분 안팎).
+  **다음 행에서 확인할 것:** SIGKILL이 `dma_fence_wait`에 매달린 프로세스에 먹는지, 죽인 뒤 timeout이 곧 멎는지
+  (밀린 fence가 그 프로세스 몫이면 함께 버려진다). 멎지 않으면 30초 뒤 재기동이 복구 중인 카드에 올라타 다시
+  wedge되고 감시가 또 죽인다 — 지금보다 나빠지진 않지만 단축도 없다.
 
 다음에 걸렸을 때 볼 곳 — 유닛 저널은 코어덤프·gdb 출력이 대부분이라 llama-server 자체 로그가 묻힌다.
 `journalctl -u llama.cpp-PaddleOCR-VL-For-Manga.service -o json`에서 `_COMM=llama-server`로 거를 것.
 커널의 카드 복귀는 `SMU is resumed successfully!`로 남는다. 앱 쪽은 `003acbc` 이후 실제 원인을
 `EngineTaskError: HTTPStatusError: ...`로 남긴다(그 전엔 `BrokenProcessPool`로 묻혔다).
-매달리는 쪽이면 hang이 살아 있을 때만 남는 것부터 뜬다 — devcoredump(카드가 복구되면 사라짐),
-`/sys/kernel/debug/dri/<pci>/amdgpu_fence_info`, `/proc/<pid>/task/*/stack`, `/slots`. 복구는 그 다음이다.
+hang이 살아 있을 때만 남는 것 — devcoredump(카드가 복구되면 사라짐),
+`/sys/kernel/debug/dri/<pci>/amdgpu_fence_info`, `/proc/<pid>/task/*/stack`, `/slots` — 은 감시 유닛이 첫 timeout에서
+서버를 죽이므로 뜰 틈이 없다. 다시 떠야 하면 `systemctl mask llama.cpp-PaddleOCR-VL-For-Manga-watchdog.service`로 막고 기다린다.
 
 환경: Navi 44 gfx1200, mesa 26.1.1 radv, kernel 6.12.0-233.el10.
 
