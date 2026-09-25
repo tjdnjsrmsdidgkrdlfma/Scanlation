@@ -441,6 +441,7 @@ function renderPlugins() {
 // --- behavior (client settings, delivered to the extension via handshake) -
 function renderBehavior() {
   $("min-image-dim").value = DATA.selection.min_image_dim;
+  $("min-font-size").value = DATA.selection.min_font_size;
   $("verbose-log").checked = !!DATA.selection.verbose_log;
   $("translate-concurrency").value = DATA.selection.translate_concurrency;
   $("model-idle-unload-minutes").value = DATA.selection.model_idle_unload_minutes;
@@ -818,11 +819,13 @@ async function clearStats() {
 async function saveBehavior() {
   try {
     const n = parseInt($("min-image-dim").value, 10);
+    const f = parseInt($("min-font-size").value, 10);
     const c = parseInt($("translate-concurrency").value, 10);
     const u = parseInt($("model-idle-unload-minutes").value, 10);
     await postJSON("/set_client_config/", {
       // NaN guard only (empty field -> a sane default); the server clamps the range.
       min_image_dim: Number.isFinite(n) ? n : 0,
+      min_font_size: Number.isFinite(f) ? f : 1,
       verbose_log: $("verbose-log").checked,
       translate_concurrency: Number.isFinite(c) ? c : 1,
       model_idle_unload_minutes: Number.isFinite(u) ? u : 0,

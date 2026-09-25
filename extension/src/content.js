@@ -17,6 +17,7 @@
     showTranslated: globalThis.SCAN.SHOW_TRANSLATED,
     token: "",
     minImageDim: globalThis.SCAN.MIN_IMAGE_DIM,
+    minFontSize: globalThis.SCAN.MIN_FONT_SIZE,
   };
   let enabled = false;
   let observer = null;
@@ -34,11 +35,12 @@
 
   async function loadConfig() {
     try {
-      const r = await ext.storage.local.get(["endpoint", "showTranslated", "token", "minImageDim", "lang"]);
+      const r = await ext.storage.local.get(["endpoint", "showTranslated", "token", "minImageDim", "minFontSize", "lang"]);
       if (r.endpoint) cfg.endpoint = r.endpoint;
       if (typeof r.showTranslated === "boolean") cfg.showTranslated = r.showTranslated;
       if (typeof r.token === "string") cfg.token = r.token;
       if (typeof r.minImageDim === "number") cfg.minImageDim = r.minImageDim;
+      if (typeof r.minFontSize === "number") cfg.minFontSize = r.minFontSize;
       if (r.lang) setBadgeLang(r.lang); // localize the failure badge
     } catch (e) { /* storage may be unavailable in some frames */ }
   }
@@ -156,7 +158,6 @@
     const f = SCANUTIL.boxFractions(item.bounds, nw, nh);
     const div = document.createElement("div");
     div.className = "scanlation-box";
-    div.__bounds = item.bounds;   // original bounds; sizeFonts refits from these on resize
     div.style.left = f.left * 100 + "%";
     div.style.top = f.top * 100 + "%";
     div.style.width = f.w * 100 + "%";
@@ -172,21 +173,42 @@
     return div;
   }
 
-  function sizeFonts(entry) {
-    const dispW = entry.img.clientWidth || entry.img.width || 1;
-    const dispH = entry.img.clientHeight || entry.img.height || 1;
-    const [nw, nh] = naturalSize(entry.img);
-    for (const box of entry.boxes) {
-      const f = SCANUTIL.boxFractions(box.__bounds, nw, nh);
-      const wpx = f.w * dispW;
-      const hpx = f.h * dispH;
-      // size font by text length vs box area so long text shrinks to fit
-      const len = Math.max(1, (box.textContent || "").length);
-      let fs = Math.sqrt((wpx * hpx * 0.8) / len);
-      fs = Math.max(7, Math.min(fs, hpx)); // never taller than the box
-      box.style.fontSize = fs + "px";
+  // Fit text by measuring it: binary-search each box's largest whole-px font size
+  // whose wrapped text stays inside the box, from the /admin floor up to the box
+  // height. Text that overflows even at the floor stays clipped (full text is the
+  // hover title). All boxes step together — write every size, then read every
+  // overflow — so each round costs one layout, not one per box.
+  function sizeFonts(boxes) {
+    const floor = cfg.minFontSize;
+    const all = boxes.map((box) => ({ box, lo: floor, hi: Math.max(floor, box.clientHeight) }));
+    let open = all.filter((s) => s.lo < s.hi);
+    while (open.length) {
+      for (const s of open) s.box.style.fontSize = (s.mid = (s.lo + s.hi + 1) >> 1) + "px";
+      for (const s of open) {
+        const b = s.box;
+        if (b.scrollHeight <= b.clientHeight && b.scrollWidth <= b.clientWidth) s.lo = s.mid;
+        else s.hi = s.mid - 1;
+      }
+      open = open.filter((s) => s.lo < s.hi);
     }
+    for (const s of all) s.box.style.fontSize = s.lo + "px";
   }
+
+  const allBoxes = () => tracked.flatMap((entry) => entry.boxes);
+
+  // Refit a wrapper's boxes whenever its laid-out size changes: window resize, viewer
+  // zoom, or a hidden page becoming visible (a box measured at 0 height sat at the
+  // floor). Debounced so a drag-resize refits once it settles, not every frame.
+  const pendingFit = new Set();
+  let fitTimer = null;
+  const resizeObs = new ResizeObserver((records) => {
+    for (const r of records) pendingFit.add(r.target);
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(() => {
+      sizeFonts(tracked.filter((e) => pendingFit.has(e.wrapper)).flatMap((e) => e.boxes));
+      pendingFit.clear();
+    }, 150);
+  });
 
   function applyResult(img, result) {
     const [nw, nh] = naturalSize(img);
@@ -199,7 +221,8 @@
       entry.boxes.push(box);
     }
     tracked.push(entry);
-    sizeFonts(entry);
+    sizeFonts(entry.boxes);
+    resizeObs.observe(wrapper);
   }
 
   // A whole-request failure has no box coords, so pin a status chip to the image
@@ -214,7 +237,7 @@
     badge.title = msg; // cause (e.g. "server 502: ...") on hover
     wrapper.appendChild(badge);
     // boxes stays empty: the badge is a child of wrapper (removed with it) and
-    // has no __bounds, so it must not go through sizeFonts()/onResize().
+    // is not a text box, so it must not go through sizeFonts().
     tracked.push({ img, wrapper, boxes: [] });
   }
 
@@ -250,13 +273,15 @@
 
   // -------------------------------------------------------------- toggle ---
   function retext() {
-    for (const entry of tracked) {
-      for (const box of entry.boxes) setBoxText(box);
-      sizeFonts(entry); // text length changed -> refit
-    }
+    const boxes = allBoxes();
+    boxes.forEach(setBoxText);
+    sizeFonts(boxes); // text changed -> refit
   }
 
   function clearAll() {
+    resizeObs.disconnect();
+    clearTimeout(fitTimer);
+    pendingFit.clear();
     for (const entry of tracked) {
       for (const box of entry.boxes) box.remove();
       const { wrapper, img } = entry;
@@ -298,7 +323,6 @@
       for (const m of muts) m.addedNodes.forEach((n) => { if (n.nodeType === 1) scan(n); });
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
-    window.addEventListener("resize", onResize, { passive: true });
     reportState();
   }
 
@@ -306,15 +330,8 @@
     if (!enabled) return;
     enabled = false;
     if (observer) { observer.disconnect(); observer = null; }
-    window.removeEventListener("resize", onResize);
     clearAll();
     reportState();
-  }
-
-  let resizeTimer = null;
-  function onResize() {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => tracked.forEach(sizeFonts), 150);
   }
 
   // ------------------------------------------------------------ messages ---
@@ -326,6 +343,9 @@
       case "set-endpoint": cfg.endpoint = msg.endpoint; break;
       case "set-token": cfg.token = msg.token || ""; break;
       case "set-min-image-dim": if (typeof msg.value === "number") cfg.minImageDim = msg.value; break;
+      case "set-min-font-size":
+        if (typeof msg.value === "number") { cfg.minFontSize = msg.value; sizeFonts(allBoxes()); }
+        break;
       case "set-show-translated": cfg.showTranslated = !!msg.value; retext(); break;
       case "set-lang": setBadgeLang(msg.lang); break;
       default: break;

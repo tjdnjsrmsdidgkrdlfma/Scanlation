@@ -60,6 +60,14 @@ class Settings:
         default_factory=lambda: _env_int("SCANLATION_MIN_IMAGE_DIM", 80)
     )
 
+    # First-run default for the overlay's font-size floor (px): the extension fits
+    # each box's text at the largest size that stays inside it, but never below
+    # this — text that still overflows is clipped (full text on hover). Persisted in
+    # state.json, editable in /admin (동작 tab), delivered via the handshake. Floor 1.
+    min_font_size: int = field(
+        default_factory=lambda: _env_int("SCANLATION_MIN_FONT_SIZE", 7, floor=1)
+    )
+
     # First-run default for the concurrent-translation limit (bounds parallel ollama
     # requests). Persisted in state.json, editable in /admin (동작 tab). Floor 1: a
     # 0/negative Semaphore would deadlock, matching set_client_config's clamp.

@@ -149,6 +149,24 @@ def test_client_config_min_image_dim():
         c.post("/set_client_config/", json={"min_image_dim": 80})  # cleanup
 
 
+def test_client_config_min_font_size():
+    c = client()
+    # handshake + get_settings expose the current value
+    assert "min_font_size" in c.get("/").json()
+    assert "min_font_size" in c.get("/get_settings/").json()["selection"]
+    try:
+        # set it -> reflected in both the handshake and the admin snapshot
+        r = c.post("/set_client_config/", json={"min_font_size": 10})
+        assert r.status_code == 200 and r.json()["min_font_size"] == 10
+        assert c.get("/").json()["min_font_size"] == 10
+        assert c.get("/get_settings/").json()["selection"]["min_font_size"] == 10
+        # below 1 -> clamped to 1 (state is the single validation authority, not a 400)
+        r = c.post("/set_client_config/", json={"min_font_size": 0})
+        assert r.status_code == 200 and r.json()["min_font_size"] == 1
+    finally:
+        c.post("/set_client_config/", json={"min_font_size": 7})  # cleanup (back to default)
+
+
 def test_client_config_verbose_log():
     c = client()
     # server-only (NOT in the handshake the extension reads); shown in the admin snapshot
@@ -207,6 +225,7 @@ TESTS = [
     test_active_prompt_injected_into_translator_options,
     test_clear_cache_drops_runs,
     test_client_config_min_image_dim,
+    test_client_config_min_font_size,
     test_client_config_verbose_log,
     test_client_config_translate_concurrency,
     test_client_config_model_idle_unload_minutes,

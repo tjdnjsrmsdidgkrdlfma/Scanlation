@@ -98,6 +98,9 @@ class Selection:
     # Client behavior (delivered to the extension via the handshake): skip images
     # whose shorter side is under this many px (icons/banners). 0 = no filter.
     min_image_dim: int = settings.min_image_dim
+    # Client behavior (via the handshake): the overlay fits text to its box but never
+    # below this font size (px); text that still overflows is clipped. Floor 1.
+    min_font_size: int = settings.min_font_size
     # Verbose (DEBUG) logging: per-detection/translation detail (see app.pipeline).
     # Seeded from SCANLATION_LOG_LEVEL (DEBUG -> on), toggled at runtime in /admin
     # (동작 tab) and re-applied to the scanlation logger without a restart.
@@ -230,19 +233,22 @@ class AppState:
         self.gpu_gate = InferenceGate(self.resolve_recognize_concurrency(self.selection.recognizer))
 
     def set_client_config(
-        self, *, min_image_dim: int | None = None, verbose_log: bool | None = None,
+        self, *, min_image_dim: int | None = None, min_font_size: int | None = None,
+        verbose_log: bool | None = None,
         translate_concurrency: int | None = None, model_idle_unload_minutes: int | None = None,
         torch_backend: str | None = None, torch_vendor: str | None = None,
         torch_index: str | None = None,
     ) -> None:
         """Persist behavior settings (the /admin 동작 tab): the extension image
-        filter, the verbose-log toggle, the concurrent-translation limit, the idle
-        model-unload timer, and the GPU/torch backend for plugin installs. Verbose
+        filter and overlay font floor, the verbose-log toggle, the concurrent-translation
+        limit, the idle model-unload timer, and the GPU/torch backend for plugin installs. Verbose
         re-applies to the live logger and translate_concurrency swaps translate_sem
         (runtime, no restart); the idle timer is read live by the background sweep;
         the torch backend takes effect on the NEXT plugin install."""
         if min_image_dim is not None:
             self.selection.min_image_dim = max(0, int(min_image_dim))
+        if min_font_size is not None:
+            self.selection.min_font_size = max(1, int(min_font_size))
         if verbose_log is not None:
             self.selection.verbose_log = bool(verbose_log)
             from .logconfig import apply_verbose

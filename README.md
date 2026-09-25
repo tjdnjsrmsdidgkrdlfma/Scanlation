@@ -242,6 +242,7 @@ llama.cpp 쪽이 **per-crop ~2.2x 빠르고 VRAM은 ~1/4**이다(모델 사본�
 | `SCANLATION_AUTH_TOKEN` | (빈 값) | 설정 시 모든 API·admin이 `X-Auth-Token` 헤더를 요구(빈 값=무인증). 확장 팝업·`/admin`에 같은 값 입력. `OPTIONS`·`/admin` 정적은 면제 |
 | `SCANLATION_LOG_LEVEL` | `INFO` | `scanlation.*` 로거 레벨(서드파티는 root WARNING으로 고정). access 로그는 자체 미들웨어가 타임스탬프+소요시간(`METHOD PATH -> STATUS Nms`)으로 대체. `DEBUG`로 상세화 |
 | `SCANLATION_MIN_IMAGE_DIM` | `80` | 확장 이미지 필터 최초 기본값: **짧은 변**이 이 px 미만이면 아이콘·배너로 보고 스킵. `/admin` **동작** 탭에서 조절(→ handshake로 확장에 전달). `0`=전부 번역 |
+| `SCANLATION_MIN_FONT_SIZE` | `7` | 오버레이 글자 크기 하한 최초 기본값(px). 확장은 박스마다 글이 넘치지 않는 가장 큰 크기를 실측으로 찾되 이 값 밑으로는 내리지 않는다(그래도 넘치면 잘리고 hover로 전문). `/admin` **동작** 탭에서 조절(→ handshake로 확장에 전달). 최소 `1` |
 | `SCANLATION_MODEL_IDLE_UNLOAD_MINUTES` | `5` | 로컬 torch 엔진(detector·recognizer)을 이 **분**만큼 안 쓰면 백그라운드 sweep가 VRAM에서 내림(작업 사이 GPU 반납). `/admin` **동작** 탭에서 조절, `state.json` 영속. `0`=안 내림(상주). 번역기(ollama)는 별도 프로세스라 무관 — 그쪽은 `OLLAMA_KEEP_ALIVE`가 관리 |
 | `SCANLATION_DETECTOR` / `_RECOGNIZER` / `_TRANSLATOR` | `comic-text-and-bubble-detector` / (빈 값) / (빈 값) | 최초 기동 기본 엔진(detector 기본 `comic-text-and-bubble-detector`; 나머지 빈 값=미선택; 이후 `/admin`이 덮어씀) |
 | `SCANLATION_LANG_SRC` / `_DST` | `ja` / `ko` | 최초 기동 기본 언어(이후 `/admin`) |

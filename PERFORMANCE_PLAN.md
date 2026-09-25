@@ -134,8 +134,8 @@
 - **검증**: lazy 뷰어에서 스크롤 시 이미지가 빠짐없이 잡히는지 수동 확인.
 
 ### 3-C. 렌더 read/write 분리 + DocumentFragment
-- **현황**: [sizeFonts](extension/src/content.js#L175)가 박스마다 읽기(`clientWidth/Height`)와 쓰기(`style.fontSize`)를 교차 → forced reflow. [onResize](extension/src/content.js#L317)의 `tracked.forEach(sizeFonts)`가 전 이미지로 확대. [applyResult](extension/src/content.js#L198)는 박스를 하나씩 `appendChild`.
-- **변경**: `sizeFonts`/`onResize`를 **측정 일괄 → 쓰기 일괄**로 분리하고 `requestAnimationFrame` 안에서 수행. `applyResult`는 **DocumentFragment**에 박스를 모아 1회 append. 150ms 디바운스는 유지.
+- **현황**: [sizeFonts](extension/src/content.js#L181)는 글자 크기를 실측 이분 탐색으로 맞추되 전 박스를 한 라운드씩 함께 진행(쓰기 일괄 → 읽기 일괄)해 라운드당 layout 1회, 라운드 수는 log2(박스 높이) 수준. 크기 변화는 wrapper별 [ResizeObserver](extension/src/content.js#L204)(150ms 디바운스)가 바뀐 이미지의 박스만 다시 맞춘다. 다만 `requestAnimationFrame` 밖에서 동기로 돌고, [applyResult](extension/src/content.js#L220)는 박스를 하나씩 `appendChild`.
+- **변경**: `sizeFonts` 호출을 `requestAnimationFrame` 안으로 옮기고, `applyResult`는 **DocumentFragment**에 박스를 모아 1회 append. 150ms 디바운스는 유지.
 - **효과/위험/규모**: resize·오버레이 reflow 폭풍 완화. 낮음~중간. `content.js` 국소.
 - **검증**: 이미지 많은 페이지 resize 시 Performance layout 시간 감소.
 

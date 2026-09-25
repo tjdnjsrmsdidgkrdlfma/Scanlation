@@ -7,4 +7,5 @@ globalThis.SCAN = {
   ENDPOINT: "http://127.0.0.1:4010",
   SHOW_TRANSLATED: true,
   MIN_IMAGE_DIM: 80,
+  MIN_FONT_SIZE: 7,
 };

@@ -83,10 +83,12 @@ async function connect() {
 
     const store = { endpoint: endpoint(), token: token() };
     if (typeof d.min_image_dim === "number") store.minImageDim = d.min_image_dim;
+    if (typeof d.min_font_size === "number") store.minFontSize = d.min_font_size;
     await ext.storage.local.set(store);
     sendActive({ type: "set-endpoint", endpoint: endpoint() });
     sendActive({ type: "set-token", token: token() });
     if (typeof d.min_image_dim === "number") sendActive({ type: "set-min-image-dim", value: d.min_image_dim });
+    if (typeof d.min_font_size === "number") sendActive({ type: "set-min-font-size", value: d.min_font_size });
   } catch (e) {
     setStatus(SCANI18N.t("status.unreachable", { msg: e.message || e }), "err");
   }

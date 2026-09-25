@@ -79,6 +79,7 @@ class SelectPromptRequest(BaseModel):
 # --- admin: /set_client_config/ (동작 tab) ---------------------------------
 class SetClientConfigRequest(BaseModel):
     min_image_dim: Optional[int] = None   # extension image filter (shorter-side px)
+    min_font_size: Optional[int] = None   # overlay font-size floor (px) for fit-to-box
     verbose_log: Optional[bool] = None    # DEBUG logging toggle (per-detection/translation detail)
     translate_concurrency: Optional[int] = None  # max images translating at once (swaps translate_sem)
     model_idle_unload_minutes: Optional[int] = None  # idle minutes before a local engine leaves VRAM (0 = never)

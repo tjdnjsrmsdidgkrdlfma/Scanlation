@@ -31,13 +31,14 @@ def test_state_json_roundtrip():
         st.set_options("detector", "x", {"a": 1})
         st.save_prompt("mine", "PROMPT")
         old_sem = st.translate_sem
-        st.set_client_config(min_image_dim=123, verbose_log=True, translate_concurrency=8,
+        st.set_client_config(min_image_dim=123, min_font_size=9, verbose_log=True, translate_concurrency=8,
                              model_idle_unload_minutes=20,
                              torch_backend="gpu", torch_vendor="amd", torch_index="https://x/rocm6.2")
         assert st.translate_sem is not old_sem  # semaphore instance swapped at runtime
         # a fresh instance reads state.json back; dataclass equality covers every field
         assert AppState().selection == st.selection
         assert AppState().selection.recognize_concurrency == {"rec-x": 4}  # per-engine pool size persisted
+        assert AppState().selection.min_font_size == 9  # overlay font floor persisted
         assert AppState().selection.verbose_log is True  # verbose toggle persisted
         assert AppState().selection.translate_concurrency == 8  # concurrency persisted
         assert AppState().selection.model_idle_unload_minutes == 20  # idle-unload window persisted

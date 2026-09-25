@@ -13,6 +13,7 @@ const DEFAULTS = {
   endpoint: globalThis.SCAN.ENDPOINT,
   showTranslated: globalThis.SCAN.SHOW_TRANSLATED,
   minImageDim: globalThis.SCAN.MIN_IMAGE_DIM,
+  minFontSize: globalThis.SCAN.MIN_FONT_SIZE,
 };
 const ICON_ON = { 16: "icons/icon16.png", 48: "icons/icon48.png" };
 const ICON_OFF = { 16: "icons/icon-off16.png", 48: "icons/icon-off48.png" };

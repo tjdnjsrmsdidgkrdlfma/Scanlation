@@ -100,6 +100,7 @@ def get_settings() -> dict:
             "lang_dst": sel.lang_dst,
             "prompt_active": sel.prompt_active,
             "min_image_dim": sel.min_image_dim,
+            "min_font_size": sel.min_font_size,
             "verbose_log": sel.verbose_log,
             "translate_concurrency": sel.translate_concurrency,
             "model_idle_unload_minutes": sel.model_idle_unload_minutes,
@@ -189,15 +190,17 @@ def delete_prompt(req: SelectPromptRequest) -> dict:
 @router.post("/set_client_config/")
 def set_client_config(req: SetClientConfigRequest) -> dict:
     """Persist behavior settings (동작 tab): min_image_dim (image filter shorter-side
-    px, delivered to the extension via GET /), verbose_log (DEBUG logging toggle,
+    px) and min_font_size (overlay font floor px) — both delivered to the extension
+    via GET / — verbose_log (DEBUG logging toggle,
     re-applied to the live logger), and translate_concurrency (concurrent-translation
     limit, swaps translate_sem at runtime) plus model_idle_unload_minutes (idle
     minutes before a local engine leaves VRAM; read live by the background sweep).
     Out-of-range values are clamped by state.set_client_config (min_image_dim >= 0,
-    translate_concurrency >= 1, model_idle_unload_minutes >= 0), the single
-    validation authority — so the route trusts its input."""
+    min_font_size >= 1, translate_concurrency >= 1, model_idle_unload_minutes >= 0),
+    the single validation authority — so the route trusts its input."""
     state.set_client_config(
-        min_image_dim=req.min_image_dim, verbose_log=req.verbose_log,
+        min_image_dim=req.min_image_dim, min_font_size=req.min_font_size,
+        verbose_log=req.verbose_log,
         translate_concurrency=req.translate_concurrency,
         model_idle_unload_minutes=req.model_idle_unload_minutes,
         torch_backend=req.torch_backend, torch_vendor=req.torch_vendor,
@@ -206,6 +209,7 @@ def set_client_config(req: SetClientConfigRequest) -> dict:
     return {
         "status": "success",
         "min_image_dim": state.selection.min_image_dim,
+        "min_font_size": state.selection.min_font_size,
         "verbose_log": state.selection.verbose_log,
         "translate_concurrency": state.selection.translate_concurrency,
         "model_idle_unload_minutes": state.selection.model_idle_unload_minutes,
