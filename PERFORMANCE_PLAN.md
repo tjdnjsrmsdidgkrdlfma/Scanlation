@@ -158,7 +158,7 @@
 
 **시퀀스**: Tier 0(측정·문서) → Tier 1(저위험 코드) → Tier 2(조절값+큐) → Tier 3(클라이언트 구조) → Tier 4(스파이크). 각 코드 변경마다 해당 벤치로 전/후 A/B.
 
-**CLAUDE.md 준수 체크**:
+**CLAUDE.md·PROJECT.md 준수 체크**:
 - **하드코딩 금지 → `/admin`**: `client_concurrency`(및 선택적 워밍업 토글)는 env 기본 + `state.json` + `/admin` 동작 탭(ko/en i18n) + handshake→storage→content 전 경로. 확장 폴백은 `constants.js` `SCAN.*` 상수(리터럴 금지).
 - **역할 어휘**: detector/recognizer/translator, `{bounds, source, destination}`. BOX/OCR/TSL 미사용.
 - **plugin vs engine** 구분 준수 / **내부 SDK version bump 금지**(`geometry.py`는 서버 app이라 무관).
