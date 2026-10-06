@@ -2,13 +2,13 @@
 
 미뤄둔 작업 모음. translate/MI50 관련 상세·완료분은 [translate-gpu-mi50.md](packages/scanlation-server/tools/translate-gpu-mi50.md), 설계는 [SCANLATION_DESIGN.md](SCANLATION_DESIGN.md).
 
-## 9060 XT compute ring 행 — 원인 미규명 (2026-09-24 갱신)
+## 9060 XT compute ring 행 — 원인 미규명 (2026-10-06 갱신)
 
 인식 llama-server가 간헐적으로 9060 XT의 컴퓨트 링을 wedge시킨다. 7일간 21회 기동 중 4회 실패(~20%).
-번역(MI50)은 같은 기간 0회 — 9060 XT 쪽만의 문제다. 끝나는 모양은 두 가지다 — 프로세스가 죽거나(08월),
-죽지 않고 매달린다(09-14, 09-24 2건). 매달리는 쪽이 이제 기본 모양이다.
+번역(MI50)은 같은 기간 0회 — 9060 XT 쪽만의 문제다. 끝나는 모양은 두 가지다 — 프로세스가 죽거나(08월, 10-06),
+죽지 않고 매달린다(09-14, 09-24 2건). 어느 쪽이 나올지는 정해져 있지 않다 — 매달림 3건 뒤에 10-06은 다시 죽었다.
 
-**죽는 쪽.** 08월 3건의 서명은 동일하다:
+**죽는 쪽.** 08월 3건과 10-06의 서명은 동일하다:
 
 ```
 radv/amdgpu: The CS has been cancelled because the context is lost.
@@ -19,7 +19,16 @@ llama-server: terminate called after throwing an instance of 'vk::DeviceLostErro
 
 llama.cpp가 `vk::DeviceLostError`를 잡지 않아 `ggml_uncaught_exception` → `std::terminate` → abort로 끝난다.
 GPU가 아직 복구 중일 때 systemd가 재시작하면 그 프로세스는 **로드 중에** 또 죽는다 — 이쪽 백트레이스를
-1차 사고로 오독하기 쉬우니 주의(실제로 한 번 그랬다).
+1차 사고로 오독하기 쉬우니 주의(실제로 한 번 그랬다). 반대로 1차 사고 자체가 로드 중일 수도 있다(10-06, 아래).
+둘은 유닛 저널로 가린다 — 그 `Starting` 바로 앞이 유휴 종료면 1차, 직전 기동의 `Main process exited`면 재시작이다.
+
+**10-06 — 기동 직후 첫 제출에서.** 01:32에 유휴 종료된 유닛이 20:40:29 요청에 기동했고(같은 초에
+`SMU is resumed`), 모델은 0.33초에 올라갔다. 이어진 워밍업 디코드(`load_model` → `common_init_from_params`
+→ `llama_decode`)의 첫 제출이 10초 lockup timeout을 다 채우고 `comp_1.1.0` 리셋 → `DeviceLostError`로 죽었다.
+크롭은 하나도 처리하지 않았다. 2차 기동(20:41:59)도 같은 자리에서 `comp_1.0.1`로 죽었는데, 두 사고 사이 90초
+동안 ring timeout은 한 줄도 없었다 — 조용한 카드에서 다시 첫 제출이 걸린 것이라 위의 "복구 중 재시작"으로는
+설명되지 않는다. 3차 기동(20:43:29)은 3초 만에 정상으로 떴다. 정지 3분, 그 사이 페이지 2건이
+`httpx.ReadTimeout`으로 500. 1차의 devcoredump·로그는 서버 `/root/hang-2026-10-06/`.
 
 **매달리는 쪽 (09-14).** 커널 로그는 같다(`ring comp_1.1.0 timeout` → `Ring comp_1.1.0 reset succeeded` →
 `device wedged, but recovered through reset`). 그런데 `vk::DeviceLostError`로 죽지 않고 프로세스가 살아서 멈춘다:
@@ -36,11 +45,13 @@ HTTP 스레드는 멀쩡해서 `/health`가 200이다. 앱은 `httpx.ReadTimeout
 종료도 graceful stop이 끝나지 않아 `TimeoutStopSec`을 다 쓴다. 이 건은 warm reboot이 이 유닛에서 멈춰 강제로
 전원을 내렸고, 콜드 부팅 뒤엔 깨끗했다.
 
-devcoredump(`/sys/class/drm/card*/device/devcoredump/data`, hang 중에만 존재)가 좁혀 준 것:
+devcoredump(`/sys/class/drm/card*/device/devcoredump/data`)가 좁혀 준 것:
 
-- **페이지 폴트 아님** — `[gfxhub] Page fault observed`는 찍히지만 주소와 `GCVM_L2_PROTECTION_FAULT_STATUS`가 0이다
+- **페이지 폴트 아님** — 덤프의 `GCVM_L2_PROTECTION_FAULT_STATUS`는 0이다(09-14, 10-06). 커널 로그에는
+  `[gfxhub] page fault`(`0x00040B5A`, client CPC, vmid 0, 주소 0)가 사고마다 첫 리셋 도중에 한 번 찍히지만
+  (09-24, 10-06) timeout 뒤에 나오므로 원인이 아니라 리셋의 부산물이다
 - **셰이더 실행 중 아님** — `SQG_STATUS=0`, `SQC_CACHES=0`
-- **컴퓨트 CP stall** — `CP_CPC_STALLED_STAT1=0x4000`
+- **컴퓨트 CP stall** — `CP_CPC_STALLED_STAT1=0x4000`(09-14). 10-06(죽은 쪽, 워밍업)은 0이라 모든 사고에 공통은 아니다
 
 리셋이 성공으로 보고되는데 fence가 정리되지 않는 게 직접적인 결함이라, 남는 층 중 **amdgpu의 컴퓨트 큐 리셋
 경로**가 가장 유력하다. 원본은 서버 `/root/hang-2026-09-14/`(devcoredump·스택·`slots.json`·로그).
@@ -63,7 +74,8 @@ devcoredump(`/sys/class/drm/card*/device/devcoredump/data`, hang 중에만 존�
 abort로 중간에 끊긴 것이라 순수 비교는 아니지만, env를 뺄 때 빈도와 소진 길이를 같이 보면 갈린다 — 길어진 게
 맞다면 이 env는 행을 막지도 못하면서 사고당 정지만 늘린 셈이다.
 
-**로드 문제가 아니다.** 모델은 0.9초에 뜨고 크롭을 정상 처리하다가 특정 task에서 멈춘다:
+**대개는 로드 문제가 아니다.** 모델은 0.9초에 뜨고 크롭을 정상 처리하다가 특정 task에서 멈춘다.
+예외는 10-06 하나로, 크롭 없이 워밍업에서 멈췄다:
 
 | | 직전 SMU 복귀 | 행 | 간격 | 그 사이 |
 |---|---|---|---|---|
@@ -73,6 +85,7 @@ abort로 중간에 끊긴 것이라 순수 비교는 아니지만, env를 뺄 �
 | 09-14 | 19:27:04 | 19:28:36 | 92초 | 크롭 3개 처리 후 80초 유휴, 4번째 task (매달림) |
 | 09-24a | 14:46:18 | 14:47:03 | 45초 | 크롭 4개를 2.1초에 정상 처리한 직후 (매달림) |
 | 09-24b | 15:09:14 | 15:13:37 | 4분23초 | 크롭 5개 정상 처리 후 4분 유휴 (매달림) |
+| 10-06 | 20:40:29 | 20:40:40 | 11초 | 기동 직후 워밍업 첫 제출, 크롭 0개 (죽음) |
 
 행 감지까지 걸리는 시간은 0초/61초/317초로 들쭉날쭉하다. 317초짜리는 유닛이 5분 넘게 `activating`으로
 보이므로 "기동이 느리다"로 오해하기 쉽다. 09-14는 감지 자체가 안 됐다(위 매달리는 쪽).
@@ -88,8 +101,9 @@ abort로 중간에 끊긴 것이라 순수 비교는 아니지만, env를 뺄 �
 "복귀 직후"가 참이다. 08-09은 복귀 117초 뒤 연속 처리 중에 죽어서 아예 안 맞는다.
 
 **DPM 가설도 약하다.** 램프업이 위험한 순간이라면 첫 크롭이 죽어야 하는데, 08-25은 크롭 9개를 1.1초간
-정상 처리한 뒤 10번째에서 죽었다. 행까지 처리한 크롭 수는 2·2·9·~120·3·4·5개로 "세션 초반"도 "오래 돌면"도
-아니다 — **크롭마다 낮은 확률(~1%)로 터지는 모양**에 가깝고, 같은 이미지가 재시도에서 되는 것도 이쪽이
+정상 처리한 뒤 10번째에서 죽었다. 행까지 처리한 크롭 수는 2·2·9·~120·3·4·5·0개로 "세션 초반"도 "오래 돌면"도
+아니다. 10-06은 처음으로 첫 제출에서, 그것도 두 번 연달아 터졌지만 한 건이라 분포를 세션 초반으로 끌어가진
+못한다 — **크롭마다 낮은 확률(~1%)로 터지는 모양**에 가깝고(10-06은 크롭이 아닌 워밍업 디코드도 터진다는 것을 보탠다), 같은 이미지가 재시도에서 되는 것도 이쪽이
 설명한다(8/23 `b1fb5abb`·`b28b9a33`이 01:06 실패 → 01:29 같은 md5로 성공).
 
 플러그인은 배제된다. 같은 입력에 다른 결과면 입력 의존 결정론적 버그가 아니고, 플러그인은 앱 컨테이너의
@@ -105,7 +119,8 @@ HTTP 클라이언트일 뿐이라 다른 프로세스의 GPU 링을 wedge시킬 
   필요해서 **숫자는 잘 안 맞는다**. 싸니까 배제 실험으로 걸어둔 것.
 - [x] ~~**관찰.**~~ **재현 (2026-09-14)** — 두 조치 뒤 20일 만에 재현해 둘 다 해결책은 아니다. 죽는 대신
   매달리는 쪽으로 바뀐 게 llama.cpp 업데이트 탓인지는 가리지 못했다(커널은 그대로 233).
-  09-24에 10일 만에 2건 더 — 한 세션에서 재시작을 사이에 두고 두 번이다.
+  09-24에 10일 만에 2건 더 — 한 세션에서 재시작을 사이에 두고 두 번이다. 10-06에 12일 만에 1건 — 감시 유닛
+  배포 뒤 기동 16회 중 실패 2회이고, 둘 다 같은 사고의 1·2차다.
 - [ ] **커널 업데이트** `6.12.0-233` → `6.12.0-269`(현재 baseos 최신), 그 다음이 DPM `high`. 09-14의 fence 미정리가 커널 쪽이라 다음 순서다.
   **선행: `nct6687`을 DKMS에 등록.** 모듈이 233 트리(`extra/`)에만 손으로 빌드돼 있고 `dkms`가 없어서, 그냥 올리면
   재부팅 후 팬 제어를 잃는다(설치된 212·218 커널에도 이미 없다). 순서: `dkms` + 새 커널 `kernel-devel` 설치 →
@@ -116,15 +131,25 @@ HTTP 클라이언트일 뿐이라 다른 프로세스의 GPU 링을 wedge시킬 
   이 카드의 timeout은 지금까지 전부 행이라 횟수를 세지 않는다. 목적은 복구가 아니라 **단축**이다(13분 반 → 1분 안팎).
   **다음 행에서 확인할 것:** SIGKILL이 `dma_fence_wait`에 매달린 프로세스에 먹는지, 죽인 뒤 timeout이 곧 멎는지
   (밀린 fence가 그 프로세스 몫이면 함께 버려진다). 멎지 않으면 30초 뒤 재기동이 복구 중인 카드에 올라타 다시
-  wedge되고 감시가 또 죽인다 — 지금보다 나빠지진 않지만 단축도 없다.
+  wedge되고 감시가 또 죽인다 — 지금보다 나빠지진 않지만 단축도 없다. 10-06은 스스로 죽은 쪽이라 둘 다 아직
+  미확인이다. 기동 중(`activating`)에는 감시 유닛이 `After=` 순서 때문에 아직 떠 있지 않으므로, 로드 중에 매달리면
+  감시 대신 기동 제한시간(`TimeoutStartSec` 90초)이 끊는다.
+- [ ] **실패한 기동이 90초씩 붙잡힌다.** llama-server가 로드 중에 죽어도 `ExecStartPost`의 `/health` 폴링은
+  계속 돌아서, 유닛은 `TimeoutStartSec`(90초)에 잘릴 때까지 `activating (start-post) (Result: core-dump)`로 남는다.
+  10-06의 정지 3분 중 2분 반이 이 대기다(기동당 12초에 죽고 78초를 더 기다림). 폴링에 `kill -0 $MAINPID || exit 1`을
+  넣으면 죽는 즉시 실패한다. 걸리는 점: 프록시가 기동 job을 걸어 둔 상태에선 재시작이 `RestartSec=30`을 건너뛰고
+  바로 들어간다(`Scheduled restart job immediately on client request`). 빨리 실패시키면 재기동이 리셋 직후의 카드에
+  곧장 올라탄다. 한편 10-06은 90초 간격에도 2차가 걸렸으니 간격이 재발을 막는지부터 불분명하다.
 
 다음에 걸렸을 때 볼 곳 — 유닛 저널은 코어덤프·gdb 출력이 대부분이라 llama-server 자체 로그가 묻힌다.
 `journalctl -u llama.cpp-PaddleOCR-VL-For-Manga.service -o json`에서 `_COMM=llama-server`로 거를 것.
 커널의 카드 복귀는 `SMU is resumed successfully!`로 남는다. 앱 쪽은 `003acbc` 이후 실제 원인을
 `EngineTaskError: HTTPStatusError: ...`로 남긴다(그 전엔 `BrokenProcessPool`로 묻혔다).
-hang이 살아 있을 때만 남는 것 — devcoredump(카드가 복구되면 사라짐),
-`/sys/kernel/debug/dri/<pci>/amdgpu_fence_info`, `/proc/<pid>/task/*/stack`, `/slots` — 은 감시 유닛이 첫 timeout에서
-서버를 죽이므로 뜰 틈이 없다. 다시 떠야 하면 `systemctl mask llama.cpp-PaddleOCR-VL-For-Manga-watchdog.service`로 막고 기다린다.
+devcoredump는 timeout 때 만들어져 5분간(커널 devcoredump 보존 시간) 남는다 — 카드가 복구되거나 프로세스가 죽어도
+사라지지 않는다. 하나가 남아 있는 동안 생긴 덤프는 버려지므로 연달아 터지면 1차 것만 남는다(10-06의 2차 덤프가
+그랬다. 커널 로그의 `coredump file has been created`는 버려질 때도 찍힌다). 5분 안에 `cat`으로 떠 둘 것.
+hang이 살아 있을 때만 남는 것 — `/sys/kernel/debug/dri/<pci>/amdgpu_fence_info`, `/proc/<pid>/task/*/stack`,
+`/slots` — 은 감시 유닛이 첫 timeout에서 서버를 죽이므로 뜰 틈이 없다. 다시 떠야 하면 `systemctl mask llama.cpp-PaddleOCR-VL-For-Manga-watchdog.service`로 막고 기다린다.
 
 환경: Navi 44 gfx1200, mesa 26.1.1 radv, kernel 6.12.0-233.el10.
 
