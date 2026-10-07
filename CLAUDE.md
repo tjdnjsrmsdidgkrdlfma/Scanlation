@@ -98,7 +98,8 @@ $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
 ## 작업 방식 (Windows)
 
 - 여러 줄 파일 작성은 Write 도구로. bash heredoc은 길거나 따옴표가 섞이면 깨진다.
-- 한국어·일본어를 출력하는 파이썬은 `PYTHONUTF8=1`(또는 `PYTHONIOENCODING=utf-8`). `.ps1`은 UTF-8 BOM 필수.
+- **커밋 메시지 파일·스크립트처럼 BOM이 없어야 하는 파일도 Write 도구로 쓴다.** PowerShell 5.1이 쓰는 파일(`>`·`Out-File`·`Set-Content`)에는 `-Encoding utf8`을 줘도 BOM이 붙고, 그 파일을 `git commit -F`로 넘기면 메시지 맨 앞에 보이지 않는 글자(U+FEFF)가 남는다. BOM이 있어야 하는 것은 `.ps1`뿐이다 — PowerShell 5.1은 BOM 없는 스크립트를 시스템 코드페이지로 읽어 한글이 깨진다.
+- 한국어·일본어를 출력하는 파이썬은 `PYTHONUTF8=1`(또는 `PYTHONIOENCODING=utf-8`).
 
 ## 문서를 나누는 법
 
