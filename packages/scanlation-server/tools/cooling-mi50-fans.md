@@ -2,7 +2,7 @@
 
 작성 2026-07-20. MI50(패시브 서버 카드)를 데스크톱 섀시에서 능동 공랭하기 위한 팬/쉬라우드/`fancontrol` 설정 계획 + 실행 런북. 배경과 기존 쿨링 관측(무냉각 크래시·전력 캡·온도 임계값)은 [translate-gpu-mi50.md §MI50 쿨링](translate-gpu-mi50.md#mi50-쿨링--능동-냉각-필수)에 있고, 여기서 반복하지 않는다.
 
-> **상태 (2026-08-06):** 운영은 맨팬 1개, **`fancontrol`이 MI50 junction 온도로 `pwm4`를 제어한다.** 구성: SYS_FAN2 헤더, 커브 `MINTEMP 60 / MAXTEMP 80 / MINPWM 26(1,587rpm) / MAXPWM 74(4,983rpm)`, 부팅 영속은 `fancontrol.service` + `/etc/modprobe.d/nct6687.conf`([deploy/](../../../deploy/README.md)). **Task 1·2·4 완료**(결과 아래). **Task 3(2팬 vs 3팬 A/B)은 쉬라우드 장착 대기.** **Task 5(온도 알람)는 보류** — 유휴 복귀가 빠르고(10초에 수십 °C 하강 실측) 커브가 junction을 직접 보므로.
+> **상태 (2026-08-06):** 운영은 맨팬 1개, **MI50 junction 온도로 `pwm4`를 제어한다** — 2026-10-08부터는 lm-sensors `fancontrol` 대신 [`mi50-fan`](../../../deploy/mi50-fan.example)이 같은 커브로 돈다(`fancontrol`은 종료·읽기 실패 때 팬을 최대로 돌린다). 구성: SYS_FAN2 헤더, 커브 `MINTEMP 60 / MAXTEMP 80 / MINPWM 26(1,587rpm) / MAXPWM 74(4,983rpm)`, 부팅 영속은 `fancontrol.service` + `/etc/modprobe.d/nct6687.conf`([deploy/](../../../deploy/README.md)). **Task 1·2·4 완료**(결과 아래). **Task 3(2팬 vs 3팬 A/B)은 쉬라우드 장착 대기.** **Task 5(온도 알람)는 보류** — 유휴 복귀가 빠르고(10초에 수십 °C 하강 실측) 커브가 junction을 직접 보므로.
 >
 > **지속 부하는 맨팬으로 못 잡는다 (2026-08-06 실측).** 3분 연속 풀로드에서 junction이 50초 만에 96°C에 닿는다. 팬 상한 5,208rpm은 46초에 97°C, 7,075rpm은 50초에 96°C — **36% 빠른 팬이 1°C를 샀다.** **전력 캡도 답이 아니다** — 120W는 10초를 벌 뿐이고, 100W라야 135초로 늘지만(토큰 -11.2%) 그래도 3분을 못 버틴다(§전력 캡). 열이 나는 양이 아니라 **빼내는 양이 병목**이고 그 병목은 쉬라우드 없는 정압 누설이다 → Task 3. 운영은 150W를 유지한다. 실사용 패턴인 16~42초 버스트는 현재 커브로 여유가 있다(포화 P1/P2/P4·파이프라인 conc4 전부 완주, 피크 ≤89°C — [translate-gpu-mi50.md §신냉각 1차 실측](translate-gpu-mi50.md)).
 >
@@ -219,7 +219,7 @@ junction 차이 +2.6°C 중 **+1.1°C는 전력이 1.8W 더 들어간 몫**이�
 
 > dense 31B는 `GGML_VK_DISABLE_HOST_VISIBLE_VIDMEM=1` 없이는 6GB가 시스템 메모리로 새어 PCIe에 묶인다([translate-gpu-mi50.md](translate-gpu-mi50.md#32gb-카드가-16gb만-쓰던-문제-2026-08-12-해결)). 그 상태의 발열 측정은 **무효**다 — GPU가 스톨하느라 열이 덜 난다. 모델을 바꿔 재측정할 때는 `mem_info_gtt_used`가 200MB 안팎인지 먼저 확인한다.
 
-**운영에 반영하려면** `/etc/fancontrol`의 `MAXPWM`을 74에서 128로 올리고([deploy/fancontrol.example](../../../deploy/fancontrol.example)도 함께), 지속 작업 동안 캡을 100W로 내린다. 버스트만 도는 평소에는 현재 커브가 이미 여유가 있으므로(피크 ≤89°C) 바꿀 이유가 없다 — **상시 8,600rpm은 소음 대가가 크다.**
+**운영에 반영하려면** `mi50-fan`의 `MAXPWM`을 74에서 128로 올리고([deploy/mi50-fan.example](../../../deploy/mi50-fan.example)도 함께), 지속 작업 동안 캡을 100W로 내린다. 버스트만 도는 평소에는 현재 커브가 이미 여유가 있으므로(피크 ≤89°C) 바꿀 이유가 없다 — **상시 8,600rpm은 소음 대가가 크다.**
 
 **방법론 — 같은 함정을 다시 밟지 않도록.**
 

@@ -1,0 +1,144 @@
+#!/bin/bash
+# MI50 fan control: the ARCTIC fan on SYS_FAN2 (nct6687 pwm4) follows the
+# MI50's own junction temperature. Install as /usr/local/sbin/mi50-fan
+# (mode 755, comments may be stripped), run by mi50-fan.service.
+#
+# The board EC only sees CPU/board temps, so a BIOS fan curve cannot cool this
+# card -- see cooling-mi50-fans.md principle 1. nct6687 must be loaded with
+# msi_fan_brute_force=1 (/etc/modprobe.d/nct6687.conf), or the EC overrides
+# pwm4 within a second and the floor returns to ~4,360 rpm; and it must be
+# loaded by nct6687-load.service, because modules-load.d loses the boot race.
+#
+# Measured duty->rpm, single bare fan, brute force mode:
+#   pwm    0    26    51    77   102   128
+#   rpm 1046  1587  3432  5154  7075  8823
+#
+# MINTEMP 60 keeps the fan flat at MINPWM through idle and light load; the fan
+# becomes audible around 5,000 rpm and clearly loud by 6,400. MINPWM 26
+# (1,587 rpm) is the floor -- the ARCTIC S4028-15K is rated 1,400-15,000 rpm.
+# MAXPWM 74 (~4,983 rpm) is chosen by listening, not by cooling headroom: under
+# sustained full load a 7,075 rpm cap reached junction 96C in 50s while a
+# 5,208 rpm cap reached 97C in 46s -- a 36% faster fan bought 1C. Sustained load
+# is a matter for the power cap or the shroud, not the fan.
+#
+# The script never writes more than MAXPWM. A failed temperature read keeps the
+# current duty, and READ_FAILS of them in a row on an active card set MAXPWM.
+# On exit it parks the fan at the floor if the card is asleep or cool and at
+# MAXPWM otherwise; the unit restarts it in 5 s. (lm-sensors' fancontrol drives
+# every fan to full speed whenever it exits or fails a read, which at night is
+# the loudest thing this machine does.)
+#
+# Runtime suspend: the MI50 only runtime-suspends with amdgpu.runpm=1 (BACO),
+# which this server does not use -- suspend logged "psp gfx command UNLOAD_TA
+# failed (0x117)" and the first request after it froze the whole machine
+# (2026-10-08). The script still handles a suspending card, since on this
+# kernel (6.12.0-233.el10) hwmon reads behave like this:
+# 1. Every read of an active card resets its 5 s autosuspend timer, so reading
+#    every 5 s keeps the card awake for good. Reading stops once the card has
+#    been idle (gpu_busy_percent 0) and below MINTEMP for IDLE_READS reads in a
+#    row; from then on only power/runtime_status is polled, which never touches
+#    the card.
+# 2. A suspended card answers hwmon reads with EBUSY rather than waking. A
+#    suspended card gets the floor duty -- it makes no heat.
+# Every read also re-applies the 150 W power cap if it is missing, since a
+# suspend powers the SMU down and GPU-powercap.service only writes it at boot.
+# With power/control=on (the default without runpm=1) reading never stops.
+set -u
+
+GPU=/sys/bus/pci/devices/0000:03:00.0
+MINTEMP=60
+MAXTEMP=80
+MINPWM=26
+MAXPWM=74
+CAP=150000000
+INTERVAL=5
+IDLE_READS=3   # idle+cool reads in a row before reading stops
+WAKE_CHECKS=3  # "active" polls in a row before reading resumes
+READ_FAILS=3   # failed reads of an active card before the fan goes to MAXPWM
+
+N=$(dirname "$(grep -lx nct6687 /sys/class/hwmon/hwmon*/name | head -1)")
+H=$(ls -d "$GPU"/hwmon/hwmon* 2>/dev/null | head -1)
+if [ ! -e "$N/pwm4" ] || [ -z "$H" ]; then
+    echo "nct6687 pwm4 or MI50 hwmon missing (fan=$N gpu=$H)" >&2
+    exit 1
+fi
+
+cur=""
+setpwm() {
+    [ "$1" = "$cur" ] && return
+    echo 1 > "$N/pwm4_enable" && echo "$1" > "$N/pwm4" && cur=$1
+}
+
+curve() {
+    local t=$1
+    if (( t <= MINTEMP )); then echo $MINPWM
+    elif (( t >= MAXTEMP )); then echo $MAXPWM
+    else echo $(( (t - MINTEMP) * (MAXPWM - MINPWM) / (MAXTEMP - MINTEMP) + MINPWM ))
+    fi
+}
+
+asleep() { [ "$1" = suspended ] || [ "$1" = suspending ]; }
+
+park() {
+    local st p=$MAXPWM t
+    st=$(cat "$GPU/power/runtime_status" 2>/dev/null)
+    if asleep "$st"; then p=$MINPWM
+    elif t=$(cat "$H/temp2_input" 2>/dev/null) && (( t / 1000 < MINTEMP )); then p=$MINPWM
+    fi
+    echo 1 > "$N/pwm4_enable"; echo $p > "$N/pwm4"
+    echo "exit: fan parked at pwm $p (card $st)"
+}
+trap park EXIT
+trap 'exit 0' TERM INT HUP
+
+mode=read idle=0 woke=0 fails=0
+echo "start: fan=$N gpu=$H"
+while :; do
+    st=$(cat "$GPU/power/runtime_status")
+    ctl=$(cat "$GPU/power/control")
+
+    if [ $mode = quiet ]; then
+        if asleep "$st"; then
+            woke=0
+            setpwm $MINPWM
+        else
+            woke=$((woke + 1))
+            if (( woke >= WAKE_CHECKS )) || [ "$ctl" = on ]; then
+                mode=read idle=0
+                echo "card awake ${woke} polls -- reading again"
+            fi
+        fi
+    fi
+
+    if [ $mode = read ]; then
+        if asleep "$st"; then
+            setpwm $MINPWM
+            mode=quiet woke=0
+            echo "card $st -- fan at floor, reading stops"
+        elif t=$(cat "$H/temp2_input" 2>/dev/null); then
+            t=$((t / 1000))
+            setpwm "$(curve $t)"
+            c=$(cat "$H/power1_cap" 2>/dev/null) && [ "$c" != $CAP ] &&
+                echo $CAP > "$H/power1_cap" && echo "power cap was $c -- set to $CAP"
+            busy=$(cat "$GPU/gpu_busy_percent" 2>/dev/null || echo 100)
+            if [ "$ctl" = auto ] && (( busy == 0 && t < MINTEMP )); then
+                idle=$((idle + 1))
+            else
+                idle=0
+            fi
+            if (( idle >= IDLE_READS )); then
+                mode=quiet woke=0
+                echo "card idle at ${t}C -- reading stops"
+            fi
+            fails=0
+        else
+            fails=$((fails + 1))
+            if (( fails >= READ_FAILS )); then
+                setpwm $MAXPWM
+                (( fails == READ_FAILS )) && echo "card active but temp unreadable ${fails}x -- fan at pwm $MAXPWM"
+            fi
+        fi
+    fi
+
+    sleep $INTERVAL
+done

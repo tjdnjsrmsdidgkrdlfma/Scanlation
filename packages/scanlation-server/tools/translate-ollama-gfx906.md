@@ -190,7 +190,7 @@ $ modinfo amdgpu | grep runpm
          0 = disable, -1 = auto, -2 = auto with displays)
 ```
 
-9060 XT는 auto에서 **BOCO**(슬롯 전원까지 끊는 쪽)를 받아 D3cold까지 간다. MI50에게 열려 있는 길은 **BACO**(버스만 살리고 칩을 끔)인데 그건 `runpm=1`로 **명시 opt-in해야** 켜지므로, auto에서는 드라이버가 probe에 `Runtime PM not available`을 찍고 `control=on`으로 고정한다. Vega20이 BACO를 못 하는 게 아니라 auto가 대상에서 빼는 것이다. `amdgpu.runpm=1`(부팅 파라미터 → 재부팅 필요)로 실제로 내려가는지는 **미검증**이다.
+9060 XT는 auto에서 **BOCO**(슬롯 전원까지 끊는 쪽)를 받아 D3cold까지 간다. MI50에게 열려 있는 길은 **BACO**(버스만 살리고 칩을 끔)인데 그건 `runpm=1`로 **명시 opt-in해야** 켜지므로, auto에서는 드라이버가 probe에 `Runtime PM not available`을 찍고 `control=on`으로 고정한다. Vega20이 BACO를 못 하는 게 아니라 auto가 대상에서 빼는 것이다. `amdgpu.runpm=1`(부팅 파라미터)로 강제하면 `Forcing BACO for runtime pm`이 찍히고 카드가 D3hot으로 내려가지만 — llama-server가 16 GB를 쥔 채로도 잠든다 — 잠들 때 `psp gfx command UNLOAD_TA(0x2) failed and response status is (0x117)`가 나고, **잠든 뒤 첫 요청(복귀)에 서버 전체가 멈췄다**(SSH 불통, 내장 그래픽 화면이 초록색으로 굳음, 전원 차단으로만 복구. 2026-10-08, 커널 6.12.0-233.el10). 이 파라미터는 전역이라 9060 XT도 `Forcing BACO`로 바뀌지만 그 카드는 그래도 D3cold까지 갔다. MI50 런타임 PM은 쓰지 않는다.
 
 **렌더 노드를 연 프로세스는 D3를 막지 않는다.** translate llama-server(Vulkan/RADV)는 자기 카드뿐 아니라 `renderD128/129/130`을 **셋 다 열어 두는데**, 그 상태에서도 9060 XT는 D3cold에 들어가 있었다. 카드를 깨우는 건 열린 fd가 아니라 실제 제출이다.
 

@@ -1,0 +1,23 @@
+# MI50 fan control (mi50-fan.example). Install as
+# /etc/systemd/system/mi50-fan.service and enable it. It drives pwm4 alone:
+# do not run lm-sensors' fancontrol.service next to it.
+#
+# On a host that still runs fancontrol, switch over with SIGKILL, not stop:
+# fancontrol answers SIGTERM by driving the fan to full speed.
+#   systemctl disable fancontrol
+#   systemctl kill -s KILL fancontrol
+#   systemctl enable --now mi50-fan
+[Unit]
+Description=MI50 fan control (junction curve, lets the card suspend)
+Requires=nct6687-load.service
+After=nct6687-load.service
+Conflicts=fancontrol.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/sbin/mi50-fan
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

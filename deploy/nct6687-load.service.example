@@ -7,17 +7,11 @@ Description=Load nct6687 once the Super I/O EC answers
 # /etc/modules-load.d -- that path always loses the race and only adds a failure
 # line to the boot log.
 #
-# fancontrol needs this module for pwm4. Without it fancontrol exits with
-# "Device path of hwmonN has changed" and the board EC drives the MI50 fan off
-# CPU temperature -- which is exactly what this whole setup exists to prevent
-# (cooling-mi50-fans.md principle 1).
-#
-# Pair with a fancontrol drop-in at
-# /etc/systemd/system/fancontrol.service.d/nct6687.conf:
-#   [Unit]
-#   Requires=nct6687-load.service
-#   After=nct6687-load.service
-Before=fancontrol.service
+# mi50-fan needs this module for pwm4 (it Requires= and orders After= this
+# unit). Without it mi50-fan exits until the module appears, and the board EC
+# drives the MI50 fan off CPU temperature -- which is exactly what this whole
+# setup exists to prevent (cooling-mi50-fans.md principle 1).
+Before=mi50-fan.service
 After=sysinit.target
 
 [Service]
