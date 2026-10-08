@@ -9,4 +9,6 @@ After=llama.cpp-PaddleOCR-VL-For-Manga.service
 # Every compute ring timeout on the 9060 XT (0000:09:00.0) has been a hang, and a hang
 # can leave llama-server alive with /health at 200 for as long as the ring takes to
 # drain. Kill on the first one and let Restart=on-failure bring it back.
-ExecStart=/bin/sh -c 'journalctl -k -f -n0 -o cat | grep -q "^amdgpu 0000:09:00.0: amdgpu: ring comp_.* timeout" && systemctl kill -s KILL llama.cpp-PaddleOCR-VL-For-Manga.service'
+# The "amdgpu: " after the PCI address is optional: CentOS Stream 10 kernels from
+# 6.12.0-253 (upstream DRM 7.0) print "amdgpu 0000:09:00.0: ring comp_... timeout".
+ExecStart=/bin/sh -c 'journalctl -k -f -n0 -o cat | grep -qE "^amdgpu 0000:09:00.0: (amdgpu: )?ring comp_.* timeout" && systemctl kill -s KILL llama.cpp-PaddleOCR-VL-For-Manga.service'

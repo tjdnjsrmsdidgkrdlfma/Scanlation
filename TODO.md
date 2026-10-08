@@ -121,11 +121,19 @@ HTTP 클라이언트일 뿐이라 다른 프로세스의 GPU 링을 wedge시킬 
   매달리는 쪽으로 바뀐 게 llama.cpp 업데이트 탓인지는 가리지 못했다(커널은 그대로 233).
   09-24에 10일 만에 2건 더 — 한 세션에서 재시작을 사이에 두고 두 번이다. 10-06에 12일 만에 1건 — 감시 유닛
   배포 뒤 기동 16회 중 실패 2회이고, 둘 다 같은 사고의 1·2차다.
-- [ ] **커널 업데이트** `6.12.0-233` → `6.12.0-269`(현재 baseos 최신), 그 다음이 DPM `high`. 09-14의 fence 미정리가 커널 쪽이라 다음 순서다.
-  **선행: `nct6687`을 DKMS에 등록.** 모듈이 233 트리(`extra/`)에만 손으로 빌드돼 있고 `dkms`가 없어서, 그냥 올리면
-  재부팅 후 팬 제어를 잃는다(설치된 212·218 커널에도 이미 없다). 순서: `dkms` + 새 커널 `kernel-devel` 설치 →
-  [Fred78290/nct6687d](https://github.com/Fred78290/nct6687d) 등록 → 새 커널 설치 → **재부팅 전에** `dkms status`에서
-  새 커널이 `installed`인지 확인. 무서명 모듈이라 Secure Boot는 꺼진 채여야 한다.
+- [ ] **커널 업데이트** `6.12.0-233` → `6.12.0-273`(2026-10-02 게시, BaseOS 최신), 그 다음이 DPM `high`. 09-14의 fence 미정리가 커널 쪽이라 다음 순서다.
+  **왜 기대할 만한가.** 233의 amdgpu는 상류 DRM 6.18 수준이고 273은 7.0 수준이다(Stream 10 커널은 DRM을 통째로 당겨 온다 — 249가 6.19, 253이 7.0). 두 태그의 소스를 맞대면 이 증상 경로에 걸리는 차이가 있다:
+  - 링 리셋 뒤 재제출에 상한이 생긴다(상류 `fb62a2067c`, "don't reemit ring contents more than once"). 233은 상한 없이 다시 넣는다 — 다시 넣은 작업이 또 멈추면 10초 뒤 또 타임아웃, 회마다 fence 2개. 09-24의 「81회 × 10초, fence 158개, 13분 40초」와 모양이 같다. 273에서는 두 번째 타임아웃에 전부 취소하므로 긴 매달림 대신 곧바로 DeviceLost로 죽을 것으로 본다.
+  - 기본 `lockup_timeout`이 10초 → 2초(`1bea57ea75`).
+  - gfx12 MES 「LR compute W/A」가 빠진다(`6b0d812971`, "instability … with newer GC microcode"). 233은 MES ≥ 0x82면 켠다 — 서버 MES 버전은 `/sys/kernel/debug/dri/0000:09:00.0/amdgpu_firmware_info`에서 본다.
+  「gfx1200 compute wedge를 고쳤다」고 밝힌 자료는 없다. 첫 wedge가 사라질지는 모르고, 긴 꼬리는 줄 가능성이 높다. 펌웨어(`amd-gpu-firmware`·`linux-firmware`, 최신 20260812-26)와 Mesa는 같은 단계에서 바꾸지 않는다 — 귀속이 섞인다.
+  **선행 (재부팅 전에 다 끝낸다):**
+  - `nct6687`을 DKMS로. 모듈이 233 트리(`extra/`)에만 손으로 빌드돼 있어서 그냥 올리면 `mi50-fan`이 `pwm4`를 못 찾고 보드 EC가 MI50 팬을 CPU 온도로 돌린다 — 온도 스로틀 없는 카드라 소음이 아니라 안전 문제다. EPEL 10의 `dkms` + `kernel-devel-6.12.0-273.el10`을 먼저 → [Fred78290/nct6687d](https://github.com/Fred78290/nct6687d) `make dkms/install` → `dkms build/install nct6687d/1 -k 6.12.0-273.el10.x86_64` → 새 커널 설치 → `dkms status`에서 273이 `installed`. 무서명 모듈이라 Secure Boot는 꺼진 채여야 한다. 최신 nct6687d의 `fan_control_watchdog` 속성이 꺼져 있는지 로드 뒤 확인한다(`mi50-fan`은 값이 바뀔 때만 쓴다).
+  - 감시 유닛 정규식 — 253 이후 커널은 로그에서 `amdgpu: ` 접두를 뺀다. [감시 유닛](deploy/llama.cpp-PaddleOCR-VL-For-Manga-watchdog.service.example)은 접두를 선택으로 받는다(2026-10-08 서버 반영).
+  - 기준값을 적어 둔다: `rpm -q kernel-core linux-firmware amd-gpu-firmware mesa-vulkan-drivers`, `lockup_timeout`, 9060 XT `amdgpu_firmware_info`의 MES/MEC.
+  - 첫 부팅은 `grub2-reboot`로 1회만 → 잘못되면 전원을 다시 넣어 233으로. llama-server들을 먼저 내리고 사람이 서버 앞에 있을 때.
+  **효과 확인:** 자연 관찰은 느리다(08-25 이후 6주에 4건). 기동 → 크롭 10개 → proxy 내림 → `suspended` 대기를 한 사이클로 233에서 30~40회 돌려 기준선이 재현되는지 먼저 본다. 재현율이 20% 안팎이면 273에서 15회 무사고로 「안 변했다」를 4%, 30회로 0.2%에서 기각한다. 3% 아래면 자연 관찰로 간다. 그래도 남으면 펌웨어 → DPM `high` → `GGML_VK_MAX_NODES_PER_SUBMIT` 제거 순으로 하나씩, 끝으로 ELRepo `kernel-ml` 7.2.
+  2026-10-08 21:34~23:11은 `amdgpu.runpm=1`로 돌아 9060 XT가 BOCO 대신 BACO로 잤다 — 이 구간의 기동은 통계에서 뺀다.
 - [x] ~~**매달림 감지.**~~ **배포 (2026-09-24)** — [감시 유닛](deploy/llama.cpp-PaddleOCR-VL-For-Manga-watchdog.service.example)이
   이 카드의 `ring comp_.* timeout` 첫 줄에서 llama-server를 SIGKILL하고 `Restart=on-failure`(30초)에 넘긴다.
   이 카드의 timeout은 지금까지 전부 행이라 횟수를 세지 않는다. 목적은 복구가 아니라 **단축**이다(13분 반 → 1분 안팎).
