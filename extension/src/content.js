@@ -24,7 +24,7 @@
   let configReady = null; // resolves once loadConfig() has applied stored settings
   const processed = new WeakSet();
   const processing = new WeakSet();
-  const tracked = []; // { img, wrapper, boxes: [el] }
+  const tracked = []; // { img, target (img or its <picture>), wrapper, boxes: [el], held, follow }
 
   // The failure badge is the only text the content world renders, so it carries
   // its own two translations inline instead of loading the whole popup i18n table.
@@ -139,13 +139,122 @@
     document.body.style.alignItems = "center";     // vertical
   }
 
+  // ---------------------------------------------------- the image's size ----
+  // Inside the wrapper the image has a new containing block. A size the page set
+  // relative to the old one (max-height: 100% in a fit-to-screen viewer) resolves
+  // against the wrapper instead, and the wrapper takes its size from the image,
+  // so the limit drops and the image shows at its natural size. When wrapping
+  // changes the size, the image is held at the size the page gave it.
+  //
+  // The held size follows the page as it re-lays out (a resize, a viewer switching
+  // fit modes): display: contents takes the wrapper's box away, the image lays out
+  // against its old containing block again, and its size is read back. A size that
+  // came from a selector the wrapper itself breaks (`.viewer > img`) can't be read
+  // back that way, so such an image keeps the size it had when it was wrapped.
+  const HELD = ["width", "height", "min-width", "min-height", "max-width", "max-height"];
+
+  // The used width/height (box-sizing included), or null when the element has no box.
+  function layoutSize(el) {
+    if (!el.isConnected || !el.getClientRects().length) return null;
+    const cs = getComputedStyle(el);
+    const w = parseFloat(cs.width), h = parseFloat(cs.height);
+    return Number.isFinite(w) && Number.isFinite(h) ? { w, h } : null;
+  }
+  const sameSize = (a, b) => !!a && !!b && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5;
+
+  function holdSize(entry, size) {
+    const s = entry.img.style;
+    if (!entry.held) entry.held = { saved: HELD.map((p) => [p, s.getPropertyValue(p), s.getPropertyPriority(p)]) };
+    const v = { width: size.w + "px", height: size.h + "px", "min-width": "0px", "min-height": "0px", "max-width": "none", "max-height": "none" };
+    for (const p of HELD) s.setProperty(p, v[p], "important");
+    entry.held.size = size;
+    entry.held.mine = HELD.map((p) => s.getPropertyValue(p)); // as the browser stored them
+  }
+
+  // Hand the page its own inline sizes back, except any it has rewritten since.
+  function releaseSize(entry) {
+    const { held } = entry;
+    if (!held) return;
+    const s = entry.img.style;
+    held.saved.forEach(([p, value, priority], i) => {
+      if (s.getPropertyValue(p) !== held.mine[i]) return;
+      if (value) s.setProperty(p, value, priority); else s.removeProperty(p);
+    });
+    entry.held = null;
+  }
+
+  function keepSize(entry, before) {
+    if (!before || sameSize(layoutSize(entry.img), before)) return;
+    entry.wrapper.style.display = "contents";
+    entry.follow = sameSize(layoutSize(entry.img), before);
+    entry.wrapper.style.removeProperty("display");
+    holdSize(entry, before);
+    if (entry.follow) follow(entry);
+  }
+
+  // Re-read the held sizes whenever the page may have re-laid out: the window
+  // resizing, the block an image sits in resizing, or a class/style/src change.
+  let followTimer = null;
+  const scheduleFollow = () => { clearTimeout(followTimer); followTimer = setTimeout(refollow, 150); };
+  const blockObs = new ResizeObserver(scheduleFollow);
+  const isOverlay = (el) => el.classList.contains("scanlation-wrapper") || !!el.closest(".scanlation-box, .scanlation-badge");
+  const attrObs = new MutationObserver((records) => {
+    if (records.some((r) => !isOverlay(r.target))) scheduleFollow();
+  });
+
+  // ResizeObserver sees nothing of an inline box (a <picture>, say), so watch the
+  // nearest ancestor that lays out as a block.
+  function blockAncestor(el) {
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      const d = getComputedStyle(p).display;
+      if (d !== "inline" && d !== "contents") return p;
+    }
+    return document.documentElement;
+  }
+
+  function follow(entry) {
+    blockObs.observe(blockAncestor(entry.wrapper));
+    attrObs.observe(document.documentElement, {
+      subtree: true, attributes: true, attributeFilter: ["class", "style", "src", "srcset", "width", "height"],
+    });
+    window.addEventListener("resize", scheduleFollow);
+  }
+
+  function refollow() {
+    const entries = tracked.filter((e) => e.follow && e.wrapper.isConnected);
+    const prev = entries.map((e) => e.held && e.held.size);
+    for (const e of entries) { releaseSize(e); e.wrapper.style.display = "contents"; }
+    const sizes = entries.map((e) => layoutSize(e.img)); // one layout for all of them
+    entries.forEach((e, i) => {
+      e.wrapper.style.removeProperty("display");
+      const size = sizes[i] || prev[i];
+      if (size) holdSize(e, size);
+    });
+    attrObs.takeRecords(); // these writes are ours, not the page re-laying out
+  }
+
+  function stopFollowing() {
+    blockObs.disconnect();
+    attrObs.disconnect();
+    window.removeEventListener("resize", scheduleFollow);
+    clearTimeout(followTimer);
+  }
+
+  // An <img> in a <picture> picks its file from the <source>s beside it; moved out,
+  // it would pick again (usually the plain src) and reload. So the <picture> goes
+  // into the wrapper whole.
   function wrap(img) {
+    const parent = img.parentElement;
+    const target = parent && parent.tagName === "PICTURE" ? parent : img;
+    const before = layoutSize(img);
     const wrapper = document.createElement("span");
     wrapper.className = "scanlation-wrapper";
-    img.parentNode.insertBefore(wrapper, img);
-    wrapper.appendChild(img);
+    target.parentNode.insertBefore(wrapper, target);
+    wrapper.appendChild(target);
+    const entry = { img, target, wrapper, boxes: [], held: null, follow: false };
     if (isImageDocument()) fixImageDocumentLayout(img);
-    return wrapper;
+    else keepSize(entry, before);
+    return entry;
   }
 
   // Text follows the show-original toggle; the full text is also the hover title.
@@ -213,16 +322,15 @@
   function applyResult(img, result) {
     const [nw, nh] = naturalSize(img);
     if (!nw || !nh) return;
-    const wrapper = wrap(img);
-    const entry = { img, wrapper, boxes: [] };
+    const entry = wrap(img);
     for (const item of result) {
       const box = makeBox(item, nw, nh);
-      wrapper.appendChild(box);
+      entry.wrapper.appendChild(box);
       entry.boxes.push(box);
     }
     tracked.push(entry);
     sizeFonts(entry.boxes);
-    resizeObs.observe(wrapper);
+    resizeObs.observe(entry.wrapper);
   }
 
   // A whole-request failure has no box coords, so pin a status chip to the image
@@ -230,15 +338,15 @@
   function showError(img, msg) {
     const [nw, nh] = naturalSize(img);
     if (!nw || !nh) return;
-    const wrapper = wrap(img);
+    const entry = wrap(img);
     const badge = document.createElement("div");
     badge.className = "scanlation-badge scanlation-error";
     badge.textContent = badgeFail();
     badge.title = msg; // cause (e.g. "server 502: ...") on hover
-    wrapper.appendChild(badge);
+    entry.wrapper.appendChild(badge);
     // boxes stays empty: the badge is a child of wrapper (removed with it) and
     // is not a text box, so it must not go through sizeFonts().
-    tracked.push({ img, wrapper, boxes: [] });
+    tracked.push(entry);
   }
 
   async function processImage(img) {
@@ -282,11 +390,13 @@
     resizeObs.disconnect();
     clearTimeout(fitTimer);
     pendingFit.clear();
+    stopFollowing();
     for (const entry of tracked) {
       for (const box of entry.boxes) box.remove();
-      const { wrapper, img } = entry;
+      const { wrapper, target, img } = entry;
+      releaseSize(entry);
       if (wrapper.parentNode) {
-        wrapper.parentNode.insertBefore(img, wrapper);
+        wrapper.parentNode.insertBefore(target, wrapper);
         wrapper.remove();
       }
       if (img.__scanOrig) {  // undo the ImageDocument layout takeover -> UA re-centers
