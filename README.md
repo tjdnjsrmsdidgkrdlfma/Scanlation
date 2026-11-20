@@ -293,6 +293,13 @@ cd packages/scanlation-server
 `visualize.py`는 `annotated.png` + deskew된 `crops/`를 저장 → 박스 위치와 crop이 똑바른지
 눈으로 판단. (실제 ja→ko 확인은 서버+`/admin`+브라우저로.)
 
+**폴더째 번역해 그림으로 저장** — 브라우저 없이 폴더의 페이지를 한 장씩 실행 중인 서버에 보내고,
+확장이 겹치는 모양 그대로 번역을 그려 넣어 `<폴더>_ko/`에 같은 이름·형식으로 저장한다(영역 텍스트는
+`scanlation.json`). MI50 온도를 보며 뜨거우면 쉬었다 가므로 GPU 호스트에서 돌린다:
+```bash
+python tools/translate_folder.py /path/to/chapter   # 이미 저장된 페이지는 건너뛰어 끊긴 데서 이어 간다
+```
+
 ---
 
 ## 알려진 이슈 / 주의

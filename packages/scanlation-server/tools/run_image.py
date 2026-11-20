@@ -39,7 +39,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif", ".bmp"}
 
 
 def iter_images(paths: list[str]):
