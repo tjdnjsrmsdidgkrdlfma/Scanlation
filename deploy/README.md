@@ -24,7 +24,7 @@
 
 커브 근거와 실측은 `mi50-fan.example` 머리 주석과 [cooling-mi50-fans.md](../packages/scanlation-server/tools/cooling-mi50-fans.md).
 
-`nct6687`은 커널에 없는 out-of-tree 모듈([Fred78290/nct6687d](https://github.com/Fred78290/nct6687d))이라 **커널마다 빌드해야 한다.** DKMS에 등록하지 않았다면 커널을 올리기 전에 새 커널용으로 빌드해 둘 것 — 없으면 1번이 `pwm4`를 못 찾고 EC가 팬을 가져간다.
+`nct6687`은 커널에 없는 out-of-tree 모듈([Fred78290/nct6687d](https://github.com/Fred78290/nct6687d))이라 **커널마다 빌드해야 한다.** 서버에서는 DKMS(`nct6687d/1`, 소스 `/usr/src/nct6687d-1`)에 올라 있어 새 커널을 깔면 저절로 빌드된다. 새 커널로 재부팅하기 전에 `dkms status`에서 그 커널이 `installed`인지 본다 — 없으면 1번이 `pwm4`를 못 찾고 EC가 팬을 가져간다. 무서명 모듈이라 Secure Boot는 꺼진 채여야 한다.
 
 **lm-sensors `fancontrol`은 쓰지 않는다.** 시작할 때, 종료할 때, 온도를 한 번 못 읽을 때마다 팬을 최대(약 15,000 rpm)로 돌려놓고 나간다. `mi50-fan`은 어떤 경로로도 `MAXPWM`(74, 약 5,000 rpm)을 넘지 않고, 멈출 때 카드가 식어 있으면 최저 duty로 둔다.
 
